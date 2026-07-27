@@ -70,6 +70,15 @@ class SAM:
         # This lock is the single chokepoint both text and voice input
         # converge on, so one lock here covers both input sources.
         self._process_lock = threading.Lock()
+        # Interrupt/Stop: a thread-safe signal the CURRENTLY RUNNING task
+        # checks between steps. This is the real fix for the "stop it"
+        # bug seen in real testing — typing "stop it" while a task ran
+        # just queued behind self._process_lock and never actually
+        # interrupted anything. Setting an Event is instant regardless of
+        # whether the lock is held, so cancellation requests are intercepted
+        # in _process() BEFORE the lock is ever touched — see below.
+        self._cancel_event = threading.Event()
+        self._STOP_PHRASES = {"stop", "stop it", "cancel", "cancel that", "abort", "never mind", "nevermind"}
 
     # ─── Input Handlers ───────────────────────────────────────────────────
 
@@ -90,6 +99,17 @@ class SAM:
     def _process(self, user_input: str):
         """Shared processing pipeline for both voice and text input.
         Serialized via self._process_lock -- see __init__ for why."""
+        normalized = user_input.strip().lower()
+        if normalized in self._STOP_PHRASES:
+            was_running = self._process_lock.locked()
+            self._cancel_event.set()
+            msg = ("Stopping now." if was_running
+                   else "Nothing's running right now, but noted.")
+            print(f"\nSAM: {msg}\n")
+            if self.settings.tts_engine != "none":
+                self.tts.speak(msg)
+            return
+
         acquired = self._process_lock.acquire(blocking=False)
         if not acquired:
             print("\n[SAM] Still working on your previous request — "
@@ -127,12 +147,14 @@ class SAM:
             # actual result instead of the pre-action guess.
             if response.action and response.action not in (None, "none"):
                 try:
+                    self._cancel_event.clear()  # fresh start — don't inherit a stale cancel from a prior interrupted task
                     real_result_text = self.react_loop.run_planned_task(
                         task=user_input,
                         brain=self.brain,
                         session=session,
                         founder_context=session.founder_context,
-                        initial_response=response
+                        initial_response=response,
+                        cancel_event=self._cancel_event
                     )
                     final_response = replace(response, text=real_result_text)
                 except Exception as e:
@@ -154,7 +176,8 @@ class SAM:
             # Save session to memory — records what actually happened,
             # not the discarded pre-action claim
             if not self.settings.incognito:
-                session.save(user_input=user_input, response=final_response)
+                session.save(user_input=user_input, response=final_response,
+                             memory_store=self.memory.get_store(self.settings))
 
             # Founder Mode capture — same, sees the real outcome
             self.founder_mode.capture_if_relevant(user_input, final_response)

@@ -232,6 +232,6 @@ Commercial license available for products built on SAM.
 ## Built By
 
 Dhanush Surada — Visakhapatnam, India
-github.com/suradadhanush | linkedin.com/in/dhanushsurada
+github.com/dhanushsurada | linkedin.com/in/dhanushsurada
 
 Waitlist: smtg-is-cmg.carrd.co

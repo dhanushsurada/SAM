@@ -18,6 +18,18 @@ class MemoryRetriever:
             self._store = MemoryStore(settings)
         return self._store
 
+    def get_store(self, settings=None):
+        """
+        Public accessor for the cached MemoryStore. Added so Session.save()
+        can reuse the SAME instance retrieve() already created this turn,
+        instead of constructing its own — see core/session.py for why this
+        mattered (a real, confirmed performance bug: every turn was opening
+        a brand new SQLite connection AND re-initializing ChromaDB from
+        scratch on save, visible in every real Mac test log this whole
+        project).
+        """
+        return self._get_store(settings)
+
     def retrieve(self, query: str, settings=None, top_k: int = 5) -> List[Dict]:
         try:
             store = self._get_store(settings)

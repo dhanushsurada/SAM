@@ -22,18 +22,32 @@ class Session:
     history: List[Dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def save(self, user_input: str, response):
+    def save(self, user_input: str, response, memory_store=None):
         """
         Extract and save memory from this interaction.
         Skipped entirely in incognito mode.
+
+        memory_store: pass the already-cached MemoryStore (e.g. from
+        MemoryRetriever.get_store()) to reuse the SAME SQLite/ChromaDB
+        connection this turn's retrieve() call already opened, instead of
+        creating a brand new one here. Confirmed via real Mac logs: every
+        turn was opening a fresh SQLite connection AND re-initializing
+        ChromaDB from scratch on save — real, measurable overhead on every
+        single turn, worse on the slower hardware this project actually
+        targets. Omit memory_store to get the old behaviour unchanged
+        (creates its own store, exactly as before) — kept for backward
+        compatibility with any caller not yet passing one.
         """
         if self.settings.incognito:
             logger.info("Incognito mode — session not saved")
             return
 
         try:
-            from memory.store import MemoryStore
-            store = MemoryStore(self.settings)
+            if memory_store is not None:
+                store = memory_store
+            else:
+                from memory.store import MemoryStore
+                store = MemoryStore(self.settings)
 
             # Save episodic event
             store.save_episode(

@@ -157,7 +157,8 @@ class TelegramBridge:
                 final_response = replace(response, text=f"I tried to do that but hit an error: {e}")
 
         if not self.settings.incognito:
-            session.save(user_input=user_input, response=final_response)
+            session.save(user_input=user_input, response=final_response,
+                         memory_store=self.memory.get_store(self.settings))
         self.founder_mode.capture_if_relevant(user_input, final_response)
 
         return final_response.text
