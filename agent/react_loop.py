@@ -155,10 +155,10 @@ class ReactLoop:
         recent = [o.get("observation", "") for o in observations[-STAGNATION_WINDOW:]]
         return recent[0] != "" and len(set(recent)) == 1
 
-    def run_task(self, task: str, brain, session, initial_response=None) -> str:
+    def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
-        Continues until task is complete or MAX_STEPS reached.
+        Continues until task is complete, MAX_STEPS reached, or cancelled.
 
         Latency fix #1: if initial_response is provided (the caller already
         got a Brain response for this exact task — e.g. main.py's first
@@ -166,6 +166,12 @@ class ReactLoop:
         calling brain.process() again for the same decision. Every
         iteration after the first still reasons fresh, exactly as before.
         Omit initial_response to get the old behaviour unchanged.
+
+        cancel_event: an optional threading.Event checked between every
+        step. This is the actual interrupt mechanism (main.py sets it the
+        instant the user says "stop", bypassing the process lock entirely
+        so it takes effect even while this loop is mid-execution). Omit it
+        to get the old, never-cancellable behaviour unchanged.
         """
         logger.info(f"Starting ReAct loop for task: {task}")
         observations = []
@@ -175,6 +181,12 @@ class ReactLoop:
         response = initial_response
 
         while steps < MAX_STEPS:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("Task cancelled by user request")
+                result = "Stopped."
+                self._safe_reflect(task, observations, result)
+                return result
+
             steps += 1
             logger.info(f"ReAct step {steps}/{MAX_STEPS}")
 
@@ -220,7 +232,7 @@ class ReactLoop:
         return result
 
     def run_planned_task(self, task: str, brain, session, founder_context: str = "",
-                          initial_response=None) -> str:
+                          initial_response=None, cancel_event=None) -> str:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
@@ -237,21 +249,34 @@ class ReactLoop:
         guarantee the fresh-asked answer would've been identical — but it
         was already just as much a guess before this change, and it saves
         a full LLM round-trip on every single action turn.
+
+        cancel_event: same interrupt mechanism as run_task — checked
+        between every planned step, and passed through to run_task on
+        either fallback path so cancellation works identically regardless
+        of which path a task ends up on.
         """
         if not self._looks_multi_step(task):
             logger.info("Task looks single-step — skipping Planner call")
-            return self.run_task(task, brain, session, initial_response=initial_response)
+            return self.run_task(task, brain, session, initial_response=initial_response,
+                                  cancel_event=cancel_event)
 
         plan = planner.decompose(task, self.settings, founder_context)
         if not plan:
             logger.info("No plan available — falling back to adaptive ReAct loop")
-            return self.run_task(task, brain, session, initial_response=initial_response)
+            return self.run_task(task, brain, session, initial_response=initial_response,
+                                  cancel_event=cancel_event)
 
         logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
         observations = []
         steps_run = 0
 
         for i, planned_step in enumerate(plan):
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("Planned task cancelled by user request")
+                result = "Stopped."
+                self._safe_reflect(task, observations, result)
+                return result
+
             if steps_run >= MAX_STEPS:
                 logger.warning(f"Planned task exceeded MAX_STEPS ({MAX_STEPS}) — stopping early")
                 break
