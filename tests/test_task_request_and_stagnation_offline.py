@@ -73,6 +73,7 @@ def test_task_request_is_never_captured():
     settings.founder_mode_llm_capture = True
     settings.incognito = False
     settings.founder_mode_min_confidence_to_show = 0.3
+    settings.license_enforcement_enabled = False  # matches real Settings() default
 
     mgr = FounderModeManager(settings=settings)
     before_decisions = len(mgr._get_recent_decisions(50))
@@ -110,6 +111,7 @@ def test_real_decision_still_captured_normally():
     settings.founder_mode_llm_capture = True
     settings.incognito = False
     settings.founder_mode_min_confidence_to_show = 0.3
+    settings.license_enforcement_enabled = False  # matches real Settings() default
 
     mgr = FounderModeManager(settings=settings)
     before = len(mgr._get_recent_decisions(50))

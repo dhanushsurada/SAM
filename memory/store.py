@@ -8,7 +8,7 @@ SQLite: episodic memory
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -59,12 +59,25 @@ class MemoryStore:
             )
             conn.commit()
 
-    def get_recent_episodes(self, limit: int = 10) -> List[Dict]:
+    def get_recent_episodes(self, limit: int = 10, retention_days: Optional[int] = None) -> List[Dict]:
+        """
+        retention_days: if set, only episodes from the last N days are
+        returned — the free-tier memory cap. None (default) returns
+        everything, unchanged from before this existed.
+        """
         with sqlite3.connect(self._db_path) as conn:
-            rows = conn.execute(
-                "SELECT timestamp, user_input, response, action FROM episodes ORDER BY id DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
+            if retention_days is not None:
+                cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+                rows = conn.execute(
+                    "SELECT timestamp, user_input, response, action FROM episodes "
+                    "WHERE timestamp >= ? ORDER BY id DESC LIMIT ?",
+                    (cutoff, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT timestamp, user_input, response, action FROM episodes ORDER BY id DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
         return [{"timestamp": r[0], "user": r[1], "response": r[2], "action": r[3]} for r in rows]
 
     def _init_chroma(self):
@@ -98,7 +111,15 @@ class MemoryStore:
         except Exception as e:
             logger.error(f"Semantic save error: {e}")
 
-    def search_semantic(self, query: str, top_k: int = 5) -> List[Dict]:
+    def search_semantic(self, query: str, top_k: int = 5, retention_days: Optional[int] = None) -> List[Dict]:
+        """
+        retention_days: if set, results with a metadata timestamp older
+        than N days are filtered out post-query — same free-tier cap as
+        get_recent_episodes. Post-filtered rather than queried via a
+        ChromaDB `where` clause to keep this simple and avoid relying on
+        string-comparison query syntax; safe_k already bounds the amount
+        to filter.
+        """
         if self._collection is None:
             return []
         try:
@@ -113,12 +134,20 @@ class MemoryStore:
                 include=["documents", "metadatas", "distances"]
             )
             memories = []
+            cutoff = (datetime.now() - timedelta(days=retention_days)) if retention_days is not None else None
             if results["documents"]:
                 for doc, meta, dist in zip(
                     results["documents"][0],
                     results["metadatas"][0],
                     results["distances"][0]
                 ):
+                    if cutoff is not None:
+                        ts = (meta or {}).get("timestamp")
+                        try:
+                            if ts and datetime.fromisoformat(ts) < cutoff:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
                     memories.append({"content": doc, "metadata": meta, "relevance": 1 - dist})
             return memories
         except Exception as e:
