@@ -246,7 +246,16 @@ class FounderModeManager:
         real structured signal with reasoning + confidence. Falls back to
         lightweight heuristic capture only if the classifier itself is
         unavailable — never on a genuine "none" result.
+
+        Tier-gated: Founder Mode is a Pro-tier feature per the frozen
+        pricing table. Free tier never captures anything here — this is
+        the actual enforcement point that makes the license matter, not
+        just a status message at startup.
         """
+        from licensing.tier import get_tier, PRO
+        if get_tier(self.settings) != PRO:
+            return
+
         text_lower = user_input.lower()
         if not any(phrase in text_lower for phrase in _TRIGGER_PHRASES):
             return
@@ -326,6 +335,10 @@ class FounderModeManager:
     # ─── Context assembly (used by core/brain.py via session.founder_context) ──
 
     def get_context(self) -> str:
+        from licensing.tier import get_tier, PRO
+        if get_tier(self.settings) != PRO:
+            return ""
+
         try:
             min_conf = 0.0
             if self.settings is not None:

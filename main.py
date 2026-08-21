@@ -125,7 +125,8 @@ class SAM:
             session = Session(
                 user_input=user_input,
                 identity=self.identity.load(),
-                memories=self.memory.retrieve(user_input, self.settings),
+                memories=self.memory.retrieve(user_input, self.settings,
+                                               retention_days=self._memory_retention_days()),
                 founder_context=self.founder_mode.get_context(),
                 settings=self.settings
             )
@@ -193,6 +194,12 @@ class SAM:
 
     # ─── Commands ─────────────────────────────────────────────────────────
 
+    def _memory_retention_days(self):
+        """Free tier: 7-day memory cap. Pro tier / enforcement off: None
+        (unlimited), unchanged from before tier-gating existed."""
+        from licensing.tier import get_tier, PRO, FREE_TIER_MEMORY_RETENTION_DAYS
+        return None if get_tier(self.settings) == PRO else FREE_TIER_MEMORY_RETENTION_DAYS
+
     def _handle_command(self, text: str) -> bool:
         """Handle built-in SAM commands. Returns True if handled."""
         t = text.lower().strip()
@@ -206,8 +213,14 @@ class SAM:
             self.switch_mode("voice")
             return True
 
-        # Incognito
+        # Incognito (Pro tier — per the frozen pricing table)
         if "incognito" in t and "exit" not in t and "leave" not in t:
+            from licensing.tier import get_tier, PRO
+            if get_tier(self.settings) != PRO:
+                msg = "Incognito mode is a Pro feature. Activate a license to use it."
+                print(f"\nSAM: {msg}\n")
+                self.tts.speak(msg)
+                return True
             self.settings.incognito = True
             msg = "Incognito mode on. Nothing will be recorded."
             print(f"\nSAM: {msg}\n")

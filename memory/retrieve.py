@@ -30,7 +30,11 @@ class MemoryRetriever:
         """
         return self._get_store(settings)
 
-    def retrieve(self, query: str, settings=None, top_k: int = 5) -> List[Dict]:
+    def retrieve(self, query: str, settings=None, top_k: int = 5, retention_days=None) -> List[Dict]:
+        """
+        retention_days: pass the free-tier cap (e.g. 7) to only surface
+        memories from that window; omit (None) for unlimited.
+        """
         try:
             store = self._get_store(settings)
             if store is None:
@@ -46,7 +50,7 @@ class MemoryRetriever:
 
             # Never request more than what exists
             safe_k = min(top_k, count)
-            return store.search_semantic(query, top_k=safe_k)
+            return store.search_semantic(query, top_k=safe_k, retention_days=retention_days)
 
         except Exception as e:
             logger.debug(f"Memory retrieval skipped: {e}")

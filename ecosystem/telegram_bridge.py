@@ -132,11 +132,14 @@ class TelegramBridge:
         the future, that's the trade-off — noted in the phase doc.
         """
         from core.session import Session
+        from licensing.tier import get_tier, PRO, FREE_TIER_MEMORY_RETENTION_DAYS
+
+        retention_days = None if get_tier(self.settings) == PRO else FREE_TIER_MEMORY_RETENTION_DAYS
 
         session = Session(
             user_input=user_input,
             identity=self.identity.load(),
-            memories=self.memory.retrieve(user_input, self.settings),
+            memories=self.memory.retrieve(user_input, self.settings, retention_days=retention_days),
             founder_context=self.founder_mode.get_context(),
             settings=self.settings
         )
