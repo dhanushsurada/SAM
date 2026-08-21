@@ -1,5 +1,53 @@
 # SAM — Personal AI Assistant
 
+## Current Status
+
+SAM's current repository state includes the completed Phase 0–3 foundations plus
+feature-tier enforcement.
+
+### Implemented
+
+- **Founder Mode v2** — persistent founder preferences, decisions, rejections,
+  confidence handling, and review flow.
+- **Planner + Reflection** — multi-step planning with safe fallback and stored
+  lessons.
+- **Verification + Reflection** — retry/abort decisions, execution metrics,
+  mistakes, and reflection-to-Founder-Mode bridging.
+- **ReAct execution** — bounded execution with stagnation detection.
+- **Memory** — SQLite episodic storage and ChromaDB semantic retrieval, with
+  tier-aware retention.
+- **Browser / Vision / Control / Terminal hands** — execution backends with
+  concurrency and browser thread-affinity safeguards.
+- **Telegram Bridge** — trusted-device pairing, revocation, and remote SAM
+  interaction through Telegram.
+- **Offline licensing** — signed-license verification and fail-safe license
+  status handling.
+- **Feature-tier gating** — the license now affects behavior:
+  - **Free:** 7-day memory retention; Founder Mode and Incognito are restricted.
+  - **Pro:** unlimited memory retention; Founder Mode and Incognito are available.
+  - Development mode can disable enforcement so local development is not
+    accidentally locked out.
+
+### Current Integration Boundary
+
+The Telegram Bridge is a **remote-control bridge**, not a native device mesh.
+Direct same-Wi-Fi device discovery, local phone↔computer synchronization,
+clipboard/file synchronization, and a native mobile client are not currently
+implemented.
+
+### Next Engineering Priorities
+
+The next planned milestone is **sensitive-data redaction and persistence-path
+integration**. After that, the remaining roadmap includes feeding Reflection
+lessons back into Brain prompts, improving browser-tool selection versus blind
+clicking, formalizing the interrupt/cancel regression test, scheduled tasks,
+document ingestion, and later native device/mobile capabilities.
+
+> **Source of truth:** implementation and tests in the repository take
+> precedence over older roadmap wording. Documentation should be updated in the
+> same checkpoint whenever implementation status changes.
+
+
 **Self-learning Autonomous Mind with Hermes Intelligence & Taste Heuristics Architecture**
 
 > Fully local · Privacy-first · Voice-controlled · Self-improving · Founder Mode
