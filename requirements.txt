@@ -36,5 +36,10 @@ qrcode[pil]>=7.4.2              # Pairing QR code generation
 # ─── Licensing (Phase 3) ────────────────────────────────────────────────────
 cryptography>=42.0.0            # Ed25519 signing/verification for offline license checks
 
+# ─── iQOO Hackathon 2026 branch — Phone Task Gateway (hackathon/iqoo-2026) ──
+fastapi>=0.110.0                 # Task gateway HTTP + SSE API
+uvicorn[standard]>=0.29.0        # ASGI server for iqoo/server.py
+httpx>=0.27.0                    # Only needed for tests/test_iqoo_phase1_offline.py (TestClient)
+
 # ─── Utilities ─────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0

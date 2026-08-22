@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SAM — iQOO Control</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot" id="conn-dot"></span>
+        <span>SAM</span>
+      </div>
+      <div id="conn-label" class="conn-label">connecting…</div>
+    </header>
+
+    <main>
+
+      <!-- Home / composer -->
+      <section id="view-home" class="view">
+        <p class="hint">Point your phone at a schema, speak, or just type — SAM plans and executes on the connected PC.</p>
+
+        <div class="input-row">
+          <textarea id="instruction" rows="3" placeholder="e.g. Open Safari and go to github.com"></textarea>
+        </div>
+
+        <div class="capture-row">
+          <label class="icon-btn" for="camera-input" id="camera-btn">
+            📷
+            <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+          </label>
+          <button class="icon-btn" id="voice-btn" type="button">🎤</button>
+          <div class="capture-status" id="capture-status"></div>
+        </div>
+
+        <button id="submit-btn" class="primary-btn">Send to SAM</button>
+      </section>
+
+      <!-- Execution progress -->
+      <section id="view-task" class="view hidden">
+        <h2 id="task-instruction" class="task-instruction"></h2>
+
+        <ol id="phase-list" class="phase-list">
+          <li data-phase="received">Received</li>
+          <li data-phase="understanding">Understanding</li>
+          <li data-phase="planning">Planning</li>
+          <li data-phase="executing">Executing</li>
+          <li data-phase="verifying">Verifying</li>
+        </ol>
+
+        <div id="event-log" class="event-log"></div>
+
+        <div id="result-box" class="result-box hidden">
+          <div id="result-status" class="result-status"></div>
+          <div id="result-text" class="result-text"></div>
+        </div>
+
+        <div class="task-actions">
+          <button id="cancel-btn" class="danger-btn">Cancel</button>
+          <button id="retry-btn" class="secondary-btn hidden">Retry</button>
+          <button id="new-task-btn" class="secondary-btn hidden">New task</button>
+        </div>
+      </section>
+
+      <div id="error-banner" class="error-banner hidden"></div>
+
+    </main>
+  </div>
+
+  <script src="state.js"></script>
+  <script src="api.js"></script>
+  <script src="events.js"></script>
+  <script src="camera.js"></script>
+  <script src="voice.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

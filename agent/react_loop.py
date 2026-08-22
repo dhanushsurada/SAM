@@ -155,7 +155,8 @@ class ReactLoop:
         recent = [o.get("observation", "") for o in observations[-STAGNATION_WINDOW:]]
         return recent[0] != "" and len(set(recent)) == 1
 
-    def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None) -> str:
+    def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None,
+                 on_event=None) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete, MAX_STEPS reached, or cancelled.
@@ -202,7 +203,10 @@ class ReactLoop:
                 return response.text
 
             # Act: execute the action (Phase 1.5: verified, with 1 retry on failure)
+            self._safe_event(on_event, "executing", f"Step {steps}: {response.action}")
             verified = self._execute_verified(response.action, response.action_payload or {}, f"step {steps}")
+            self._safe_event(on_event, "verifying",
+                              f"Step {steps} {'verified' if verified['success'] else 'failed verification'}")
             observation = verified["observation"]
             observations.append({
                 "step": steps,
@@ -232,7 +236,7 @@ class ReactLoop:
         return result
 
     def run_planned_task(self, task: str, brain, session, founder_context: str = "",
-                          initial_response=None, cancel_event=None) -> str:
+                          initial_response=None, cancel_event=None, on_event=None) -> str:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
@@ -254,19 +258,25 @@ class ReactLoop:
         between every planned step, and passed through to run_task on
         either fallback path so cancellation works identically regardless
         of which path a task ends up on.
+
+        on_event: iQOO Phase 1 adapter — optional callback(phase, message)
+        fired at plan creation, before/after each step's execution, and on
+        stagnation abort. Additive and backward-compatible: default None
+        means zero behaviour change for existing callers. See _safe_event.
         """
         if not self._looks_multi_step(task):
             logger.info("Task looks single-step — skipping Planner call")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event)
+                                  cancel_event=cancel_event, on_event=on_event)
 
         plan = planner.decompose(task, self.settings, founder_context)
         if not plan:
             logger.info("No plan available — falling back to adaptive ReAct loop")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event)
+                                  cancel_event=cancel_event, on_event=on_event)
 
         logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
+        self._safe_event(on_event, "planning", f"Plan created with {len(plan)} step(s)")
         observations = []
         steps_run = 0
 
@@ -290,9 +300,14 @@ class ReactLoop:
                 response = brain.process(session)
 
             if response.action and response.action != "none":
+                self._safe_event(on_event, "executing",
+                                  f"Step {planned_step['step']}: {planned_step['description']}")
                 verified = self._execute_verified(
                     response.action, response.action_payload or {}, f"step {planned_step['step']}"
                 )
+                self._safe_event(on_event, "verifying",
+                                  f"Step {planned_step['step']} "
+                                  f"{'verified' if verified['success'] else 'failed verification'}")
                 observation = verified["observation"]
                 attempts = verified["attempts"]
             else:
@@ -320,6 +335,19 @@ class ReactLoop:
         final_text = observations[-1]["observation"] if observations else "Task could not be started."
         self._safe_reflect(task, observations, final_text)
         return final_text
+
+    def _safe_event(self, on_event, phase: str, message: str):
+        """iQOO Phase 1 adapter: optional progress callback, additive and
+        backward-compatible exactly like cancel_event above -- default
+        None means zero behaviour change for any existing caller
+        (main.py, telegram_bridge) that doesn't pass it. Never allowed to
+        break or delay the task the callback is reporting on."""
+        if on_event is None:
+            return
+        try:
+            on_event(phase, message)
+        except Exception as e:
+            logger.debug(f"on_event callback skipped: {e}")
 
     def _safe_reflect(self, task: str, observations: list, outcome: str):
         """Reflection must never break or delay the response the user is
