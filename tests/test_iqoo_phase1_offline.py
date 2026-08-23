@@ -40,12 +40,20 @@ def make_mocked_gateway():
     """Builds a TaskGateway with every SAM-core dependency mocked, the
     same pattern test_phase2_telegram_offline.py uses for Telegram's
     Update/Context. Patches the source classes (not iqoo.gateway's local
-    imports) since gateway.py imports them lazily inside __init__."""
+    imports) since gateway.py imports them lazily inside __init__.
+
+    Also mocks VisionAdapter/AudioAdapter (added in Phase 2) so nothing
+    in this Phase 1 suite can accidentally reach a real Ollama/Whisper
+    call over the network — by default both raise clearly if invoked,
+    since no test in *this* file is meant to exercise real perception
+    logic (that's tests/test_iqoo_phase2_offline.py's job)."""
     with patch("memory.identity.Identity") as MockIdentity, \
          patch("memory.retrieve.MemoryRetriever") as MockMemory, \
          patch("founder_mode.manager.FounderModeManager") as MockFounder, \
          patch("core.brain.Brain") as MockBrain, \
-         patch("agent.react_loop.ReactLoop") as MockReactLoop:
+         patch("agent.react_loop.ReactLoop") as MockReactLoop, \
+         patch("iqoo.gateway.VisionAdapter") as MockVision, \
+         patch("iqoo.gateway.AudioAdapter") as MockAudio:
 
         MockIdentity.return_value.load.return_value = {}
         MockMemory.return_value.retrieve.return_value = []
@@ -54,13 +62,27 @@ def make_mocked_gateway():
         MockFounder.return_value.capture_if_relevant.return_value = None
         MockBrain.return_value._check_ollama.return_value = True
 
+        def _unexpected_vision_call(*a, **kw):
+            raise AssertionError(
+                "VisionAdapter.interpret() was called from the Phase 1 suite — "
+                "perception behavior belongs in test_iqoo_phase2_offline.py")
+
+        def _unexpected_audio_call(*a, **kw):
+            raise AssertionError(
+                "AudioAdapter.transcribe() was called from the Phase 1 suite — "
+                "perception behavior belongs in test_iqoo_phase2_offline.py")
+
+        MockVision.return_value.interpret.side_effect = _unexpected_vision_call
+        MockAudio.return_value.transcribe.side_effect = _unexpected_audio_call
+
         from config.settings import Settings
         settings = Settings()
         settings.incognito = True  # skip session.save() entirely in tests
 
         from iqoo.gateway import TaskGateway
         gateway = TaskGateway(settings=settings)
-        return gateway, MockBrain.return_value, MockReactLoop.return_value
+        return gateway, MockBrain.return_value, MockReactLoop.return_value, \
+            MockVision.return_value, MockAudio.return_value
 
 
 def wait_for_status(gateway, task_id, statuses, timeout=5.0):
@@ -116,7 +138,7 @@ def test_event_bus():
 
 
 def test_gateway_no_action_task():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         mock_brain.process.return_value = FakeBrainResponse(text="It's 3pm.", action=None)
         task_id = gateway.submit_task("what time is it")
@@ -130,7 +152,7 @@ def test_gateway_no_action_task():
 
 
 def test_gateway_action_task():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         mock_brain.process.return_value = FakeBrainResponse(
             text="Opening Safari...", action="control", action_payload={"type": "open_app", "app": "Safari"})
@@ -153,8 +175,68 @@ def test_gateway_action_task():
         gateway.shutdown()
 
 
+def test_gateway_cancel_before_start_emits_exactly_one_terminal_event():
+    """Explicit regression check (requested in review): a pre-start
+    cancellation — cancel_task() called while the task is still queued,
+    never reaching brain.process() — must publish exactly one terminal
+    'cancelled' event on the task's event queue, not zero and not more
+    than one. Reviewed iqoo/gateway.py's early-cancellation branch
+    (the `if cancel_event.is_set(): ... return` guard at the top of
+    _process_task) line by line and via a programmatic duplicate-line
+    scan; only a single event_bus.publish(..., "cancelled", ...) call
+    exists there. This test locks that invariant in so a future edit
+    can't silently reintroduce a duplicate."""
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
+    try:
+        slow_holder = {"go": False}
+
+        def slow_process(session):
+            while not slow_holder["go"]:
+                time.sleep(0.01)
+            return FakeBrainResponse(text="done", action=None)
+
+        mock_brain.process.side_effect = slow_process
+        blocker_id = gateway.submit_task("slow task")
+        target_id = gateway.submit_task("cancel me before start")
+
+        # Subscribe to the target task's event queue BEFORE cancelling,
+        # so every event it emits (including "received" from submit_task
+        # and the eventual "cancelled") is captured for counting.
+        q = gateway.event_bus.subscribe_queue(target_id)
+
+        ok = gateway.cancel_task(target_id)
+        check("Cancel accepted while task still queued", ok is True)
+
+        slow_holder["go"] = True
+        wait_for_status(gateway, blocker_id, {"completed", "failed"})
+        final = wait_for_status(gateway, target_id, {"completed", "failed", "cancelled"})
+        check("Pre-start cancellation resolves to cancelled", final == "cancelled")
+
+        # Drain every event published for this task_id.
+        events = []
+        while True:
+            try:
+                events.append(q.get_nowait())
+            except Exception:
+                break
+
+        cancelled_events = [e for e in events if e["phase"] == "cancelled"]
+        check("Exactly one 'cancelled' event was published for a pre-start cancellation",
+              len(cancelled_events) == 1)
+        check("The single cancelled event has the expected message",
+              cancelled_events and cancelled_events[0]["message"] == "Cancelled before execution started")
+
+        # Brain must never have been reached for the cancelled task
+        # specifically (it was called once, for the unrelated blocker
+        # task, which is fine and expected).
+        check("Brain was called exactly once (only for the blocker task, not the cancelled one)",
+              mock_brain.process.call_count == 1)
+    finally:
+        gateway.shutdown()
+
+
 def test_gateway_cancel_before_start():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         # Block the worker on a slow first task so our cancel target
         # stays queued long enough to cancel before it starts.
@@ -183,7 +265,7 @@ def test_gateway_cancel_before_start():
 
 
 def test_gateway_execution_failure():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         mock_brain.process.side_effect = RuntimeError("ollama unreachable")
         task_id = gateway.submit_task("do something")
@@ -195,8 +277,63 @@ def test_gateway_execution_failure():
         gateway.shutdown()
 
 
+def test_gateway_concurrency_serialization():
+    """Explicit test for the invariant documented in ARCHITECTURE.md:
+    SAM's Hands aren't safe for concurrent execution, so TaskGateway must
+    run tasks one at a time off its single worker thread, no matter how
+    many are submitted back to back. This proves it directly by tracking
+    concurrent-entry count into the mocked Brain.process call, instead of
+    only inferring serialization indirectly from cancel-before-start
+    timing (test_gateway_cancel_before_start)."""
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
+    try:
+        active = {"count": 0, "max": 0}
+        lock = __import__("threading").Lock()
+        order = []
+
+        def tracked_process(session):
+            with lock:
+                active["count"] += 1
+                active["max"] = max(active["max"], active["count"])
+            order.append(("start", session.user_input))
+            time.sleep(0.15)  # long enough to overlap if serialization is broken
+            order.append(("end", session.user_input))
+            with lock:
+                active["count"] -= 1
+            return FakeBrainResponse(text=f"done: {session.user_input}", action=None)
+
+        mock_brain.process.side_effect = tracked_process
+
+        task_ids = [gateway.submit_task(f"task {i}") for i in range(4)]
+        for task_id in task_ids:
+            final = wait_for_status(gateway, task_id, {"completed", "failed"}, timeout=5.0)
+            check(f"Task {task_id[:8]} reached a terminal status", final == "completed")
+
+        check("Never more than one task executing Brain.process concurrently",
+              active["max"] == 1)
+        check("All four tasks actually ran", len(order) == 8)
+
+        # Each task's start/end pair must be contiguous — no interleaving
+        # of "task N start" ... "task M start" before "task N end".
+        non_interleaved = True
+        running = None
+        for kind, label in order:
+            if kind == "start":
+                if running is not None:
+                    non_interleaved = False
+                running = label
+            else:  # end
+                if running != label:
+                    non_interleaved = False
+                running = None
+        check("Task execution order is strictly serialized (no interleaving)",
+              non_interleaved)
+    finally:
+        gateway.shutdown()
+
+
 def test_gateway_retry():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         mock_brain.process.return_value = FakeBrainResponse(text="ok", action=None)
         task_id = gateway.submit_task("do X")
@@ -210,16 +347,30 @@ def test_gateway_retry():
         gateway.shutdown()
 
 
-def test_gateway_unsupported_input_type():
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+def test_gateway_perception_failure_handled_gracefully():
+    """Phase 1 regression check, updated for Phase 2: a non-text task
+    used to always fail with a hardcoded 'Phase 2' message (Phase 1
+    behavior). Now that Phase 2 actually wires VisionAdapter/AudioAdapter
+    into _perceive(), this test instead confirms the gateway still fails
+    a task cleanly (not a crash, not a hang) when perception itself
+    raises — using the mocked adapter from make_mocked_gateway() rather
+    than a real network call, keeping this suite fully offline. Detailed
+    multimodal behavior (valid image, valid audio, structured context
+    composition, etc.) is covered in test_iqoo_phase2_offline.py."""
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
-        task_id = gateway.submit_task("turn this into a backend", input_type="image+voice",
-                                       attachments=[{"kind": "image", "data": "..."}])
+        from iqoo.errors import PerceptionError
+        mock_vision.interpret.side_effect = PerceptionError("mock vision failure")
+
+        task_id = gateway.submit_task(
+            "turn this into a backend", input_type="image+text",
+            attachments=[{"kind": "image", "mime_type": "image/jpeg", "data": "..."}]
+        )
         final = wait_for_status(gateway, task_id, {"completed", "failed"})
         record = gateway.get_task(task_id)
-        check("Phase 1 fails multimodal tasks honestly instead of ignoring attachments",
-              final == "failed" and "Phase 2" in (record["error"] or ""))
-        check("Brain never called for unsupported input type in Phase 1",
+        check("Perception failure fails the task cleanly, not silently",
+              final == "failed" and "mock vision failure" in (record["error"] or ""))
+        check("Brain is never reached when perception fails first",
               not mock_brain.process.called)
     finally:
         gateway.shutdown()
@@ -229,7 +380,7 @@ def test_api_endpoints():
     from fastapi.testclient import TestClient
     import iqoo.server as server_module
 
-    gateway, mock_brain, mock_react_loop = make_mocked_gateway()
+    gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     mock_brain.process.return_value = FakeBrainResponse(text="hi there", action=None)
     server_module._gateway = gateway  # inject our mocked gateway instead of building a real one
 
@@ -278,9 +429,11 @@ def main():
     test_gateway_no_action_task()
     test_gateway_action_task()
     test_gateway_cancel_before_start()
+    test_gateway_cancel_before_start_emits_exactly_one_terminal_event()
+    test_gateway_concurrency_serialization()
     test_gateway_execution_failure()
     test_gateway_retry()
-    test_gateway_unsupported_input_type()
+    test_gateway_perception_failure_handled_gracefully()
     test_api_endpoints()
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")

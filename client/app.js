@@ -96,21 +96,65 @@ async function refreshConnection() {
   }
 }
 
+function determineInputType() {
+  const hasImage = !!STATE.pendingImage;
+  const hasAudio = !!STATE.pendingAudio;
+  if (hasImage && hasAudio) return "image+voice";
+  if (hasImage) return "image+text";
+  if (hasAudio) return "voice";
+  return "text";
+}
+
+function buildAttachments() {
+  const attachments = [];
+  if (STATE.pendingImage) {
+    attachments.push({
+      kind: "image",
+      mime_type: STATE.pendingImage.mime_type,
+      data: STATE.pendingImage.data,
+      filename: STATE.pendingImage.filename,
+    });
+  }
+  if (STATE.pendingAudio) {
+    attachments.push({
+      kind: "audio",
+      mime_type: STATE.pendingAudio.mime_type,
+      data: STATE.pendingAudio.data,
+      filename: STATE.pendingAudio.filename,
+    });
+  }
+  return attachments;
+}
+
 async function submitTask() {
-  const instruction = EL.instruction.value.trim();
+  const typed = EL.instruction.value.trim();
+  const inputType = determineInputType();
+
+  // A "voice"-only or "image+voice"-only submission still needs a
+  // non-empty instruction field (server-side schema requires it) — use
+  // a clear placeholder rather than blocking the user, since the real
+  // content is in the audio attachment.
+  const instruction = typed || (inputType === "text"
+    ? ""
+    : `(${inputType} task — see attachment${STATE.pendingAudio && STATE.pendingImage ? "s" : ""})`);
+
   if (!instruction) {
-    showError("Type or speak an instruction first.");
+    showError("Type something, attach a photo, or record a voice note first.");
     return;
   }
 
   EL.submitBtn.disabled = true;
+  EL.submitBtn.textContent = "Sending…";
   try {
-    const record = await API.createTask(instruction, "text", []);
+    const attachments = buildAttachments();
+    const record = await API.createTask(instruction, inputType, attachments);
     resetTaskState();
     STATE.taskId = record.task_id;
-    STATE.instruction = instruction;
+    STATE.instruction = typed || `[${inputType}]`;
     STATE.status = record.status;
     STATE.view = "task";
+    CAMERA.reset();
+    AUDIO_REC.reset();
     render();
 
     EVENTS.subscribe(STATE.taskId, {
@@ -131,6 +175,7 @@ async function submitTask() {
     showError(e.message || "Could not reach SAM.");
   } finally {
     EL.submitBtn.disabled = false;
+    EL.submitBtn.textContent = "Send to SAM";
   }
 }
 
@@ -172,12 +217,14 @@ function newTask() {
   STATE.view = "home";
   EL.instruction.value = "";
   CAMERA.reset();
+  AUDIO_REC.reset();
   render();
 }
 
 function init() {
   cacheElements();
   CAMERA.init();
+  AUDIO_REC.init();
   VOICE.init();
 
   EL.submitBtn.addEventListener("click", submitTask);

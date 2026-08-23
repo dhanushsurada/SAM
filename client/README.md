@@ -30,25 +30,35 @@ Office Kit's mirrored browser during Red Light).
 | `state.js` | Single plain-object app state |
 | `api.js` | fetch() wrapper for `/api/iqoo/*` |
 | `events.js` | SSE subscription (`EventSource`) for live execution progress |
-| `camera.js` | Camera entry point — captures a photo but does not yet submit it (Phase 2 wires real multimodal submission) |
-| `voice.js` | Voice entry point — browser `SpeechRecognition` dictation into the text box (push-to-talk, not SAM's own Whisper pipeline) |
-| `app.js` | Wires everything together: submit, cancel, retry, render loop |
+| `camera.js` | Camera capture — encodes the photo to base64, shows a real preview, attaches it to the task (Phase 2: actually submitted now) |
+| `audio.js` | Voice note recording via `MediaRecorder` — records real audio, attaches it to the task for SAM's server-side Whisper transcription (Phase 2) |
+| `voice.js` | Separate dictation entry point — browser `SpeechRecognition` typing directly into the text box (push-to-talk, client-side only, not sent to SAM as audio) |
+| `app.js` | Wires everything together: composes the multimodal request (text/image/voice/image+voice), submit, cancel, retry, render loop |
 
-## Phase 1 scope (what actually works)
+## Phase 2 scope (what actually works)
 
-- Text task submission → real SAM execution → result on phone
-- Live execution progress via SSE (received → understanding → planning →
-  executing → verifying → completed/failed/cancelled)
-- Cancel (interrupts the actual running task, not just the UI)
-- Retry (resubmits as a fresh task)
-- Camera and voice **entry points** exist and are wired, but a captured
-  photo is not yet sent to SAM — submitting an `image`/`image+voice` task
-  today returns an honest "not supported until Phase 2" failure instead
-  of silently ignoring the photo. See `docs/iqoo/PROGRESS.md`.
+- Everything from Phase 1, unchanged (text tasks, cancel, retry, SSE)
+- Camera capture → real preview → actually submitted as a task attachment
+- Voice note recording → actually submitted as a task attachment →
+  transcribed server-side by SAM's Whisper pipeline
+- Combined image+voice submission (the primary whiteboard-to-backend
+  demo shape)
+- A `perceiving` phase in the progress checklist while SAM's vision/audio
+  adapters interpret the attachment(s)
+- Client-side MIME/size pre-checks (reject obviously-bad files before
+  even uploading) — the server re-validates independently regardless
 
-## Not yet built (Phase 2)
+## Not yet built (Phase 3)
 
-- Actually uploading the captured image as a task attachment
-- Vision adapter → structured schema context
-- Server-side STT for real (non-browser) voice capture
-- The whiteboard-to-backend demo workflow
+- Demo reset / seeded environment
+- SSE reconnect with event backlog/replay
+- Task-level timeout surfaced to the UI
+
+## Untested (all phases, honestly)
+
+Nothing in `client/` has been run against a real mobile browser, a real
+camera, or a real microphone in this build environment. The camera/audio
+capture code was written against the standard File API / MediaRecorder
+API specs, but browser quirks (especially iOS Safari's historically
+inconsistent `MediaRecorder` support) are common and none have been
+found yet, because nothing has touched a real device.

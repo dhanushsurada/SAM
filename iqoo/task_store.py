@@ -29,12 +29,13 @@ SAM_DATA_DIR = Path.home() / ".sam_data"
 IQOO_DIR = SAM_DATA_DIR / "iqoo"
 TASKS_DB_PATH = IQOO_DIR / "tasks.db"
 
-# Full state machine per the PDR (section 8.5). "queued" is this store's
+# Full state machine per the PDR (section 8.5), extended in Phase 2 with
+# "perceiving" for image/audio interpretation. "queued" is this store's
 # own pre-state before the worker thread picks a task up, layered on top
 # of the PDR's "received" event which fires the moment the row is created.
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ALL_STATUSES = {
-    "queued", "received", "understanding", "planning", "executing",
+    "queued", "received", "understanding", "perceiving", "planning", "executing",
     "testing", "verifying", *TERMINAL_STATUSES,
 }
 

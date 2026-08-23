@@ -81,7 +81,63 @@ textarea {
 
 .icon-btn.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(58,160,255,0.25); }
 
+#record-btn.active { border-color: var(--bad); box-shadow: 0 0 0 2px rgba(255,93,93,0.25); }
+
 .capture-status { font-size: 12px; color: var(--muted); }
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--bad);
+  margin-bottom: 8px;
+}
+
+.recording-indicator.hidden { display: none; }
+
+.pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bad);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.preview-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.preview-item img {
+  max-width: 100%;
+  max-height: 160px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.preview-item img.hidden { display: none; }
+
+.remove-chip {
+  margin-top: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--bad);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.remove-chip.hidden { display: none; }
 
 .primary-btn, .secondary-btn, .danger-btn {
   width: 100%;

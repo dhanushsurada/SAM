@@ -78,6 +78,17 @@ the phone would only ever see `understanding` → `completed`, with no
 visibility into planning/execution/verification — the granularity the
 PDR's event contract actually asks for.
 
+## Phase 2 addition: perception adapters
+
+`iqoo/vision_adapter.py` and `iqoo/audio_adapter.py` slot into
+`iqoo/gateway.py::_perceive`, called before `brain.process()` for any
+non-`text` task. See `PERCEPTION.md` for the full design, including the
+documented coupling in `AudioAdapter` (reaches into
+`ears/stt.py::SpeechToText`'s private `_load_model()`/`_model` rather
+than a new public method, specifically to avoid touching a file outside
+`iqoo/`/`client/`/`tests/`/`docs/iqoo/` without stopping to justify it
+first — flagged as a recommended fast-follow, not hidden).
+
 ## Data separation
 
 `iqoo/task_store.py` (`~/.sam_data/iqoo/tasks.db`) holds competition task
@@ -88,14 +99,12 @@ principle already used by `ecosystem/device_registry.py`: task
 bookkeeping is operational metadata, not AI memory, even though both
 live under `~/.sam_data`.
 
-## What Phase 1 deliberately does not do
+## What's deliberately not done yet
 
-- No image/voice attachment processing (fails honestly — see
-  `PROGRESS.md`).
-- No granular "testing" phase distinct from "executing" (a terminal
-  action running `pytest` still reports as `executing`/`verifying` in
-  Phase 1; Phase 2's `skills/iqoo/whiteboard_to_backend/` workflow will
-  emit an explicit `testing` phase).
 - No demo reset / hackathon mode (Phase 3 scope).
 - No reconnect/session-recovery beyond what SQLite status + a fresh SSE
   subscription already gives you (Phase 3 scope).
+- No task-level timeout (Phase 3 scope).
+- Phone client UI for camera/audio capture-and-submit and the
+  perception progress states — code was written in this phase (see
+  `PROGRESS.md`) but has not been exercised against a real device.

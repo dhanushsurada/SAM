@@ -30,10 +30,25 @@
         <div class="capture-row">
           <label class="icon-btn" for="camera-input" id="camera-btn">
             📷
-            <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+            <input type="file" id="camera-input" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
           </label>
-          <button class="icon-btn" id="voice-btn" type="button">🎤</button>
+          <button class="icon-btn" id="record-btn" type="button" title="Record voice note (sent to SAM's server-side transcription)">🔴</button>
+          <button class="icon-btn" id="voice-btn" type="button" title="Dictate into the text box (browser only)">🎤</button>
           <div class="capture-status" id="capture-status"></div>
+        </div>
+
+        <div id="recording-indicator" class="recording-indicator hidden">
+          <span class="pulse-dot"></span> Recording…
+        </div>
+
+        <div class="preview-row">
+          <div class="preview-item">
+            <img id="image-preview" class="hidden" alt="Captured photo preview">
+            <button id="image-remove-btn" class="remove-chip hidden" type="button">✕ Remove photo</button>
+          </div>
+          <div class="preview-item">
+            <button id="audio-remove-btn" class="remove-chip hidden" type="button">✕ Remove voice note</button>
+          </div>
         </div>
 
         <button id="submit-btn" class="primary-btn">Send to SAM</button>
@@ -46,6 +61,7 @@
         <ol id="phase-list" class="phase-list">
           <li data-phase="received">Received</li>
           <li data-phase="understanding">Understanding</li>
+          <li data-phase="perceiving">Perceiving</li>
           <li data-phase="planning">Planning</li>
           <li data-phase="executing">Executing</li>
           <li data-phase="verifying">Verifying</li>
@@ -74,6 +90,7 @@
   <script src="api.js"></script>
   <script src="events.js"></script>
   <script src="camera.js"></script>
+  <script src="audio.js"></script>
   <script src="voice.js"></script>
   <script src="app.js"></script>
 </body>
