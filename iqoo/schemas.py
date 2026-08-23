@@ -82,7 +82,11 @@ class ExecutionEvent(BaseModel):
 
 class HealthStatus(BaseModel):
     status: Literal["ok", "degraded"]
+    worker_alive: bool
     brain_reachable: bool
+    vision_model_available: Optional[bool] = None
+    whisper_available: bool
     active_task: Optional[str] = None
     queue_depth: int
-    version: str = "iqoo-phase2"
+    uptime_seconds: float
+    version: str = "iqoo-phase3a"

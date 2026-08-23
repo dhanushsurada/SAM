@@ -108,3 +108,106 @@ live under `~/.sam_data`.
 - Phone client UI for camera/audio capture-and-submit and the
   perception progress states — code was written in this phase (see
   `PROGRESS.md`) but has not been exercised against a real device.
+
+## Phase 3A: reliability & recovery
+
+**[IMPLEMENTED, TESTED OFFLINE — see `tests/test_iqoo_phase3a_offline.py`, 44/44]**
+
+### SSE reconnect — the actual fix
+
+Phase 1/2 kept a single `queue.Queue` per task, destructively drained by
+whichever connection read it, and `event_bus.cleanup()` was called the
+moment ANY stream disconnected. A reconnecting phone (dropped WiFi,
+browser refresh, backgrounded tab) got either a queue with nothing left
+in it, or no queue at all — silently losing the terminal event. This was
+the real bug, not a hypothetical one.
+
+`iqoo/events.py` now keeps a full ordered, sequence-numbered history per
+task instead. `iqoo/server.py`'s `/api/iqoo/tasks/{id}/events` reads the
+standard SSE `Last-Event-ID` header (which browsers send automatically
+on reconnect — zero client-side reconnect logic needed) and replays
+every event after that point before continuing live. A cold reconnect
+(`Last-Event-ID` absent) replays the full history, including an
+already-reached terminal status. History is never deleted on disconnect
+— only by an explicit demo reset.
+
+Found and fixed a genuine hang while building this: a reconnect that's
+already fully caught up to an already-terminal task (empty backlog, and
+no future event will ever come) would loop on `wait_for_new(...)`
+forever with only heartbeats, since nothing was checking "is this task
+actually already done" in that branch. Fixed by re-checking task status
+on every empty wait before looping again.
+
+### Timeout — an honest trade-off, not a silent gap
+
+`TaskGateway._run_task_with_timeout` runs `_process_task` on a nested
+thread with a hard wall-clock ceiling (`task_timeout_seconds`, default
+600s). If it doesn't finish in time, the phone is told "failed (timed
+out)" immediately. **But** nothing in Python can forcibly kill a thread
+blocked inside a synchronous Hands call or an unbounded network
+request — the only real way is killing the process. So the FIFO worker
+thread still waits for the orphaned thread to actually finish before
+touching Hands again, preserving the single-flight invariant at the
+cost of the queue not *instantly* continuing after a true hang. This is
+documented, not hidden — see the docstring on that method.
+
+A companion guard was needed and added: once a task reaches a terminal
+status, `TaskStore.update_status`/`EventBus.publish` refuse any further
+write for that task_id. Without this, an orphaned thread that
+eventually finishes late (after the phone was already told "timed out")
+could silently flip the status back to "completed" minutes later.
+
+### Worker recovery — a real gap found and fixed during testing
+
+Moving `_process_task` onto a nested thread for the timeout watchdog
+initially dropped the exception handling that used to wrap it directly
+in `_worker_loop` — an exception raised *outside* `_process_task`'s own
+inner try/except (e.g. in the pre-perceive cancellation check) would
+propagate out of the nested thread silently (Python swallows uncaught
+thread exceptions rather than crashing the process), leaving that task
+stuck in a non-terminal status forever and never actually testing the
+"task A fails, task B still executes" requirement. Caught by
+`test_worker_recovery_task_a_fails_task_b_still_executes` before it
+shipped — fixed by adding an explicit catch-all in the nested thread's
+target function.
+
+### Retry safety
+
+`retry_task` now rejects retrying a task that hasn't reached a terminal
+status (`TaskAlreadyActiveError` → HTTP 409) — retrying a still-running
+task would create two competing attempts at the same instruction with
+no clear "which one is real." A new `retried_from` column links a retry
+back to its origin for debugging history. Fresh cancel-state per retry
+was already correct in Phase 1/2 (new task_id → new `threading.Event`)
+and is now explicitly tested rather than just assumed.
+
+### Server-restart recovery
+
+`TaskStore.recover_orphaned_tasks()` runs once at `TaskGateway.__init__`:
+any task left in a non-terminal status by a previous process (crash,
+kill, restart mid-task) is marked `failed` with a distinguishable
+`"Orphaned by a server restart..."` message. Tested by directly
+manipulating the SQLite DB and constructing a fresh `TaskStore` instance
+against the same file (a real process restart was not performed — see
+`PROGRESS.md`'s hardware/real-environment validation status).
+
+### Demo reset
+
+`TaskGateway.reset_demo_state()` (→ `POST /api/iqoo/demo/reset`) deletes
+every task row and all event history. Refuses with `DemoResetBusyError`
+(→ 409) while a task is active or queued, so a reset can never be issued
+out from under running work. Statically verified via AST inspection
+(not just behavior) that neither `TaskStore.reset_demo_state` nor
+`EventBus.reset_all` import or reference `memory`/`founder_mode` in
+their actual code — SAM's real long-term memory cannot be touched by
+this call no matter what invokes it.
+
+### Health diagnostics
+
+`health()` now also reports `worker_alive`, `vision_model_available`
+(via a cheap Ollama `/api/tags` check, `None` if Ollama itself is
+unreachable — distinct from "reachable but model missing" = `False`),
+`whisper_available` (whether `faster-whisper` is importable, no model
+loaded), and `uptime_seconds`. `status` becomes `"degraded"` if the
+worker has died or the brain is unreachable. No task instructions,
+attachment content, or other user data is included.

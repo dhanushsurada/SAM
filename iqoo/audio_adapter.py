@@ -119,3 +119,17 @@ class AudioAdapter:
         if not transcript.strip():
             raise PerceptionError("Fallback transcription produced no text")
         return transcript
+
+    @staticmethod
+    def whisper_installed() -> bool:
+        """Phase 3A health diagnostic: cheap check for whether
+        faster-whisper is importable, without loading any model weights.
+        A False result means transcription will fall back to the
+        WAV/AIFF/FLAC-only speech_recognition path — useful for the
+        phone/organizer to know before a demo, not just after a failed
+        voice task."""
+        try:
+            import faster_whisper  # noqa: F401
+            return True
+        except ImportError:
+            return False

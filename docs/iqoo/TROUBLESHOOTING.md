@@ -49,9 +49,40 @@ format support; this is a documented, honest limitation, not a bug (see
 
 ## Task stuck in `executing` forever
 
-There is no task-level timeout in Phase 1 (see `TEST_PLAN.md` known
-gaps). If the underlying Brain/Ollama call hangs, the task will not
-self-recover — restart `iqoo/server.py`. Phase 3 adds timeout handling.
+**Phase 3A note:** there is now a hard task timeout (default 600s) —
+a stuck task self-reports `failed` with a `"timed out after ...s"`
+message and an SSE `failed` event, so it should never actually stay
+stuck indefinitely from the phone's perspective. It CAN still occupy
+the worker thread longer than the timeout, though — see
+`ARCHITECTURE.md`'s honest trade-off explanation. If a restart happens
+while a task is non-terminal, `recover_orphaned_tasks()` marks it
+`failed` on the next startup rather than leaving it stuck forever.
+
+## Retrying a task returns 409
+
+**Phase 3A:** retry is only allowed once the original task has reached
+a terminal status. If you get a 409, the task is still running —
+cancel it first, or wait for it to finish, then retry.
+
+## `POST /api/iqoo/demo/reset` returns 409
+
+A task is currently active or still queued. Cancel it or wait for it to
+finish, then reset again. This guard exists specifically so a reset can
+never corrupt a task that's actually running.
+
+## SSE reconnects but shows old events again / never closes
+
+**Phase 3A fixed both of these as real, found bugs** (not hypothetical
+edge cases — both caused actual test hangs/failures during
+development, documented in `TEST_PLAN.md`):
+- A reconnect that's already caught up to an already-terminal task now
+  closes immediately instead of heartbeating forever.
+- Reconnecting with a `Last-Event-ID` you've already seen returns zero
+  duplicate events — the browser's native `EventSource` sends this
+  header automatically, no client code needed.
+
+If you still see this, check that any custom SSE client (not
+`EventSource`) is actually sending `Last-Event-ID` on reconnect.
 
 ## SSE stream never emits anything
 

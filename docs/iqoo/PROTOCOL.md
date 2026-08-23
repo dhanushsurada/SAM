@@ -9,7 +9,8 @@
 | GET | `/api/iqoo/tasks/{task_id}/events` | SSE execution progress stream |
 | POST | `/api/iqoo/tasks/{task_id}/cancel` | Cancel a queued/running task |
 | POST | `/api/iqoo/tasks/{task_id}/retry` | Resubmit as a fresh task |
-| GET | `/api/iqoo/health` | Liveness, queue depth, brain reachability |
+| GET | `/api/iqoo/health` | Liveness, queue depth, brain/model reachability |
+| POST | `/api/iqoo/demo/reset` | **[Phase 3A]** Clear all task/event state (refuses if busy) |
 
 ## Task creation
 
@@ -106,20 +107,42 @@ is cancelled before the Brain is ever called.
 ## Retry
 
 `POST /api/iqoo/tasks/{task_id}/retry` re-submits the original
-instruction as a **new** `task_id`. It does not resume mid-plan — that
-needs step-level checkpointing, which is Phase 3 (task recovery) scope.
+instruction/attachments as a **new** `task_id`, linked back via a
+`retried_from` field for debugging history. It does not resume
+mid-plan — that needs step-level checkpointing, out of scope.
+
+**[Phase 3A]** Only allowed once the original task has reached a
+terminal status (`completed`/`failed`/`cancelled`) — retrying a
+still-running task returns `409 Conflict` rather than creating two
+competing attempts at the same instruction.
 
 ## Health
 
 ```json
 {
   "status": "ok",
+  "worker_alive": true,
   "brain_reachable": true,
+  "vision_model_available": true,
+  "whisper_available": true,
   "active_task": "uuid-or-null",
   "queue_depth": 0,
-  "version": "iqoo-phase1"
+  "uptime_seconds": 123.4,
+  "version": "iqoo-phase3a"
 }
 ```
 
 `brain_reachable` calls the existing `Brain._check_ollama()` — not
-duplicated, just surfaced.
+duplicated, just surfaced. `vision_model_available` is `null` (not
+`false`) when Ollama itself couldn't be reached at all — distinct from
+"reachable but the model isn't pulled" (`false`). `whisper_available`
+only confirms `faster-whisper` is importable, not that transcription
+actually works. `status` becomes `"degraded"` if the worker thread has
+died or the brain is unreachable.
+
+## Demo reset
+
+**[Phase 3A]** `POST /api/iqoo/demo/reset` deletes every task row and
+all event history. Returns `409 Conflict` if a task is currently active
+or queued (never resets out from under running work). Never touches
+`memory/store.py` or `founder_mode`'s store — see `ARCHITECTURE.md`.
