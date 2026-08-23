@@ -126,15 +126,52 @@ def test_event_bus():
     bus = EventBus()
     bus.publish("t1", "planning", "Plan created")
     bus.publish("t1", "executing", "Step 1")
-    q = bus.subscribe_queue("t1")
-    e1 = q.get(timeout=1)
-    e2 = q.get(timeout=1)
-    check("First event has correct phase", e1["phase"] == "planning")
-    check("Second event has correct phase", e2["phase"] == "executing")
-    check("Event has task_id", e1["task_id"] == "t1")
+    events = bus.get_since("t1")
+    check("First event has correct phase", events[0]["phase"] == "planning")
+    check("Second event has correct phase", events[1]["phase"] == "executing")
+    check("Event has task_id", events[0]["task_id"] == "t1")
+    check("Events have strictly increasing sequence numbers",
+          events[0]["seq"] == 1 and events[1]["seq"] == 2)
+    check("get_since(after_seq=1) returns only the newer event",
+          bus.get_since("t1", after_seq=1) == [events[1]])
     bus.cleanup("t1")
-    check("Cleanup removes queue (new subscribe gives fresh queue)",
-          bus.subscribe_queue("t1").empty())
+    check("Cleanup removes all history for the task",
+          bus.get_since("t1") == [])
+
+
+def test_event_bus_reconnect_and_terminal_guard():
+    """Phase 3A: the actual fix for the Phase 1/2 reconnect bug — a
+    subscriber that shows up AFTER events were already published (the
+    reconnect scenario) must see the full backlog via get_since(0),
+    including any terminal event, and no post-terminal event can ever be
+    appended (the clobbering guard)."""
+    from iqoo.events import EventBus
+
+    bus = EventBus()
+    bus.publish("t2", "received", "Task received by SAM")
+    bus.publish("t2", "understanding", "Reading your request")
+    bus.publish("t2", "completed", "All done")
+
+    # Simulates a phone reconnecting cold (no Last-Event-ID) after
+    # missing every earlier event.
+    replay = bus.get_since("t2", after_seq=0)
+    check("Cold reconnect replays the full history including the terminal event",
+          len(replay) == 3 and replay[-1]["phase"] == "completed")
+    check("has_terminal_event reports true after a terminal event", bus.has_terminal_event("t2"))
+
+    # A late/orphaned write attempting to publish after terminal must be
+    # dropped, not appended — otherwise a reconnecting client could see
+    # a status change happening AFTER "completed", which is nonsensical.
+    dropped = bus.publish("t2", "executing", "a stray late event")
+    check("Publish after terminal is dropped (returns None)", dropped is None)
+    check("History length unchanged after a dropped post-terminal publish",
+          len(bus.get_since("t2", after_seq=0)) == 3)
+
+    # A reconnect with a Last-Event-ID matching what was already seen
+    # should get nothing new (no duplicate rendering).
+    resumed = bus.get_since("t2", after_seq=3)
+    check("Reconnect with an up-to-date Last-Event-ID gets zero duplicate events",
+          resumed == [])
 
 
 def test_gateway_no_action_task():
@@ -199,11 +236,12 @@ def test_gateway_cancel_before_start_emits_exactly_one_terminal_event():
         blocker_id = gateway.submit_task("slow task")
         target_id = gateway.submit_task("cancel me before start")
 
-        # Subscribe to the target task's event queue BEFORE cancelling,
-        # so every event it emits (including "received" from submit_task
-        # and the eventual "cancelled") is captured for counting.
-        q = gateway.event_bus.subscribe_queue(target_id)
-
+        # Read every event published for this task_id via the new
+        # backlog API (Phase 3A) instead of the removed
+        # subscribe_queue()/queue.Queue-based approach — get_since(0)
+        # returns the full ordered history regardless of when it's
+        # called relative to publish(), which is the whole point of the
+        # Phase 3A redesign (see iqoo/events.py's module docstring).
         ok = gateway.cancel_task(target_id)
         check("Cancel accepted while task still queued", ok is True)
 
@@ -212,13 +250,7 @@ def test_gateway_cancel_before_start_emits_exactly_one_terminal_event():
         final = wait_for_status(gateway, target_id, {"completed", "failed", "cancelled"})
         check("Pre-start cancellation resolves to cancelled", final == "cancelled")
 
-        # Drain every event published for this task_id.
-        events = []
-        while True:
-            try:
-                events.append(q.get_nowait())
-            except Exception:
-                break
+        events = gateway.event_bus.get_since(target_id, after_seq=0)
 
         cancelled_events = [e for e in events if e["phase"] == "cancelled"]
         check("Exactly one 'cancelled' event was published for a pre-start cancellation",
@@ -426,6 +458,7 @@ def test_api_endpoints():
 def main():
     test_task_store()
     test_event_bus()
+    test_event_bus_reconnect_and_terminal_guard()
     test_gateway_no_action_task()
     test_gateway_action_task()
     test_gateway_cancel_before_start()

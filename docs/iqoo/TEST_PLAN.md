@@ -69,7 +69,44 @@ asserts the more general, still-true invariant: a perception failure
 (mocked) still fails the task cleanly without reaching the Brain. Every
 other Phase 1 test is byte-for-byte unchanged.
 
-## Full regression (re-verified for Phase 2)
+## Phase 3A automated coverage
+
+**[IMPLEMENTED, TESTED OFFLINE]** `tests/test_iqoo_phase3a_offline.py` —
+44 checks, fully offline (no real Ollama, faster-whisper, phone, or
+Office Kit). Server-restart recovery is simulated via a fresh
+`TaskStore` instance against the same on-disk DB, not an actual process
+kill/restart — see `PROGRESS.md` for what remains **[UNVERIFIED]**
+pending real hardware. Run with:
+
+```bash
+HOME=/tmp/sam_iqoo_phase3a_test python3 tests/test_iqoo_phase3a_offline.py
+```
+
+| Requirement | Covered by |
+|---|---|
+| SSE reconnect (cold, partial, already-caught-up) | `test_sse_event_stream_reconnect_no_duplicates` |
+| Duplicate event prevention | `test_event_bus_reconnect_and_terminal_guard` (Phase 1 suite), `test_sse_event_stream_reconnect_no_duplicates` |
+| Terminal state recovery after reconnect | `test_event_bus_reconnect_and_terminal_guard`, `test_sse_event_stream_reconnect_no_duplicates` |
+| Timeout | `test_task_timeout_reports_promptly_and_does_not_get_clobbered` |
+| Worker recovery (task A fails, task B still runs) | `test_worker_recovery_task_a_fails_task_b_still_executes` |
+| Queue continuation after a failure/timeout | `test_queue_continues_after_timeout` |
+| Retry safety (non-terminal rejection, history, fresh cancel state) | `test_retry_rejects_non_terminal_task`, `test_retry_records_history_and_fresh_cancel_state` |
+| Server-restart / orphan recovery | `test_orphaned_task_recovery_on_restart`, `test_gateway_recovers_orphans_at_startup` |
+| Demo reset (success + busy guard + memory isolation) | `test_demo_reset_clears_state_and_respects_busy_guard`, `test_demo_reset_never_touches_memory_or_founder_mode` |
+| Health diagnostics | `test_health_reports_expanded_diagnostics`, `test_health_reports_worker_dead_after_shutdown` |
+
+Two real bugs were found and fixed while writing this suite (both
+documented in `ARCHITECTURE.md`'s Phase 3A section, not just fixed
+silently):
+1. `event_stream`'s reconnect-already-caught-up case looped on
+   heartbeats forever instead of closing — found because the offline
+   test genuinely hung.
+2. The timeout-watchdog refactor dropped exception handling for errors
+   raised outside `_process_task`'s own inner try/except, which would
+   have left a task stuck non-terminal forever — found by the
+   worker-recovery test.
+
+## Full regression (re-verified for Phase 3A)
 
 All 12 pre-existing `tests/*_offline.py` suites were re-run against this
 branch and pass unchanged — this branch introduced zero regressions to

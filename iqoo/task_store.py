@@ -1,5 +1,5 @@
 """
-iQOO — Task Store (Phase 1)
+iQOO — Task Store (Phase 1, extended in Phase 3A)
 
 Bookkeeping for competition tasks submitted from the phone: status,
 instruction, timestamps, result, and per-task cancellation signals.
@@ -9,9 +9,16 @@ SQLite AI memory) or founder_mode's store. Those hold what SAM has
 learned; this holds what SAM is currently doing. Mirrors the "Local Data
 Separation" principle already used by ecosystem/device_registry.py: task
 bookkeeping and AI memory are kept apart even though both live locally.
+This class never imports or touches memory/ or founder_mode/ in any way
+— reset_demo_state() below can only ever delete rows in this file's own
+tasks table.
 
 Stored at ~/.sam_data/iqoo/tasks.db — same base directory convention as
 every other SAM subsystem.
+
+Phase 3A additions: a `retried_from` column (retry history/debugging),
+recover_orphaned_tasks() (server-restart reliability), and
+reset_demo_state() (controlled demo reset).
 """
 
 import json
@@ -28,6 +35,8 @@ logger = logging.getLogger("SAM.iQOO.TaskStore")
 SAM_DATA_DIR = Path.home() / ".sam_data"
 IQOO_DIR = SAM_DATA_DIR / "iqoo"
 TASKS_DB_PATH = IQOO_DIR / "tasks.db"
+
+ORPHAN_ERROR_MESSAGE = "Orphaned by a server restart — no worker was left to finish this task."
 
 # Full state machine per the PDR (section 8.5), extended in Phase 2 with
 # "perceiving" for image/audio interpretation. "queued" is this store's
@@ -63,38 +72,49 @@ class TaskStore:
                     updated_at TEXT NOT NULL
                 )
             """)
+            # Phase 3A: additive column for pre-existing Phase 1/2
+            # databases that predate it. SQLite has no "ADD COLUMN IF
+            # NOT EXISTS", so the standard lightweight-migration pattern
+            # is to attempt it and swallow the "duplicate column" error.
+            try:
+                conn.execute("ALTER TABLE tasks ADD COLUMN retried_from TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
             conn.commit()
         logger.info(f"iQOO task store DB at {TASKS_DB_PATH}")
 
     # ─── Create / Read ──────────────────────────────────────────────────
 
     def create_task(self, instruction: str, input_type: str = "text",
-                     attachments: Optional[List[Dict]] = None) -> str:
+                     attachments: Optional[List[Dict]] = None,
+                     retried_from: Optional[str] = None) -> str:
         task_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         with sqlite3.connect(TASKS_DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO tasks (task_id, instruction, input_type, attachments, "
-                "status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                "status, created_at, updated_at, retried_from) VALUES (?,?,?,?,?,?,?,?)",
                 (task_id, instruction, input_type, json.dumps(attachments or []),
-                 "queued", now, now)
+                 "queued", now, now, retried_from)
             )
             conn.commit()
-        logger.info(f"Task created: {task_id} ({input_type})")
+        logger.info(f"Task created: {task_id} ({input_type})" +
+                    (f" [retry of {retried_from}]" if retried_from else ""))
         return task_id
 
     def get_task(self, task_id: str) -> Optional[Dict]:
         with sqlite3.connect(TASKS_DB_PATH) as conn:
             row = conn.execute(
                 "SELECT task_id, instruction, input_type, attachments, status, "
-                "result_text, error, cancel_requested, created_at, updated_at "
+                "result_text, error, cancel_requested, created_at, updated_at, retried_from "
                 "FROM tasks WHERE task_id = ?",
                 (task_id,)
             ).fetchone()
         if not row:
             return None
         cols = ["task_id", "instruction", "input_type", "attachments", "status",
-                "result_text", "error", "cancel_requested", "created_at", "updated_at"]
+                "result_text", "error", "cancel_requested", "created_at", "updated_at",
+                "retried_from"]
         record = dict(zip(cols, row))
         record["attachments"] = json.loads(record["attachments"])
         record["cancel_requested"] = bool(record["cancel_requested"])
@@ -116,6 +136,23 @@ class TaskStore:
                        error: Optional[str] = None):
         if status not in ALL_STATUSES:
             logger.warning(f"Unknown status '{status}' for task {task_id} — recording anyway")
+
+        # Phase 3A: once a task reaches a terminal status, it stays
+        # there — no further write can move it, including a legitimate
+        # in-flight status update from a thread that was already
+        # abandoned by a timeout (see TaskGateway._run_task_with_timeout).
+        # Without this guard, an orphaned thread finishing late could
+        # silently flip a task the phone was already told "failed
+        # (timeout)" about back to "completed" or "cancelled" minutes
+        # later, which is a worse and more confusing outcome than simply
+        # ignoring the late write.
+        current = self.get_task(task_id)
+        if current and current["status"] in TERMINAL_STATUSES:
+            logger.debug(
+                f"Ignoring status update to '{status}' for task {task_id} — "
+                f"already terminal ({current['status']})")
+            return
+
         now = datetime.now().isoformat()
         with sqlite3.connect(TASKS_DB_PATH) as conn:
             if result_text is not None and error is not None:
@@ -165,6 +202,53 @@ class TaskStore:
     def cleanup_cancel_event(self, task_id: str):
         with self._cancel_lock:
             self._cancel_events.pop(task_id, None)
+
+    # ─── Phase 3A: reliability ──────────────────────────────────────────
+
+    def recover_orphaned_tasks(self) -> List[str]:
+        """Called once at TaskGateway startup. Any task left in a
+        non-terminal status from a previous process (crash, kill, or a
+        clean restart while a task was mid-flight) has no live worker
+        thread left that will ever update it again — without this, such
+        a task would show as permanently 'executing'/'perceiving'/etc.
+        forever, which is worse and more confusing than an honest
+        failure. Marks every non-terminal task 'failed' with a
+        distinguishable error message so it's never mistaken for a real
+        execution failure. Returns the list of recovered task_ids (empty
+        on a clean start with nothing left over)."""
+        placeholders = ",".join("?" * len(TERMINAL_STATUSES))
+        now = datetime.now().isoformat()
+        with sqlite3.connect(TASKS_DB_PATH) as conn:
+            rows = conn.execute(
+                f"SELECT task_id FROM tasks WHERE status NOT IN ({placeholders})",
+                tuple(TERMINAL_STATUSES)
+            ).fetchall()
+            recovered = [r[0] for r in rows]
+            if recovered:
+                conn.execute(
+                    f"UPDATE tasks SET status='failed', error=?, updated_at=? "
+                    f"WHERE status NOT IN ({placeholders})",
+                    (ORPHAN_ERROR_MESSAGE, now, *TERMINAL_STATUSES)
+                )
+                conn.commit()
+        if recovered:
+            logger.warning(f"Recovered {len(recovered)} orphaned task(s) from a previous process: {recovered}")
+        return recovered
+
+    def reset_demo_state(self) -> int:
+        """Deletes every task row and clears in-memory cancel events.
+        Only ever touches this file's own tasks table — never imports or
+        references memory/store.py or founder_mode's store, so SAM's
+        real long-term memory cannot be affected by this call no matter
+        what calls it or how. Returns the number of rows deleted."""
+        with sqlite3.connect(TASKS_DB_PATH) as conn:
+            cursor = conn.execute("DELETE FROM tasks")
+            conn.commit()
+            deleted = cursor.rowcount
+        with self._cancel_lock:
+            self._cancel_events.clear()
+        logger.warning(f"Demo reset: deleted {deleted} task row(s)")
+        return deleted
 
     @staticmethod
     def db_path() -> Path:

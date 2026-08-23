@@ -21,6 +21,7 @@ would silently produce a description of the wrong image.
 
 import logging
 import requests
+from typing import Optional
 
 from iqoo.errors import PerceptionError
 
@@ -77,3 +78,23 @@ class VisionAdapter:
 
         logger.info(f"Vision interpretation: {result[:120]}")
         return result
+
+    def model_available(self) -> Optional[bool]:
+        """Phase 3A health diagnostic: checks whether the configured
+        vision model is actually pulled in Ollama, without running any
+        inference. Returns True/False if Ollama answered, or None if
+        Ollama itself couldn't be reached (distinct from 'reachable but
+        model missing') — health.py surfaces that distinction rather
+        than collapsing it to a single boolean."""
+        model = "moondream" if self.settings.vision_model == "moondream" else "llava"
+        try:
+            response = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=5)
+        except requests.RequestException:
+            return None
+        if response.status_code != 200:
+            return None
+        try:
+            names = [m.get("name", "") for m in response.json().get("models", [])]
+        except ValueError:
+            return None
+        return any(model in n for n in names)

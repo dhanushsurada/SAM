@@ -1,5 +1,5 @@
 """
-iQOO — Phone Task Gateway Server (Phase 1)
+iQOO — Phone Task Gateway Server (Phase 1 + Phase 2 + Phase 3A)
 
 Standalone process, same philosophy as ecosystem/telegram_bridge.py: it
 does NOT run inside main.py's voice/text loop, and main.py is completely
@@ -11,24 +11,25 @@ loop:
 Serves:
 - POST   /api/iqoo/tasks                submit a task
 - GET    /api/iqoo/tasks/{id}           poll task status
-- GET    /api/iqoo/tasks/{id}/events    SSE execution progress stream
+- GET    /api/iqoo/tasks/{id}/events    SSE execution progress stream (reconnect-safe, Phase 3A)
 - POST   /api/iqoo/tasks/{id}/cancel    cancel a running/queued task
 - POST   /api/iqoo/tasks/{id}/retry     resubmit as a fresh task
-- GET    /api/iqoo/health               liveness + queue/brain status
+- GET    /api/iqoo/health               liveness + queue/brain/model diagnostics (Phase 3A)
+- POST   /api/iqoo/demo/reset           clear all task state (Phase 3A, demo-scoped)
 - /                                     the phone client (client/)
 """
 
 import asyncio
 import json
 import logging
-import queue as queue_mod
 from pathlib import Path
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from iqoo.gateway import TaskGateway
+from iqoo.gateway import TaskGateway, TaskAlreadyActiveError, DemoResetBusyError
 from iqoo.task_store import TERMINAL_STATUSES
 from iqoo.schemas import TaskCreateRequest, TaskRecord, HealthStatus
 
@@ -37,7 +38,7 @@ logger = logging.getLogger("SAM.iQOO.Server")
 BASE_DIR = Path(__file__).parent.parent
 CLIENT_DIR = BASE_DIR / "client"
 
-app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase2")
+app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase3a")
 
 _gateway: TaskGateway = None  # constructed lazily on first request / at startup
 
@@ -88,10 +89,72 @@ def cancel_task(task_id: str):
 @app.post("/api/iqoo/tasks/{task_id}/retry", response_model=TaskRecord)
 def retry_task(task_id: str):
     gateway = get_gateway()
-    new_id = gateway.retry_task(task_id)
+    try:
+        new_id = gateway.retry_task(task_id)
+    except TaskAlreadyActiveError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if new_id is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return gateway.get_task(new_id)
+
+
+def _format_sse(event: dict) -> str:
+    """Standard SSE framing, including `id:` — this is what makes the
+    browser's native EventSource send a Last-Event-ID header
+    automatically on reconnect, with zero client-side reconnect logic
+    needed. See iqoo/events.py's module docstring for why this replaced
+    Phase 1/2's single-consumer queue."""
+    return f"id: {event['seq']}\ndata: {json.dumps(event)}\n\n"
+
+
+async def event_stream(gateway: TaskGateway, task_id: str, after_seq: int,
+                        request: "Request | None" = None) -> AsyncGenerator[str, None]:
+    """The actual SSE generator, factored out of the endpoint so it can
+    be exercised directly in tests without needing a live HTTP
+    connection (request=None is valid for tests — the disconnect check
+    is simply skipped, since there's no real client to disconnect).
+
+    Phase 3A reconnect behavior: replays every event after `after_seq`
+    first (0 replays the full history — what a phone reconnecting cold,
+    e.g. after a browser refresh with no Last-Event-ID, needs to
+    instantly recover current state including a possibly-already-reached
+    terminal status), then continues with live events exactly as
+    before. Never calls event_bus.cleanup() on disconnect anymore — that
+    was the Phase 1/2 bug that made reconnect lose history.
+    """
+    seq = after_seq
+    backlog = gateway.event_bus.get_since(task_id, seq)
+    for event in backlog:
+        seq = event["seq"]
+        yield _format_sse(event)
+        if event["phase"] in TERMINAL_STATUSES:
+            return
+
+    while True:
+        if request is not None and await request.is_disconnected():
+            logger.info(f"Client disconnected from event stream for {task_id}")
+            return
+        new_events = await asyncio.to_thread(gateway.event_bus.wait_for_new, task_id, seq, 1.0)
+        if not new_events:
+            # A reconnect that's already caught up to an already-terminal
+            # task (e.g. Last-Event-ID == the latest seq, and that event
+            # was the terminal one) has an empty backlog AND will never
+            # see a new event — EventBus.publish refuses to append
+            # anything after a terminal event, and the task genuinely
+            # isn't running anymore. Without this check the generator
+            # would heartbeat forever and never close. Caught by
+            # tests/test_iqoo_phase3a_offline.py hanging indefinitely
+            # before this fix — a real bug, not a hypothetical one.
+            record = gateway.get_task(task_id)
+            if record and record["status"] in TERMINAL_STATUSES:
+                return
+            yield ": heartbeat\n\n"
+            continue
+        for event in new_events:
+            seq = event["seq"]
+            yield _format_sse(event)
+            if event["phase"] in TERMINAL_STATUSES:
+                return
 
 
 @app.get("/api/iqoo/tasks/{task_id}/events")
@@ -100,30 +163,11 @@ async def stream_events(task_id: str, request: Request):
     if gateway.get_task(task_id) is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    q = gateway.event_bus.subscribe_queue(task_id)
-
-    async def event_stream():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    logger.info(f"Client disconnected from event stream for {task_id}")
-                    break
-                try:
-                    event = await asyncio.to_thread(q.get, True, 1.0)
-                except queue_mod.Empty:
-                    record = gateway.get_task(task_id)
-                    if record and record["status"] in TERMINAL_STATUSES:
-                        break
-                    yield ": heartbeat\n\n"
-                    continue
-                yield f"data: {json.dumps(event)}\n\n"
-                if event.get("phase") in TERMINAL_STATUSES:
-                    break
-        finally:
-            gateway.event_bus.cleanup(task_id)
+    last_event_id = request.headers.get("last-event-id")
+    after_seq = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
 
     return StreamingResponse(
-        event_stream(),
+        event_stream(gateway, task_id, after_seq, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -132,6 +176,16 @@ async def stream_events(task_id: str, request: Request):
 @app.get("/api/iqoo/health", response_model=HealthStatus)
 def health():
     return get_gateway().health()
+
+
+@app.post("/api/iqoo/demo/reset")
+def demo_reset():
+    gateway = get_gateway()
+    try:
+        deleted = gateway.reset_demo_state()
+    except DemoResetBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"reset": True, "tasks_cleared": deleted}
 
 
 # ─── Phone client (mounted last so it never shadows /api routes) ────────

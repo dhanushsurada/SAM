@@ -1,5 +1,5 @@
 """
-iQOO — Task Gateway (Phase 1 + Phase 2)
+iQOO — Task Gateway (Phase 1 + Phase 2 + Phase 3A reliability)
 
 Thin adapter between the phone-facing HTTP API and SAM's existing
 orchestration. Does NOT reimplement Brain, Planner, ReAct, Memory, or
@@ -15,6 +15,17 @@ VisionAdapter/AudioAdapter, then hands that text to the exact same
 Brain/Planner/ReAct path a typed task already used in Phase 1. The
 Brain never sees an image or audio byte — only text, exactly as before.
 
+Phase 3A adds reliability around all of that without touching any of
+it: a hard per-task timeout watchdog, startup recovery for tasks
+orphaned by a server restart, retry validation, an explicit demo reset,
+and richer health diagnostics. See docs/iqoo/ARCHITECTURE.md's Phase 3A
+section for the timeout design's honest trade-off (it cannot forcibly
+kill a stuck synchronous Hands call — nothing in Python can, short of
+killing the process — so it reports failure to the phone immediately
+but the worker still waits for the orphaned thread to actually finish
+before touching Hands again, to preserve the single-flight invariant
+below).
+
 Concurrency: SAM's Hands (browser, vision, terminal) are not built for
 concurrent execution — this is a standing invariant already enforced by
 main.py's _process_lock and telegram_bridge's asyncio.Lock. This gateway
@@ -29,6 +40,7 @@ everything else — no separate perception concurrency model was added.
 import logging
 import queue
 import threading
+import time
 from dataclasses import replace
 from typing import Optional
 
@@ -40,13 +52,39 @@ from iqoo.audio_adapter import AudioAdapter
 
 logger = logging.getLogger("SAM.iQOO.Gateway")
 
+# Phase 3A: hard ceiling on a single task's total processing time
+# (perception + understanding + planning + execution + verification
+# combined), measured from the worker's perspective. 10 minutes is
+# generous for the whiteboard-to-backend demo (which involves an LLM
+# call, a vision call, and real code generation/test execution) while
+# still catching a genuinely stuck Hands call before it can silently
+# stall the entire competition demo for the rest of the event slot.
+DEFAULT_TASK_TIMEOUT_SECONDS = 600
+
+
+class TaskAlreadyActiveError(Exception):
+    """Raised by retry_task() when asked to retry a task that hasn't
+    reached a terminal status yet — retrying a still-running task would
+    create two competing attempts at the same instruction and make
+    "which one is real" ambiguous, which is exactly the kind of
+    confusing state Phase 3A's retry-safety requirement exists to
+    prevent."""
+
+
+class DemoResetBusyError(Exception):
+    """Raised by reset_demo_state() when the worker is mid-task or the
+    queue isn't empty — resetting out from under a running task would
+    corrupt whatever it's doing without actually stopping it (nothing
+    forcibly kills Hands calls — see the module docstring)."""
+
 
 class TaskGateway:
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, task_timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS):
         if settings is None:
             from config.settings import Settings
             settings = Settings()
         self.settings = settings
+        self.task_timeout_seconds = task_timeout_seconds
 
         # Same construction pattern as main.py / telegram_bridge.py.
         from memory.identity import Identity
@@ -66,18 +104,26 @@ class TaskGateway:
         self.vision_adapter = VisionAdapter(settings)
         self.audio_adapter = AudioAdapter(settings)
 
+        # Phase 3A: a task left non-terminal by a previous process (crash
+        # or restart mid-task) has no worker left to ever finish it —
+        # recover those immediately so the API never shows a task stuck
+        # forever in a phantom "executing" state after a restart.
+        self.task_store.recover_orphaned_tasks()
+
         self._queue: "queue.Queue[str]" = queue.Queue()
         self._active_task_id: Optional[str] = None
         self._active_lock = threading.Lock()
         self._stop = threading.Event()
+        self._started_at = time.time()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True,
                                          name="iqoo-task-worker")
         self._worker.start()
 
     # ─── Public API (called by iqoo/server.py) ─────────────────────────
 
-    def submit_task(self, instruction: str, input_type: str = "text", attachments=None) -> str:
-        task_id = self.task_store.create_task(instruction, input_type, attachments)
+    def submit_task(self, instruction: str, input_type: str = "text", attachments=None,
+                     retried_from: Optional[str] = None) -> str:
+        task_id = self.task_store.create_task(instruction, input_type, attachments, retried_from)
         self.event_bus.publish(task_id, "received", "Task received by SAM")
         self._queue.put(task_id)
         return task_id
@@ -89,26 +135,68 @@ class TaskGateway:
         return self.task_store.request_cancel(task_id)
 
     def retry_task(self, task_id: str) -> Optional[str]:
-        """Phase 1 retry: re-submits the same instruction as a fresh task.
-        Simplest correct behaviour that satisfies the contract without
-        adding a second execution path — a real "resume exactly where it
-        left off" retry needs step-level checkpointing, which is Phase 3
-        scope (task recovery), not Phase 1."""
+        """Re-submits the original instruction/attachments as a NEW
+        task_id, linked back via retried_from for debugging history.
+        Does not resume mid-plan — that needs step-level checkpointing,
+        which remains out of scope (Phase 3A hardens what exists rather
+        than adding new execution semantics).
+
+        Phase 3A: only allowed once the original task has reached a
+        terminal status. Retrying a still-active task would create two
+        competing attempts at the same instruction racing through the
+        same single worker/Hands, which is exactly the "task pretending
+        to be active twice" scenario the reliability checkpoint calls
+        out — raises TaskAlreadyActiveError instead of silently allowing
+        it, same as before this was a real (if narrow) latent bug."""
         record = self.task_store.get_task(task_id)
         if not record:
             return None
-        return self.submit_task(record["instruction"], record["input_type"], record["attachments"])
+        if record["status"] not in TERMINAL_STATUSES:
+            raise TaskAlreadyActiveError(
+                f"Task {task_id} is still '{record['status']}' — cancel it first or wait for it to finish")
+        return self.submit_task(record["instruction"], record["input_type"], record["attachments"],
+                                 retried_from=task_id)
 
     def health(self) -> dict:
         with self._active_lock:
             active = self._active_task_id
+        worker_alive = self._worker.is_alive()
+        brain_reachable = self.brain._check_ollama()
+        vision_available = self.vision_adapter.model_available() if brain_reachable else None
+        whisper_available = self.audio_adapter.whisper_installed()
+
+        status = "ok" if (worker_alive and brain_reachable) else "degraded"
+
         return {
-            "status": "ok",
-            "brain_reachable": self.brain._check_ollama(),
+            "status": status,
+            "worker_alive": worker_alive,
+            "brain_reachable": brain_reachable,
+            "vision_model_available": vision_available,
+            "whisper_available": whisper_available,
             "active_task": active,
             "queue_depth": self._queue.qsize(),
-            "version": "iqoo-phase2",
+            "uptime_seconds": round(time.time() - self._started_at, 1),
+            "version": "iqoo-phase3a",
         }
+
+    def reset_demo_state(self) -> int:
+        """Phase 3A: clears every task row and all event history. Refuses
+        while the worker is busy or the queue is non-empty, so a reset
+        can never be issued out from under a task that's actually
+        running — the caller (iqoo/server.py's /api/iqoo/demo/reset
+        endpoint) surfaces DemoResetBusyError as a 409, telling the
+        organizer/presenter to cancel or wait first. Never touches
+        memory/store.py or founder_mode's store — see
+        TaskStore.reset_demo_state's docstring."""
+        with self._active_lock:
+            active = self._active_task_id
+        if active is not None or self._queue.qsize() > 0:
+            raise DemoResetBusyError(
+                "Cannot reset while a task is active or queued — cancel or wait for it to finish first")
+        deleted = self.task_store.reset_demo_state()
+        self.event_bus.reset_all()
+        logger.warning(f"Demo reset complete: {deleted} task(s) cleared")
+        return deleted
 
     def shutdown(self):
         self._stop.set()
@@ -124,7 +212,7 @@ class TaskGateway:
             with self._active_lock:
                 self._active_task_id = task_id
             try:
-                self._process_task(task_id)
+                self._run_task_with_timeout(task_id)
             except Exception as e:
                 logger.error(f"Unhandled error processing task {task_id}: {e}", exc_info=True)
                 self.task_store.update_status(task_id, "failed", error=str(e))
@@ -133,6 +221,79 @@ class TaskGateway:
                 with self._active_lock:
                     self._active_task_id = None
                 self.task_store.cleanup_cancel_event(task_id)
+
+    def _run_task_with_timeout(self, task_id: str):
+        """Runs _process_task on a dedicated thread with a hard
+        wall-clock ceiling (self.task_timeout_seconds). If it doesn't
+        finish in time, the phone is told immediately ('failed', with a
+        timeout reason) instead of waiting indefinitely.
+
+        Honest trade-off, documented rather than hidden: this FIFO
+        worker thread still blocks until the orphaned _process_task
+        thread actually returns before picking up the next queued task.
+        Nothing in Python can forcibly stop a thread blocked inside a
+        synchronous Hands call or a network request with no timeout of
+        its own — the only real way to kill it is to kill the process.
+        Letting a second task touch the same (non-concurrency-safe)
+        Hands while the first might still be mid-action would be worse
+        than a slow recovery, so this waits it out rather than risk that.
+        See docs/iqoo/ARCHITECTURE.md's Phase 3A section.
+        """
+        done = threading.Event()
+        error_holder = {}
+
+        def _run():
+            try:
+                self._process_task(task_id)
+            except Exception as e:
+                # Belt-and-suspenders: _process_task already catches
+                # exceptions inside its own "understanding onward"
+                # block, but anything raised earlier (the cancellation
+                # pre-checks, or _perceive() itself for a bug other than
+                # PerceptionError/PerceptionCancelled) would otherwise
+                # propagate out of this thread silently — Python threads
+                # swallow uncaught exceptions rather than crashing the
+                # process, which would leave the task stuck in whatever
+                # non-terminal status it last had, forever. This was a
+                # real bug caught while writing
+                # tests/test_iqoo_phase3a_offline.py's worker-recovery
+                # test, introduced by this exact refactor (moving
+                # _process_task onto a nested thread for the timeout
+                # watchdog) — fixed before it ever shipped.
+                error_holder["exception"] = e
+            finally:
+                done.set()
+
+        worker_thread = threading.Thread(target=_run, daemon=True,
+                                          name=f"iqoo-task-{task_id[:8]}")
+        worker_thread.start()
+        finished_in_time = done.wait(timeout=self.task_timeout_seconds)
+
+        if finished_in_time:
+            if "exception" in error_holder:
+                e = error_holder["exception"]
+                logger.error(f"Unhandled error processing task {task_id}: {e}", exc_info=True)
+                self.task_store.update_status(task_id, "failed", error=str(e))
+                self.event_bus.publish(task_id, "failed", f"Unhandled error: {e}")
+            return
+
+        logger.warning(f"Task {task_id} exceeded {self.task_timeout_seconds}s — timing out")
+        # Best-effort interrupt: react_loop/_perceive check cancel_event
+        # between discrete steps, so a task currently between steps
+        # (rather than stuck inside one unbounded call) may actually
+        # stop promptly even though we don't wait for it to confirm that
+        # before reporting failure to the phone.
+        self.task_store.get_cancel_event(task_id).set()
+        self.task_store.update_status(
+            task_id, "failed", error=f"Task timed out after {self.task_timeout_seconds}s")
+        self.event_bus.publish(task_id, "failed",
+                                f"Task timed out after {self.task_timeout_seconds}s")
+
+        while not done.is_set() and not self._stop.is_set():
+            done.wait(timeout=1.0)
+        if not done.is_set():
+            logger.warning(
+                f"Gateway shutting down while task {task_id}'s orphaned thread was still running")
 
     def _process_task(self, task_id: str):
         record = self.task_store.get_task(task_id)
