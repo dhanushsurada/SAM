@@ -1,33 +1,72 @@
 /**
- * iQOO Phone Client — Camera (Phase 1 entry point only)
+ * iQOO Phone Client — Camera (Phase 2)
  *
- * PDR 8.2 requires a camera entry point to exist in Phase 1; PDR 9.2
- * (the real camera->vision->structured-context pipeline) is explicitly
- * Phase 2 scope. This module wires the button and shows a preview, but
- * deliberately does NOT submit the image to the gateway yet — the
- * gateway's Phase 1 worker fails input_type="image*" tasks honestly
- * (see iqoo/gateway.py) rather than silently ignoring the photo, and the
- * client shouldn't pretend otherwise.
+ * Phase 1 only captured a file and refused to submit it. Phase 2 encodes
+ * it to base64, shows a real preview, and lets app.js include it in the
+ * task's attachments array. Still no image processing happens on the
+ * client — it only prepares the bytes; iqoo/media_validation.py and
+ * iqoo/vision_adapter.py do the actual validation and interpretation
+ * server-side.
  */
 
 const CAMERA = {
+  ALLOWED_MIME: new Set(["image/jpeg", "image/png", "image/webp"]),
+  MAX_BYTES: 8 * 1024 * 1024,
+
   init() {
     const input = document.getElementById("camera-input");
     const btn = document.getElementById("camera-btn");
     const status = document.getElementById("capture-status");
+    const preview = document.getElementById("image-preview");
+    const removeBtn = document.getElementById("image-remove-btn");
 
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const file = input.files && input.files[0];
       if (!file) return;
 
-      btn.classList.add("active");
-      status.textContent = `Captured: ${file.name || "photo"} — multimodal processing arrives in Phase 2`;
+      if (!this.ALLOWED_MIME.has(file.type)) {
+        status.textContent = `Unsupported image type (${file.type || "unknown"}) — use JPEG, PNG, or WebP.`;
+        input.value = "";
+        return;
+      }
+      if (file.size > this.MAX_BYTES) {
+        status.textContent = `Photo too large (${(file.size / 1024 / 1024).toFixed(1)}MB) — 8MB limit.`;
+        input.value = "";
+        return;
+      }
 
-      STATE.pendingImage = file;
+      status.textContent = "Processing photo…";
+      try {
+        const data = await this._fileToBase64(file);
+        STATE.pendingImage = {
+          mime_type: file.type,
+          data,
+          filename: file.name || "photo.jpg",
+        };
+        preview.src = `data:${file.type};base64,${data}`;
+        preview.classList.remove("hidden");
+        removeBtn.classList.remove("hidden");
+        btn.classList.add("active");
+        status.textContent = "Photo attached.";
+      } catch (e) {
+        status.textContent = "Could not read that photo — try again.";
+        STATE.pendingImage = null;
+      }
+    });
 
-      // Preview isn't rendered inline in Phase 1 (no attachment upload
-      // path yet) — just confirm capture worked so the entry point is
-      // demonstrably functional per the Phase 1 acceptance tests.
+    removeBtn.addEventListener("click", () => this.reset());
+  },
+
+  _fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        // reader.result is "data:<mime>;base64,<data>" — strip the prefix.
+        const commaIdx = reader.result.indexOf(",");
+        resolve(reader.result.slice(commaIdx + 1));
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
     });
   },
 
@@ -35,9 +74,14 @@ const CAMERA = {
     const input = document.getElementById("camera-input");
     const btn = document.getElementById("camera-btn");
     const status = document.getElementById("capture-status");
+    const preview = document.getElementById("image-preview");
+    const removeBtn = document.getElementById("image-remove-btn");
     input.value = "";
     btn.classList.remove("active");
-    status.textContent = "";
+    preview.classList.add("hidden");
+    preview.src = "";
+    removeBtn.classList.add("hidden");
+    if (!STATE.pendingAudio) status.textContent = "";
     STATE.pendingImage = null;
   },
 };

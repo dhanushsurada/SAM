@@ -24,11 +24,12 @@
 ```
 
 `input_type`: one of `text | voice | image | image+text | image+voice`.
-**Phase 1 only executes `text`.** Any other value is accepted (schema
-validates it) but the worker fails the task immediately and honestly
-with `"input_type '...' is not yet supported"` rather than silently
-dropping the attachment. See `agent/react_loop.py`'s neighbour,
-`iqoo/gateway.py::_process_task`.
+**Phase 1 executed `text` only.** Phase 2 adds real image/audio
+processing for the other four — see `PERCEPTION.md` for the vision and
+audio contracts, attachment shape, and MIME/size validation rules. Any
+attachment that fails validation (bad MIME, malformed base64, oversized,
+or missing for the declared `input_type`) is rejected with a `422` at
+task-creation time, before a task row is even created.
 
 Response (`201`):
 
@@ -53,10 +54,15 @@ Malformed requests (missing/empty `instruction`) get a standard FastAPI
 ## Task states
 
 ```
-queued → received → understanding → planning → executing → verifying → completed
-                                                                       → failed
-                                                                       → cancelled
+queued → received → understanding → perceiving → planning → executing → verifying → completed
+                        (text: skipped)                                            → failed
+                                                                                    → cancelled
 ```
+
+`perceiving` (Phase 2): only entered for `input_type != "text"`. Runs
+`iqoo/gateway.py::_perceive` (vision/audio interpretation) before the
+Brain ever sees the task. A `text` task skips straight from `received`
+to `understanding`, identical to Phase 1.
 
 `queued`: row created, not yet picked up by the worker thread.
 `received`: PDR's first event, fired the instant the row is created —
@@ -65,8 +71,8 @@ no meaningful gap between the two yet (a longer queue in Phase 3's
 higher-concurrency testing may separate them further).
 
 `testing` is defined in the PDR's full state list but not yet emitted by
-anything in Phase 1 — see `ARCHITECTURE.md`'s "what Phase 1 deliberately
-does not do."
+anything in Phase 1 or 2 — see `ARCHITECTURE.md`'s "what's deliberately
+not done yet."
 
 ## Execution events (SSE)
 

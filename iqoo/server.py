@@ -37,7 +37,7 @@ logger = logging.getLogger("SAM.iQOO.Server")
 BASE_DIR = Path(__file__).parent.parent
 CLIENT_DIR = BASE_DIR / "client"
 
-app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase1")
+app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase2")
 
 _gateway: TaskGateway = None  # constructed lazily on first request / at startup
 

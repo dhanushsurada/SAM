@@ -12,15 +12,16 @@ const STATE = {
   connected: false,        // last known /api/iqoo/health result
   taskId: null,
   instruction: "",
-  status: null,            // queued|received|understanding|planning|executing|verifying|completed|failed|cancelled
+  status: null,            // queued|received|understanding|perceiving|planning|executing|verifying|completed|failed|cancelled
   events: [],              // [{phase, message, timestamp}]
   resultText: null,
   errorText: null,
-  pendingImage: null,      // Phase 1: captured but not yet submitted (see camera.js)
+  pendingImage: null,      // {mime_type, data (base64, no prefix), filename, previewUrl}
+  pendingAudio: null,      // {mime_type, data (base64, no prefix), filename, durationSec}
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
-const PHASE_ORDER = ["received", "understanding", "planning", "executing", "verifying"];
+const PHASE_ORDER = ["received", "understanding", "perceiving", "planning", "executing", "verifying"];
 
 function resetTaskState() {
   STATE.taskId = null;

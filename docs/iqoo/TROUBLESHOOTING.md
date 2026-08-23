@@ -25,9 +25,27 @@ anything about how SAM talks to Ollama.
 
 ## A task submitted with a photo always fails
 
-Expected in Phase 1. `input_type != "text"` fails on purpose with a
-message naming Phase 2 — see `PROTOCOL.md`. This is not a bug to fix;
-it's the honest boundary of what's built so far.
+**Phase 1 behavior (no longer applies as of Phase 2).** Phase 2 actually
+processes `image`/`voice`/`image+text`/`image+voice` tasks. If one still
+fails, check the task's `error` field first — perception failures are
+reported with a specific reason (e.g. "Vision model unreachable",
+"Unsupported image MIME type", "Transcription produced no text"), not a
+generic message. See `PERCEPTION.md` for the full contract.
+
+## `422` on task creation with an attachment
+
+Check the specific validation error in the response body — it names
+exactly which rule failed: unsupported MIME type, malformed base64,
+oversized payload, or a missing attachment for the declared
+`input_type`. See `PERCEPTION.md`'s validation section.
+
+## Voice/image task fails with a fallback-related message
+
+If the error mentions "No faster-whisper installed" — the fallback
+`speech_recognition` path only accepts WAV/AIFF/FLAC, and phone browsers
+almost always record webm/ogg/mp4. Install faster-whisper for real
+format support; this is a documented, honest limitation, not a bug (see
+`PERCEPTION.md`).
 
 ## Task stuck in `executing` forever
 
@@ -54,9 +72,19 @@ only after the first finishes.
 ## Existing SAM tests fail after pulling this branch
 
 They shouldn't — all 12 pre-existing offline suites were verified
-passing unchanged (`TEST_PLAN.md`). If one fails, it's most likely
-environment drift (missing dependency, stale `~/.sam_data`) rather than
-something this branch touched — the only non-`iqoo/`/`client/`/`tests/`/
-`docs/` file changed is the additive `on_event` parameter in
-`agent/react_loop.py`, which defaults to `None` and changes no existing
-behavior when omitted.
+passing unchanged (`TEST_PLAN.md`, re-verified again in Phase 2). If one
+fails, it's most likely environment drift (missing dependency, stale
+`~/.sam_data`) rather than something this branch touched — this branch's
+only non-`iqoo/`/`client/`/`tests/`/`docs/` file change, in either
+phase, is the additive `on_event` parameter in `agent/react_loop.py`,
+which defaults to `None` and changes no existing behavior when omitted.
+
+## `test_feature_tier_offline.py` fails on Termux (Python 3.13 / cryptography)
+
+This is a pre-existing environment limitation unrelated to iQOO: on
+Android Termux with Python 3.13.13 + cryptography 50.0.0, the native
+`_rust.abi3.so` extension fails to resolve `PyBaseObject_Type`. It
+reproduces identically with iQOO absent entirely. Do not modify
+`licensing/` or the cryptography dependency to work around it — the fix
+is an environment/toolchain issue (e.g. a different cryptography
+version compatible with that Python build), not a code change here.
