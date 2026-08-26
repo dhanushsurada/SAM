@@ -49,8 +49,8 @@ def make_mocked_gateway(task_timeout_seconds=600):
          patch("founder_mode.manager.FounderModeManager") as MockFounder, \
          patch("core.brain.Brain") as MockBrain, \
          patch("agent.react_loop.ReactLoop") as MockReactLoop, \
-         patch("iqoo.gateway.VisionAdapter") as MockVision, \
-         patch("iqoo.gateway.AudioAdapter") as MockAudio:
+         patch("interfaces.api.gateway.VisionAdapter") as MockVision, \
+         patch("interfaces.api.gateway.AudioAdapter") as MockAudio:
 
         MockIdentity.return_value.load.return_value = {}
         MockMemory.return_value.retrieve.return_value = []
@@ -65,7 +65,7 @@ def make_mocked_gateway(task_timeout_seconds=600):
         settings = Settings()
         settings.incognito = True
 
-        from iqoo.gateway import TaskGateway
+        from interfaces.api.gateway import TaskGateway
         gateway = TaskGateway(settings=settings, task_timeout_seconds=task_timeout_seconds)
         return gateway, MockBrain.return_value, MockReactLoop.return_value, \
             MockVision.return_value, MockAudio.return_value
@@ -146,7 +146,7 @@ def test_worker_recovery_task_a_fails_task_b_still_executes():
     task_store.get_cancel_event raise once — this exercises the
     belt-and-suspenders catch added to _run_task_with_timeout's _run()
     closure, which was a real gap found while writing this test (see
-    iqoo/gateway.py's comment at that catch site)."""
+    interfaces/api/gateway.py's comment at that catch site)."""
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
         task_a = gateway.submit_task("task A")
@@ -222,7 +222,7 @@ def test_queue_continues_after_timeout():
 # ─── D/E: Retry safety ──────────────────────────────────────────────────────
 
 def test_retry_rejects_non_terminal_task():
-    from iqoo.gateway import TaskAlreadyActiveError
+    from interfaces.api.gateway import TaskAlreadyActiveError
 
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
@@ -275,7 +275,7 @@ def test_retry_records_history_and_fresh_cancel_state():
 # ─── A/F: Server restart recovery, demo reset ──────────────────────────────
 
 def test_orphaned_task_recovery_on_restart():
-    from iqoo.task_store import TaskStore, ORPHAN_ERROR_MESSAGE
+    from interfaces.api.task_store import TaskStore, ORPHAN_ERROR_MESSAGE
 
     store = TaskStore()
     task_id = store.create_task("left running when the process died", "text", [])
@@ -304,7 +304,7 @@ def test_orphaned_task_recovery_on_restart():
 
 
 def test_gateway_recovers_orphans_at_startup():
-    from iqoo.task_store import TaskStore
+    from interfaces.api.task_store import TaskStore
 
     store = TaskStore()
     orphan_id = store.create_task("orphaned before gateway starts", "text", [])
@@ -320,7 +320,7 @@ def test_gateway_recovers_orphans_at_startup():
 
 
 def test_demo_reset_clears_state_and_respects_busy_guard():
-    from iqoo.gateway import DemoResetBusyError
+    from interfaces.api.gateway import DemoResetBusyError
 
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
@@ -372,8 +372,8 @@ def test_demo_reset_never_touches_memory_or_founder_mode():
     check the way a plain substring/line search would)."""
     import ast
     import inspect
-    from iqoo.task_store import TaskStore
-    from iqoo.events import EventBus
+    from interfaces.api.task_store import TaskStore
+    from interfaces.api.events import EventBus
 
     def references_forbidden_module(func) -> bool:
         import textwrap
@@ -434,7 +434,7 @@ def test_health_reports_worker_dead_after_shutdown():
 
 def test_sse_event_stream_reconnect_no_duplicates():
     import asyncio
-    from iqoo import server as server_module
+    from interfaces.api import server as server_module
 
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:

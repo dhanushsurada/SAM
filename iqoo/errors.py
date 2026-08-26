@@ -1,19 +1,14 @@
 """
-iQOO Phase 2 — Perception errors.
+Compatibility forwarding layer — Phase 3A.5 architecture migration.
 
-Distinct from a generic execution failure so the gateway can report
-"SAM couldn't understand your photo/voice" differently from "SAM
-started but the task itself failed", and so cancellation during
-perception is reported as cancelled, not failed.
+The real implementation moved to multimodal/errors.py (perception exceptions
+are a generic SAM capability, not iQOO-specific). This module re-exports the
+same objects so `import iqoo.errors` keeps working for anything outside this
+repo that still references the old path. There is no separate
+implementation here — these are the exact same classes, not copies.
+
+New code should import from multimodal.errors directly.
 """
+from multimodal.errors import PerceptionError, PerceptionCancelled  # noqa: F401
 
-
-class PerceptionError(Exception):
-    """Vision or audio interpretation failed. Never silently swallowed —
-    always surfaces to the task's error field and an SSE 'failed' event."""
-
-
-class PerceptionCancelled(Exception):
-    """Cancellation was requested while perception (vision/audio
-    interpretation) was in progress, before the Brain/Planner/ReAct
-    pipeline was ever reached."""
+__all__ = ["PerceptionError", "PerceptionCancelled"]
