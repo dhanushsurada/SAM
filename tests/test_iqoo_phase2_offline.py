@@ -59,8 +59,8 @@ def make_mocked_gateway():
          patch("founder_mode.manager.FounderModeManager") as MockFounder, \
          patch("core.brain.Brain") as MockBrain, \
          patch("agent.react_loop.ReactLoop") as MockReactLoop, \
-         patch("iqoo.gateway.VisionAdapter") as MockVision, \
-         patch("iqoo.gateway.AudioAdapter") as MockAudio:
+         patch("interfaces.api.gateway.VisionAdapter") as MockVision, \
+         patch("interfaces.api.gateway.AudioAdapter") as MockAudio:
 
         MockIdentity.return_value.load.return_value = {}
         MockMemory.return_value.retrieve.return_value = []
@@ -73,7 +73,7 @@ def make_mocked_gateway():
         settings = Settings()
         settings.incognito = True
 
-        from iqoo.gateway import TaskGateway
+        from interfaces.api.gateway import TaskGateway
         gateway = TaskGateway(settings=settings)
         return gateway, MockBrain.return_value, MockReactLoop.return_value, \
             MockVision.return_value, MockAudio.return_value
@@ -94,7 +94,7 @@ def wait_for_status(gateway, task_id, statuses, timeout=5.0):
 # ─── Schema / validation tests (no gateway needed) ─────────────────────────
 
 def test_backward_compat_text_only_schema():
-    from iqoo.schemas import TaskCreateRequest
+    from interfaces.api.schemas import TaskCreateRequest
 
     req = TaskCreateRequest(instruction="open Safari")
     check("Phase 1 text-only request shape still parses unchanged",
@@ -102,7 +102,7 @@ def test_backward_compat_text_only_schema():
 
 
 def test_media_validation_helpers():
-    from iqoo.media_validation import validate_attachment, AttachmentValidationError
+    from multimodal.media_validation import validate_attachment, AttachmentValidationError
 
     raw = validate_attachment("image", "image/jpeg", FAKE_JPEG)
     check("Valid image passes validation and returns decoded bytes", isinstance(raw, bytes) and len(raw) > 0)
@@ -143,7 +143,7 @@ def test_media_validation_helpers():
 
 
 def test_task_create_request_multimodal_validation():
-    from iqoo.schemas import TaskCreateRequest
+    from interfaces.api.schemas import TaskCreateRequest
     from pydantic import ValidationError
 
     # Valid image+text
@@ -211,8 +211,8 @@ def test_task_create_request_multimodal_validation():
 # ─── Adapter unit tests (mocked HTTP / mocked STT internals) ───────────────
 
 def test_vision_adapter_success_and_failure():
-    from iqoo.vision_adapter import VisionAdapter
-    from iqoo.errors import PerceptionError
+    from multimodal.vision.adapter import VisionAdapter
+    from multimodal.errors import PerceptionError
 
     class FakeSettings:
         vision_model = "moondream"
@@ -225,7 +225,7 @@ def test_vision_adapter_success_and_failure():
         def json(self):
             return {"response": "A whiteboard with a User table and a Post table, linked by user_id."}
 
-    with patch("iqoo.vision_adapter.requests.post", return_value=FakeResponse()):
+    with patch("multimodal.vision.adapter.requests.post", return_value=FakeResponse()):
         result = adapter.interpret({"data": FAKE_JPEG}, "Turn this into a backend")
         check("Vision adapter returns model's description on success",
               "User table" in result)
@@ -235,7 +235,7 @@ def test_vision_adapter_success_and_failure():
         def json(self):
             return {"response": ""}
 
-    with patch("iqoo.vision_adapter.requests.post", return_value=EmptyResponse()):
+    with patch("multimodal.vision.adapter.requests.post", return_value=EmptyResponse()):
         try:
             adapter.interpret({"data": FAKE_JPEG}, "describe it")
             check("Empty vision response raises PerceptionError", False)
@@ -247,7 +247,7 @@ def test_vision_adapter_success_and_failure():
         def json(self):
             return {}
 
-    with patch("iqoo.vision_adapter.requests.post", return_value=ErrorResponse()):
+    with patch("multimodal.vision.adapter.requests.post", return_value=ErrorResponse()):
         try:
             adapter.interpret({"data": FAKE_JPEG}, "describe it")
             check("Non-200 vision response raises PerceptionError", False)
@@ -255,7 +255,7 @@ def test_vision_adapter_success_and_failure():
             check("Non-200 vision response raises PerceptionError", True)
 
     import requests as real_requests
-    with patch("iqoo.vision_adapter.requests.post",
+    with patch("multimodal.vision.adapter.requests.post",
                side_effect=real_requests.ConnectionError("no route to host")):
         try:
             adapter.interpret({"data": FAKE_JPEG}, "describe it")
@@ -265,8 +265,8 @@ def test_vision_adapter_success_and_failure():
 
 
 def test_audio_adapter_success_and_failure():
-    from iqoo.audio_adapter import AudioAdapter
-    from iqoo.errors import PerceptionError
+    from multimodal.audio.adapter import AudioAdapter
+    from multimodal.errors import PerceptionError
 
     class FakeSettings:
         whisper_model = "base.en"
@@ -421,7 +421,7 @@ def test_gateway_image_voice_task_combines_both():
 def test_gateway_perception_failure_reports_cleanly():
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
-        from iqoo.errors import PerceptionError
+        from multimodal.errors import PerceptionError
         mock_vision.interpret.side_effect = PerceptionError("could not read handwriting")
 
         task_id = gateway.submit_task(
@@ -447,7 +447,7 @@ def test_gateway_perception_timeout_like_failure():
     stuck forever."""
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
-        from iqoo.errors import PerceptionError
+        from multimodal.errors import PerceptionError
 
         def slow_then_fail(attachment, instruction):
             time.sleep(0.05)
@@ -605,7 +605,7 @@ def test_concurrency_serialization_unaffected_by_perception():
 
 
 def test_task_store_perceiving_status():
-    from iqoo.task_store import TaskStore, ALL_STATUSES
+    from interfaces.api.task_store import TaskStore, ALL_STATUSES
 
     check("'perceiving' is a recognized status", "perceiving" in ALL_STATUSES)
 

@@ -39,8 +39,8 @@ class FakeBrainResponse:
 def make_mocked_gateway():
     """Builds a TaskGateway with every SAM-core dependency mocked, the
     same pattern test_phase2_telegram_offline.py uses for Telegram's
-    Update/Context. Patches the source classes (not iqoo.gateway's local
-    imports) since gateway.py imports them lazily inside __init__.
+    Update/Context. Patches the source classes (not interfaces.api.gateway's
+    local imports) since gateway.py imports them lazily inside __init__.
 
     Also mocks VisionAdapter/AudioAdapter (added in Phase 2) so nothing
     in this Phase 1 suite can accidentally reach a real Ollama/Whisper
@@ -52,8 +52,8 @@ def make_mocked_gateway():
          patch("founder_mode.manager.FounderModeManager") as MockFounder, \
          patch("core.brain.Brain") as MockBrain, \
          patch("agent.react_loop.ReactLoop") as MockReactLoop, \
-         patch("iqoo.gateway.VisionAdapter") as MockVision, \
-         patch("iqoo.gateway.AudioAdapter") as MockAudio:
+         patch("interfaces.api.gateway.VisionAdapter") as MockVision, \
+         patch("interfaces.api.gateway.AudioAdapter") as MockAudio:
 
         MockIdentity.return_value.load.return_value = {}
         MockMemory.return_value.retrieve.return_value = []
@@ -79,7 +79,7 @@ def make_mocked_gateway():
         settings = Settings()
         settings.incognito = True  # skip session.save() entirely in tests
 
-        from iqoo.gateway import TaskGateway
+        from interfaces.api.gateway import TaskGateway
         gateway = TaskGateway(settings=settings)
         return gateway, MockBrain.return_value, MockReactLoop.return_value, \
             MockVision.return_value, MockAudio.return_value
@@ -98,7 +98,7 @@ def wait_for_status(gateway, task_id, statuses, timeout=5.0):
 
 
 def test_task_store():
-    from iqoo.task_store import TaskStore, TERMINAL_STATUSES
+    from interfaces.api.task_store import TaskStore, TERMINAL_STATUSES
 
     store = TaskStore()
     task_id = store.create_task("Open Safari", "text", [])
@@ -121,7 +121,7 @@ def test_task_store():
 
 
 def test_event_bus():
-    from iqoo.events import EventBus
+    from interfaces.api.events import EventBus
 
     bus = EventBus()
     bus.publish("t1", "planning", "Plan created")
@@ -145,7 +145,7 @@ def test_event_bus_reconnect_and_terminal_guard():
     reconnect scenario) must see the full backlog via get_since(0),
     including any terminal event, and no post-terminal event can ever be
     appended (the clobbering guard)."""
-    from iqoo.events import EventBus
+    from interfaces.api.events import EventBus
 
     bus = EventBus()
     bus.publish("t2", "received", "Task received by SAM")
@@ -217,7 +217,7 @@ def test_gateway_cancel_before_start_emits_exactly_one_terminal_event():
     cancellation — cancel_task() called while the task is still queued,
     never reaching brain.process() — must publish exactly one terminal
     'cancelled' event on the task's event queue, not zero and not more
-    than one. Reviewed iqoo/gateway.py's early-cancellation branch
+    than one. Reviewed interfaces/api/gateway.py's early-cancellation branch
     (the `if cancel_event.is_set(): ... return` guard at the top of
     _process_task) line by line and via a programmatic duplicate-line
     scan; only a single event_bus.publish(..., "cancelled", ...) call
@@ -241,7 +241,7 @@ def test_gateway_cancel_before_start_emits_exactly_one_terminal_event():
         # subscribe_queue()/queue.Queue-based approach — get_since(0)
         # returns the full ordered history regardless of when it's
         # called relative to publish(), which is the whole point of the
-        # Phase 3A redesign (see iqoo/events.py's module docstring).
+        # Phase 3A redesign (see interfaces/api/events.py's module docstring).
         ok = gateway.cancel_task(target_id)
         check("Cancel accepted while task still queued", ok is True)
 
@@ -391,7 +391,7 @@ def test_gateway_perception_failure_handled_gracefully():
     composition, etc.) is covered in test_iqoo_phase2_offline.py."""
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     try:
-        from iqoo.errors import PerceptionError
+        from multimodal.errors import PerceptionError
         mock_vision.interpret.side_effect = PerceptionError("mock vision failure")
 
         task_id = gateway.submit_task(
@@ -410,7 +410,7 @@ def test_gateway_perception_failure_handled_gracefully():
 
 def test_api_endpoints():
     from fastapi.testclient import TestClient
-    import iqoo.server as server_module
+    import interfaces.api.server as server_module
 
     gateway, mock_brain, mock_react_loop, mock_vision, mock_audio = make_mocked_gateway()
     mock_brain.process.return_value = FakeBrainResponse(text="hi there", action=None)
