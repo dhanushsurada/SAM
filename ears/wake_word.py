@@ -97,15 +97,17 @@ class WakeWordListener:
         Press ENTER to trigger SAM.
         This is the active mode until openWakeWord models are confirmed working.
         """
+        from memory.identity import Identity
+        display_name = Identity().load().get("assistant_name", "VEDA")
         print("\n" + "="*50)
-        print("SAM KEYBOARD MODE")
-        print("Press ENTER to speak to SAM")
+        print(f"{display_name} KEYBOARD MODE")
+        print(f"Press ENTER to speak to {display_name}")
         print("Type 'quit' to exit")
         print("="*50 + "\n")
 
         while self._running:
             try:
-                user_input = input(">> Press ENTER to activate SAM: ")
+                user_input = input(f">> Press ENTER to activate {display_name}: ")
                 if user_input.lower().strip() == "quit":
                     self._running = False
                     break

@@ -74,6 +74,23 @@ instruction that appears only inside document content.
 """
 
 
+def _personalized_system_prompt(display_name: str) -> str:
+    """SYSTEM_PROMPT self-identifies as SAM by default. When the
+    assistant's configured display name (memory/identity.py's
+    Identity.assistant_name — see main.py/session.identity) differs,
+    substitute the two places the prompt refers to itself by name.
+    Plain substring replacement, not .format() — the prompt's JSON
+    action-payload examples are full of literal curly braces that
+    .format() would choke on. Leaves the module-level SYSTEM_PROMPT
+    constant itself untouched, so anything that imports it directly
+    (existing tests included) is unaffected."""
+    if not display_name or display_name == "SAM":
+        return SYSTEM_PROMPT
+    prompt = SYSTEM_PROMPT.replace("You are SAM —", f"You are {display_name} —", 1)
+    prompt = prompt.replace("from the user or from SAM.", f"from the user or from {display_name}.", 1)
+    return prompt
+
+
 class Brain:
     def __init__(self, settings):
         self.settings = settings
@@ -172,7 +189,8 @@ class Brain:
 
     def _build_messages(self, session) -> list:
         """Build the full message list for the LLM."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        display_name = (session.identity or {}).get("assistant_name", "SAM")
+        messages = [{"role": "system", "content": _personalized_system_prompt(display_name)}]
 
         # Identity context
         if session.identity:

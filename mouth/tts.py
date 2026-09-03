@@ -157,7 +157,9 @@ class TextToSpeech:
         self._pyttsx3_engine.runAndWait()
 
     def _speak_print(self, text: str):
-        print(f"\n[SAM]: {text}\n")
+        from memory.identity import Identity
+        display_name = Identity().load().get("assistant_name", "VEDA")
+        print(f"\n[{display_name}]: {text}\n")
 
     # ─── Audio Playback ───────────────────────────────────────────────────
 
