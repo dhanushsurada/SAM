@@ -123,6 +123,7 @@ class Settings:
     # Used starting with the local-knowledge milestone, not Milestone 1.
     sovereign_knowledge_collection: str = "sam_documents"
     sovereign_vision_model: Optional[str] = None  # None -> reuse vision_model
+    sovereign_top_k: int = 5  # retrieval default, mirrors memory_top_k
 
     # Runtime
     incognito: bool = False
