@@ -32,6 +32,7 @@ def _ensure_data_dirs():
         SAM_DATA_DIR / "skills" / "compiled",
         SAM_DATA_DIR / "logs",
         SAM_DATA_DIR / "sovereign" / "documents",
+        SAM_DATA_DIR / "sovereign" / "output",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -124,6 +125,9 @@ class Settings:
     sovereign_knowledge_collection: str = "sam_documents"
     sovereign_vision_model: Optional[str] = None  # None -> reuse vision_model
     sovereign_top_k: int = 5  # retrieval default, mirrors memory_top_k
+    # Generated deliverables (create_document) — deliberately separate
+    # from sovereign_docs_dir (source documents to be ingested).
+    sovereign_output_dir: str = str(SAM_DATA_DIR / "sovereign" / "output")
 
     # Runtime
     incognito: bool = False
