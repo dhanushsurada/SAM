@@ -31,6 +31,7 @@ def _ensure_data_dirs():
         SAM_DATA_DIR / "founder_mode" / "export",
         SAM_DATA_DIR / "skills" / "compiled",
         SAM_DATA_DIR / "logs",
+        SAM_DATA_DIR / "sovereign" / "documents",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -110,6 +111,18 @@ class Settings:
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")
+
+    # SIH26117 — Sovereign Workbench, document ingestion (sovereign/ingestion/).
+    # Chunk size/overlap are word counts, not characters. Overlap must stay
+    # smaller than chunk_size (enforced in sovereign/ingestion/chunk.py).
+    sovereign_docs_dir: str = str(SAM_DATA_DIR / "sovereign" / "documents")
+    sovereign_chunk_size: int = 300
+    sovereign_chunk_overlap: int = 50
+    # Separate Chroma collection from memory's "sam_memory" — keeps document
+    # evidence and conversational memory from bleeding into each other.
+    # Used starting with the local-knowledge milestone, not Milestone 1.
+    sovereign_knowledge_collection: str = "sam_documents"
+    sovereign_vision_model: Optional[str] = None  # None -> reuse vision_model
 
     # Runtime
     incognito: bool = False
