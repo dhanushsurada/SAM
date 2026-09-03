@@ -26,6 +26,7 @@ class ReactLoop:
         self._browser = None
         self._terminal = None
         self._vision = None
+        self._knowledge_index = None  # SIH26117 — lazy singleton, same pattern as the Hands above
         self._reflection = ReflectionEngine(settings)
         self._verifier = Verifier(settings)
         # Optional — pass a FounderModeManager to let high-confidence
@@ -57,6 +58,13 @@ class ReactLoop:
             self._vision = ScreenReader(self.settings)
         return self._vision
 
+    def _get_knowledge_index(self):
+        # SIH26117 — Sovereign Workbench document knowledge (Milestone 2/3).
+        if self._knowledge_index is None:
+            from sovereign.knowledge import VectorIndex
+            self._knowledge_index = VectorIndex(self.settings)
+        return self._knowledge_index
+
     def execute(self, action: str, payload: Dict[str, Any]) -> str:
         """
         Execute a single action and return the observation.
@@ -72,6 +80,14 @@ class ReactLoop:
                 return self._execute_terminal(payload)
             elif action == "vision":
                 return self._execute_vision(payload)
+            elif action == "read_document":
+                return self._execute_read_document(payload)
+            elif action == "search_knowledge":
+                return self._execute_search_knowledge(payload)
+            elif action == "calculate":
+                return self._execute_calculate(payload)
+            elif action == "create_document":
+                return self._execute_create_document(payload)
             else:
                 return f"Unknown action: {action}"
 
@@ -416,3 +432,26 @@ class ReactLoop:
         vision = self._get_vision()
         task = payload.get("task", "read the screen")
         return vision.read(task)
+
+    # ─── SIH26117 — Sovereign Workbench tools ──────────────────────────
+
+    def _execute_read_document(self, payload: Dict) -> str:
+        from sovereign.tools.read_document import read_document
+        path = payload.get("path", "")
+        return read_document(path, self.settings, index=self._get_knowledge_index())
+
+    def _execute_search_knowledge(self, payload: Dict) -> str:
+        from sovereign.tools.search_knowledge import search_knowledge
+        query = payload.get("query", "")
+        return search_knowledge(query, self.settings, index=self._get_knowledge_index())
+
+    def _execute_calculate(self, payload: Dict) -> str:
+        from sovereign.tools.calculate import calculate
+        expression = payload.get("expression", "")
+        return calculate(expression)
+
+    def _execute_create_document(self, payload: Dict) -> str:
+        from sovereign.tools.create_document import create_document
+        title = payload.get("title", "")
+        sections = payload.get("sections", [])
+        return create_document(title, sections, self.settings.sovereign_output_dir)
