@@ -74,6 +74,11 @@ class Settings:
     ollama_host: str = "http://localhost:11434"
     primary_model: str = "qwen2.5:14b"
     fallback_model: str = "qwen2.5:7b"
+    # M6.2 — set True once a person has explicitly chosen a model (first-run
+    # Step 2, or the runtime "model X" command) and it's been persisted via
+    # save(). Guards _select_model(): an explicit choice must never be
+    # silently overwritten by the RAM-based auto-pick below.
+    model_explicitly_set: bool = False
     model_context_length: int = 8192
     temperature: float = 0.7
     max_tokens: int = 1024
@@ -209,6 +214,11 @@ class Settings:
             self.detected_ram_gb = 16
 
     def _select_model(self):
+        # An explicit choice (first-run Step 2, or the runtime "model X"
+        # command) always wins — RAM-based auto-detection only ever
+        # supplies a default when no explicit choice has been made yet.
+        if self.model_explicitly_set:
+            return
         if self.detected_ram_gb is None:
             return
         if self.detected_ram_gb >= 32:

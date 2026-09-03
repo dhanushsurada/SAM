@@ -346,6 +346,45 @@ class SAM:
                 self.tts.speak(msg)
             return True
 
+        # Runtime model selection (M6.2, SIH26117) — mirrors "name X"
+        # above. Persists through Settings.save() and marks the choice
+        # model_explicitly_set so Settings._select_model()'s RAM-based
+        # guess can never silently overwrite it on a later restart.
+        # Validates against Ollama's actually-installed models when
+        # Ollama is reachable; if it isn't, there's nothing to validate
+        # against, so the choice still goes through but is flagged as
+        # unverified. Never triggers a download either way.
+        if t.startswith("model ") and len(t) > len("model "):
+            requested = text.strip()[len("model "):].strip()
+            if not requested:
+                msg = "That model name doesn't work — keeping the current one."
+                print(f"\n{self._display_name}: {msg}\n")
+                self.tts.speak(msg)
+                return True
+
+            try:
+                installed = self.brain.list_installed_models()
+            except RuntimeError:
+                installed = None  # Ollama unreachable — can't validate
+
+            if installed is not None and requested not in installed:
+                msg = (
+                    f"{requested} isn't in your installed Ollama models — "
+                    f"keeping {self.settings.primary_model}."
+                )
+                print(f"\n{self._display_name}: {msg}\n")
+                self.tts.speak(msg)
+                return True
+
+            self.settings.primary_model = requested
+            self.settings.model_explicitly_set = True
+            self.settings.save()
+            note = "" if installed is not None else " (couldn't verify it's installed — Ollama wasn't reachable)"
+            msg = f"Using {requested} from now on.{note}"
+            print(f"\n{self._display_name}: {msg}\n")
+            self.tts.speak(msg)
+            return True
+
         # Sleep / Stop
         if any(p in t for p in ["sam sleep", "go to sleep"]):
             msg = "Going to sleep. Call me when you need me."
@@ -387,13 +426,19 @@ class SAM:
     # ─── Lifecycle ────────────────────────────────────────────────────────
 
     def _run_first_run_setup(self):
-        """First run only (M6.2): name the assistant, then a
-        non-interactive readiness check using the EXISTING automatic
-        model-selection pipeline (Settings._select_model chose the
-        model already; this just calls Brain._ensure_model() to report
-        the real, current result — no new model router, no invented
-        model names, no choice UI where none existed before). Ordering
-        is deliberate: name, then model, then normal startup continues."""
+        """First run only: name the assistant (Step 1), then Step 2
+        (M6.2) — if Ollama is reachable and has at least one model
+        installed, show that real installed list and let the person pick
+        primary (and optionally fallback) explicitly. That choice is
+        persisted via Settings.save() and marked model_explicitly_set so
+        Settings._select_model()'s RAM-based guess can never silently
+        overwrite it again. If Ollama isn't reachable yet, or nothing is
+        installed, this falls back to the original M6.1 behavior
+        unchanged: a non-interactive readiness check via
+        Brain._ensure_model(), reporting whatever Settings._select_model()
+        already guessed. Either path is strictly non-destructive — nothing
+        here ever triggers a model download. Ordering is deliberate:
+        name, then model, then normal startup continues."""
         print(f"\nWelcome. Let's get set up.\n")
 
         print("STEP 1 — Name your assistant")
@@ -413,14 +458,64 @@ class SAM:
         self._display_name = chosen
         print(f"Got it — I'll go by {chosen}.\n")
 
-        print("STEP 2 — Checking your local model setup")
+        print("STEP 2 — Choose your local model")
         try:
-            model = self.brain._ensure_model()
-            print(f"Model check: using {model}.\n")
-        except RuntimeError as e:
-            print(f"Model check: {e}")
-            print(f"({chosen} will still start — you'll just need that "
-                  f"sorted before {chosen} can actually respond.)\n")
+            installed = self.brain.list_installed_models()
+        except RuntimeError:
+            installed = []
+
+        if installed:
+            print("Models currently installed in Ollama:")
+            for m in installed:
+                print(f"  - {m}")
+
+            default_primary = (
+                self.settings.primary_model if self.settings.primary_model in installed
+                else installed[0]
+            )
+            raw_primary = input(f"Which should I use as primary? [{default_primary}]: ").strip()
+            if raw_primary and raw_primary in installed:
+                chosen_primary = raw_primary
+            elif raw_primary:
+                print(f"({raw_primary} isn't in that list — using {default_primary})")
+                chosen_primary = default_primary
+            else:
+                chosen_primary = default_primary  # accepted the default
+            self.settings.primary_model = chosen_primary
+            self.settings.model_explicitly_set = True
+
+            fallback_candidates = [m for m in installed if m != chosen_primary]
+            if fallback_candidates:
+                default_fallback = (
+                    self.settings.fallback_model if self.settings.fallback_model in fallback_candidates
+                    else fallback_candidates[0]
+                )
+                raw_fallback = input(
+                    f"Fallback if {chosen_primary} is ever unavailable? [{default_fallback}, or 'skip']: "
+                ).strip()
+                if raw_fallback.lower() == "skip":
+                    pass  # leave fallback_model exactly as it was
+                elif raw_fallback and raw_fallback in fallback_candidates:
+                    self.settings.fallback_model = raw_fallback
+                elif raw_fallback:
+                    print(f"({raw_fallback} isn't in that list — keeping fallback as {default_fallback})")
+                    self.settings.fallback_model = default_fallback
+                else:
+                    self.settings.fallback_model = default_fallback  # accepted the default
+
+            self.settings.save()
+            print(f"Model check: using {chosen_primary}.\n")
+        else:
+            # Ollama isn't reachable yet, or nothing's installed — nothing
+            # to choose from, so nothing is marked as an explicit choice.
+            # Unchanged M6.1 fail-soft behavior.
+            try:
+                model = self.brain._ensure_model()
+                print(f"Model check: using {model}.\n")
+            except RuntimeError as e:
+                print(f"Model check: {e}")
+                print(f"({chosen} will still start — you'll just need that "
+                      f"sorted before {chosen} can actually respond.)\n")
 
         self.identity.update({"assistant_name": chosen, "setup_completed": True})
         self._is_first_run = False

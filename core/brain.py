@@ -105,6 +105,26 @@ class Brain:
         except Exception:
             return False
 
+    def list_installed_models(self) -> list:
+        """Return the names of models currently installed in Ollama.
+
+        Read-only: this never pulls or downloads anything, it only reports
+        what's already there. Used by first-run setup and the runtime
+        "model X" command to offer a real choice instead of a guess.
+
+        Raises RuntimeError if Ollama isn't reachable — callers that want
+        to fail soft (setup, the runtime command) should catch this.
+        """
+        if not self._check_ollama():
+            raise RuntimeError(
+                "Ollama is not running. Start it with: ollama serve"
+            )
+        try:
+            r = requests.get(f"{self.settings.ollama_host}/api/tags")
+            return [m["name"] for m in r.json().get("models", [])]
+        except Exception as e:
+            raise RuntimeError(f"Model check failed: {e}")
+
     def _ensure_model(self) -> str:
         """Ensure the right model is available. Returns model name to use."""
         if not self._check_ollama():
