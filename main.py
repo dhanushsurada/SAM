@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SAM")
 
-from config.settings import Settings
+from config.settings import Settings, validate_assistant_name
 from ears.wake_word import WakeWordListener
 from ears.text_input import TextInputListener
 from ears.stt import SpeechToText
@@ -38,11 +38,80 @@ from founder_mode.manager import FounderModeManager
 from agent.react_loop import ReactLoop
 
 
+def run_task_with_optional_sovereign_mode(
+    react_loop, settings, task, brain, session, founder_context, initial_response, cancel_event
+):
+    """
+    Milestone 6 — the actual Sovereign integration point.
+
+    Runs the real ReAct task via react_loop.run_planned_task(), optionally
+    wrapped in SocketGuard when settings.sovereign_mode is True. Returns
+    (result_text, network_report) — network_report is None when Sovereign
+    Mode didn't run (the default), so callers can tell the difference
+    between "not measured" and "measured, and it was clean."
+
+    Extracted as a standalone module-level function — not a SAM method —
+    so it's testable directly (real ReactLoop, real SocketGuard, mocked
+    only where Brain/Planner genuinely need a live Ollama) without
+    constructing a full SAM instance, which needs audio hardware this
+    sandbox doesn't have. SAM._run_task below is a thin wrapper around
+    this for _process() to call.
+    """
+    if not settings.sovereign_mode:
+        result_text = react_loop.run_planned_task(
+            task=task, brain=brain, session=session, founder_context=founder_context,
+            initial_response=initial_response, cancel_event=cancel_event,
+        )
+        return result_text, None
+
+    from sovereign.security import SocketGuard, write_evidence_log
+
+    guard = SocketGuard(settings, task_label=task[:80])
+    try:
+        with guard:
+            result_text = react_loop.run_planned_task(
+                task=task, brain=brain, session=session, founder_context=founder_context,
+                initial_response=initial_response, cancel_event=cancel_event,
+            )
+        return result_text, guard.report()
+    finally:
+        # Evidence is written even on failure — a task that errored out
+        # while guarded is exactly the case you most want a record of,
+        # not less of one. guard.report() is safe to call here whether
+        # the `with` block above exited normally or via exception —
+        # SocketGuard.__exit__ always sets ended_at before returning.
+        report = guard.report()
+        write_evidence_log(report, settings)
+        logger.info(
+            f"Sovereign task evidence — blocked={report.blocked_count}, "
+            f"external={report.external_transmission_count}, "
+            f"log={settings.sovereign_network_log}"
+        )
+
+
 class SAM:
     def __init__(self, start_in_text_mode: bool = False):
         logger.info("SAM initialising...")
         self.settings = Settings()
+
+        # M6.2 — Identity.assistant_name (memory/identity.py) is the
+        # single persistent source of truth for the display name; see
+        # config/settings.py's comment on why it isn't a Settings field.
+        # First-run detection: a file that didn't exist before this
+        # process touched it is unambiguously fresh. A pre-existing file
+        # is only "incomplete" if it explicitly says so via
+        # setup_completed=False (written below, right after a fresh
+        # file is created) — a pre-existing file with NO such key at all
+        # predates this feature and must be left alone, not re-prompted.
+        identity_existed_before = Identity.path().exists()
         self.identity = Identity()
+        if not identity_existed_before:
+            self.identity.update({"setup_completed": False})
+        current_identity = self.identity.load()
+        self._is_first_run = current_identity.get("setup_completed") is False
+        self._display_name = current_identity.get("assistant_name", "VEDA")  # short-lived cache — always re-synced from Identity after any change
+        self._name_overridden_via_cli = False
+
         self.memory = MemoryRetriever()
         self.founder_mode = FounderModeManager(settings=self.settings)
         self.brain = Brain(self.settings)
@@ -105,14 +174,14 @@ class SAM:
             self._cancel_event.set()
             msg = ("Stopping now." if was_running
                    else "Nothing's running right now, but noted.")
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             if self.settings.tts_engine != "none":
                 self.tts.speak(msg)
             return
 
         acquired = self._process_lock.acquire(blocking=False)
         if not acquired:
-            print("\n[SAM] Still working on your previous request — "
+            print(f"\n[{self._display_name}] Still working on your previous request — "
                   "this will run right after it finishes.\n")
             self._process_lock.acquire()  # now wait our turn
 
@@ -149,14 +218,7 @@ class SAM:
             if response.action and response.action not in (None, "none"):
                 try:
                     self._cancel_event.clear()  # fresh start — don't inherit a stale cancel from a prior interrupted task
-                    real_result_text = self.react_loop.run_planned_task(
-                        task=user_input,
-                        brain=self.brain,
-                        session=session,
-                        founder_context=session.founder_context,
-                        initial_response=response,
-                        cancel_event=self._cancel_event
-                    )
+                    real_result_text, network_report = self._run_task(user_input, session, response)
                     final_response = replace(response, text=real_result_text)
                 except Exception as e:
                     logger.error(f"Task execution failed: {e}", exc_info=True)
@@ -168,7 +230,7 @@ class SAM:
             logger.info(f"SAM: {final_response.text}")
 
             # Always print response — useful in text mode
-            print(f"\nSAM: {final_response.text}\n")
+            print(f"\n{self._display_name}: {final_response.text}\n")
 
             # Speak response (unless in silent/text-only mode)
             if self.settings.tts_engine != "none":
@@ -186,13 +248,21 @@ class SAM:
         except Exception as e:
             logger.error(f"Processing error: {e}", exc_info=True)
             error_msg = "I hit an error. Check the logs."
-            print(f"\nSAM: {error_msg}\n")
+            print(f"\n{self._display_name}: {error_msg}\n")
             if self.settings.tts_engine != "none":
                 self.tts.speak(error_msg)
         finally:
             self._process_lock.release()
 
     # ─── Commands ─────────────────────────────────────────────────────────
+
+    def _run_task(self, user_input: str, session: Session, response):
+        """Thin wrapper — see run_task_with_optional_sovereign_mode above
+        for the actual Sovereign integration logic."""
+        return run_task_with_optional_sovereign_mode(
+            self.react_loop, self.settings, user_input, self.brain, session,
+            session.founder_context, response, self._cancel_event,
+        )
 
     def _memory_retention_days(self):
         """Free tier: 7-day memory cap. Pro tier / enforcement off: None
@@ -218,33 +288,75 @@ class SAM:
             from licensing.tier import get_tier, PRO
             if get_tier(self.settings) != PRO:
                 msg = "Incognito mode is a Pro feature. Activate a license to use it."
-                print(f"\nSAM: {msg}\n")
+                print(f"\n{self._display_name}: {msg}\n")
                 self.tts.speak(msg)
                 return True
             self.settings.incognito = True
             msg = "Incognito mode on. Nothing will be recorded."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
             return True
 
         if any(p in t for p in ["exit incognito", "leave incognito"]):
             self.settings.incognito = False
             msg = "Incognito off. Memory is back on."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
+            return True
+
+        # Sovereign Mode (Milestone 6, SIH26117) — real task execution runs
+        # inside SocketGuard; not a licensed feature, just explicit opt-in.
+        if "sovereign mode" in t and "off" not in t and "exit" not in t and "leave" not in t:
+            self.settings.sovereign_mode = True
+            msg = "Sovereign mode on. Task execution will run inside the network guard."
+            print(f"\n{self._display_name}: {msg}\n")
+            self.tts.speak(msg)
+            return True
+
+        if any(p in t for p in ["sovereign mode off", "exit sovereign", "leave sovereign"]):
+            self.settings.sovereign_mode = False
+            msg = "Sovereign mode off."
+            print(f"\n{self._display_name}: {msg}\n")
+            self.tts.speak(msg)
+            return True
+
+        # Runtime display identity (M6.2, SIH26117) — matched by exact
+        # phrase / prefix, not loose substring: "name" alone is too
+        # common a word to safely match anywhere in a normal sentence.
+        # Persists through Identity.update() — the same mechanism a
+        # first-run naming choice uses — so it survives a restart.
+        if t in ("name", "what is your name", "what's your name"):
+            msg = f"My name is {self._display_name}."
+            print(f"\n{self._display_name}: {msg}\n")
+            self.tts.speak(msg)
+            return True
+
+        if t.startswith("name ") and len(t) > len("name "):
+            requested = text.strip()[len("name "):].strip()
+            try:
+                new_name = validate_assistant_name(requested)
+                self._display_name = new_name
+                self.identity.update({"assistant_name": new_name})
+                msg = f"Alright, call me {new_name} from now on."
+                print(f"\n{new_name}: {msg}\n")
+                self.tts.speak(msg)
+            except ValueError as e:
+                msg = f"That name doesn't work: {e}"
+                print(f"\n{self._display_name}: {msg}\n")
+                self.tts.speak(msg)
             return True
 
         # Sleep / Stop
         if any(p in t for p in ["sam sleep", "go to sleep"]):
             msg = "Going to sleep. Call me when you need me."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
             self.brain.unload()
             return True
 
         if any(p in t for p in ["sam stop", "shut down", "goodbye sam", "quit"]):
             msg = "Shutting down. Goodbye."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
             self.stop()
             return True
@@ -259,7 +371,7 @@ class SAM:
             self._input_mode = "text"
             self.wake_word.stop()
             msg = "Switched to text mode. Type your messages."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
             self.text_input.start()
             self.text_input.join()
@@ -268,14 +380,57 @@ class SAM:
             self._input_mode = "voice"
             self.text_input.stop()
             msg = "Switched to voice mode. Say Hey SAM."
-            print(f"\nSAM: {msg}\n")
+            print(f"\n{self._display_name}: {msg}\n")
             self.tts.speak(msg)
             self.wake_word.start()
 
     # ─── Lifecycle ────────────────────────────────────────────────────────
 
+    def _run_first_run_setup(self):
+        """First run only (M6.2): name the assistant, then a
+        non-interactive readiness check using the EXISTING automatic
+        model-selection pipeline (Settings._select_model chose the
+        model already; this just calls Brain._ensure_model() to report
+        the real, current result — no new model router, no invented
+        model names, no choice UI where none existed before). Ordering
+        is deliberate: name, then model, then normal startup continues."""
+        print(f"\nWelcome. Let's get set up.\n")
+
+        print("STEP 1 — Name your assistant")
+        if self._name_overridden_via_cli:
+            chosen = self._display_name
+            print(f"Using the name from --name: {chosen}")
+        else:
+            raw = input(f"What would you like to call me? [{self._display_name}]: ").strip()
+            if raw:
+                try:
+                    chosen = validate_assistant_name(raw)
+                except ValueError as e:
+                    print(f"({e} — keeping {self._display_name})")
+                    chosen = self._display_name
+            else:
+                chosen = self._display_name  # accepted the default
+        self._display_name = chosen
+        print(f"Got it — I'll go by {chosen}.\n")
+
+        print("STEP 2 — Checking your local model setup")
+        try:
+            model = self.brain._ensure_model()
+            print(f"Model check: using {model}.\n")
+        except RuntimeError as e:
+            print(f"Model check: {e}")
+            print(f"({chosen} will still start — you'll just need that "
+                  f"sorted before {chosen} can actually respond.)\n")
+
+        self.identity.update({"assistant_name": chosen, "setup_completed": True})
+        self._is_first_run = False
+        print("Setup complete.\n")
+
     def start(self):
         self._running = True
+
+        if self._is_first_run:
+            self._run_first_run_setup()
 
         signal.signal(signal.SIGINT, self._shutdown)
         signal.signal(signal.SIGTERM, self._shutdown)
@@ -301,8 +456,8 @@ class SAM:
         except Exception as e:
             logger.debug(f"License check skipped due to an internal error (non-blocking): {e}")
 
-        ready_msg = "SAM is ready."
-        print(f"\nSAM: {ready_msg}\n")
+        ready_msg = f"{self._display_name} is ready."
+        print(f"\n{self._display_name}: {ready_msg}\n")
         self.tts.speak(ready_msg)
 
         if self._input_mode == "text":
@@ -311,7 +466,10 @@ class SAM:
             self.text_input.join()
         else:
             logger.info("Starting in VOICE mode")
-            print("\nSAM VOICE MODE — Say 'Hey SAM' to activate")
+            # "Hey SAM" stays literal — it's the actual trained wake
+            # phrase for the (untouched) wake-word engine, not a display
+            # string. Only the heading uses the configured display name.
+            print(f"\n{self._display_name} VOICE MODE — Say 'Hey SAM' to activate")
             print("Say 'text mode' anytime to switch to typing\n")
             self.wake_word.start()  # Blocking
 
@@ -327,7 +485,9 @@ class SAM:
         self.stop()
 
 
-if __name__ == "__main__":
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Extracted from the __main__ block so --name (and the rest of the
+    CLI surface) is testable without running the full interactive loop."""
     parser = argparse.ArgumentParser(description="SAM — Personal AI Assistant")
     parser.add_argument(
         "--text",
@@ -339,11 +499,38 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable TTS — print responses only"
     )
+    parser.add_argument(
+        "--sovereign",
+        action="store_true",
+        help="Start in Sovereign Mode — task execution runs inside the network guard (SIH26117)"
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help=("Temporarily override the assistant's display name for this run only "
+              "(default comes from the persisted identity, VEDA on first run). "
+              "Does not save — use the runtime 'name X' command to change it permanently.")
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     sam = SAM(start_in_text_mode=args.text)
 
     if args.silent:
         sam.settings.tts_engine = "none"
+    if args.sovereign:
+        sam.settings.sovereign_mode = True
+    if args.name:
+        try:
+            sam._display_name = validate_assistant_name(args.name)
+            sam._name_overridden_via_cli = True
+        except ValueError as e:
+            print(f"Invalid --name: {e}")
+            sys.exit(1)
 
     sam.start()

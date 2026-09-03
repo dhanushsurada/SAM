@@ -21,11 +21,13 @@ class TextInputListener:
         self._thread = None
 
     def _listen_loop(self):
+        from memory.identity import Identity
+        display_name = Identity().load().get("assistant_name", "VEDA")
         print("\n" + "="*50)
-        print("SAM TEXT MODE")
+        print(f"{display_name} TEXT MODE")
         print("Type your message and press ENTER")
         print("Type 'voice mode' to switch to voice")
-        print("Type 'quit' to exit SAM")
+        print(f"Type 'quit' to exit {display_name}")
         print("="*50 + "\n")
 
         while self._running:
@@ -40,7 +42,9 @@ class TextInputListener:
                     break
 
                 if user_input.lower() in ["voice mode", "switch to voice", "use voice"]:
-                    print("[SAM] Switching to voice mode...")
+                    from memory.identity import Identity
+                    display_name = Identity().load().get("assistant_name", "VEDA")
+                    print(f"[{display_name}] Switching to voice mode...")
                     if self.mode_switch_callback:
                         self.mode_switch_callback("voice")
                     break

@@ -21,6 +21,29 @@ PLATFORM = platform.system()
 IS_MAC = PLATFORM == "Darwin"
 IS_WIN = PLATFORM == "Windows"
 
+# M6.1/M6.2 — validates values headed for memory/identity.py's
+# assistant_name (the single source of truth for the user-facing
+# display name — see main.py). Not a Settings field itself: keeping a
+# same-named field here would create two competing sources of truth.
+MAX_ASSISTANT_NAME_LENGTH = 40
+
+
+def validate_assistant_name(name: str) -> str:
+    """Minimal validation for the assistant's user-facing display name.
+    Rejects None/empty/whitespace-only, excessively long, or
+    control-character-containing names. Returns the trimmed name.
+    Raises ValueError with a human-readable reason otherwise."""
+    if name is None:
+        raise ValueError("Display name cannot be empty")
+    trimmed = name.strip()
+    if not trimmed:
+        raise ValueError("Display name cannot be empty or whitespace-only")
+    if len(trimmed) > MAX_ASSISTANT_NAME_LENGTH:
+        raise ValueError(f"Display name is too long (max {MAX_ASSISTANT_NAME_LENGTH} characters)")
+    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
+        raise ValueError("Display name cannot contain control characters")
+    return trimmed
+
 
 def _ensure_data_dirs():
     """Create ~/.sam_data structure if it doesn't exist."""
@@ -42,8 +65,9 @@ _ensure_data_dirs()
 
 @dataclass
 class Settings:
-    # Identity
-    assistant_name: str = "SAM"
+    # Identity — the assistant's user-facing display name lives in
+    # memory/identity.py's Identity.assistant_name (single source of
+    # truth, persistent), not here. See main.py.
     user_name: str = "Dhanush"
 
     # Brain
@@ -133,6 +157,11 @@ class Settings:
     # logging conventions found in the Milestone 0 audit.
     sovereign_network_log: str = str(SAM_DATA_DIR / "sovereign" / "network_guard.jsonl")
     sovereign_allowed_hosts: List[str] = field(default_factory=list)  # extra trusted hosts beyond loopback + ollama_host
+    # Milestone 6 — explicit opt-in. Real task execution is only wrapped
+    # in SocketGuard when this is True. Must default False: browser and
+    # Telegram need real network access, and existing non-Sovereign SAM
+    # behavior must be unaffected unless a user deliberately turns this on.
+    sovereign_mode: bool = False
 
     # Runtime
     incognito: bool = False
