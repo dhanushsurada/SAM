@@ -29,6 +29,10 @@ Pillow>=10.0.0                 # PIL.ImageGrab for Windows screenshots
 # ─── Memory ────────────────────────────────────────────────────────────────
 chromadb>=0.5.0
 
+# ─── Sovereign Workbench — document ingestion (SIH26117) ──────────────────
+pypdf>=5.0.0                    # PDF text extraction
+python-docx>=1.1.0              # DOCX text extraction (Milestone 1) and generation (later milestone)
+
 # ─── Ecosystem (Telegram bridge — Phase 2) ─────────────────────────────────
 python-telegram-bot>=21.0      # Bot API client (long-polling, no server needed)
 qrcode[pil]>=7.4.2              # Pairing QR code generation
