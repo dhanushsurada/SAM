@@ -454,4 +454,5 @@ class ReactLoop:
         from sovereign.tools.create_document import create_document
         title = payload.get("title", "")
         sections = payload.get("sections", [])
-        return create_document(title, sections, self.settings.sovereign_output_dir)
+        source_documents = payload.get("source_documents")
+        return create_document(title, sections, self.settings.sovereign_output_dir, source_documents=source_documents)

@@ -273,6 +273,83 @@ def test_create_document_sanitizes_filename():
     check("Unsafe filename characters are sanitized without erroring", "Created" in result)
 
 
+def test_create_document_includes_generated_date():
+    out_dir = TMP / "output"
+    create_document("Dated Note", [{"heading": "H", "body": "B"}], str(out_dir))
+    import docx as docx_lib
+    reopened = docx_lib.Document(str(out_dir / "Dated Note.docx"))
+    full_text = "\n".join(p.text for p in reopened.paragraphs)
+    check("Generated document includes a 'Generated' timestamp line", "Generated " in full_text)
+
+
+def test_create_document_with_source_documents():
+    out_dir = TMP / "output"
+    create_document(
+        "Note With Sources", [{"heading": "H", "body": "B"}], str(out_dir),
+        source_documents=["inspection_report.pdf", "sop.docx"],
+    )
+    import docx as docx_lib
+    reopened = docx_lib.Document(str(out_dir / "Note With Sources.docx"))
+    full_text = "\n".join(p.text for p in reopened.paragraphs)
+    check("Source documents line is present when provided",
+          "inspection_report.pdf" in full_text and "sop.docx" in full_text)
+
+
+def test_create_document_without_source_documents_omits_line():
+    out_dir = TMP / "output"
+    create_document("Note Without Sources", [{"heading": "H", "body": "B"}], str(out_dir))
+    import docx as docx_lib
+    reopened = docx_lib.Document(str(out_dir / "Note Without Sources.docx"))
+    full_text = "\n".join(p.text for p in reopened.paragraphs)
+    check("Source documents line is absent when not provided", "Source documents:" not in full_text)
+
+
+def test_create_document_renders_evidence_citations():
+    out_dir = TMP / "output"
+    create_document(
+        "Note With Evidence",
+        [{
+            "heading": "Findings",
+            "body": "Pressure exceeded the limit.",
+            "evidence": [
+                {"source": "sop.docx", "location": "Pressure Limits", "text": "Maximum allowed pressure is 150 PSI."},
+                {"source": "inspection_report.pdf", "location": "page 2", "text": "Recorded pressure: 152 PSI"},
+            ],
+        }],
+        str(out_dir),
+    )
+    import docx as docx_lib
+    reopened = docx_lib.Document(str(out_dir / "Note With Evidence.docx"))
+    full_text = "\n".join(p.text for p in reopened.paragraphs)
+    check("Evidence heading is present", "Evidence" in full_text)
+    check("First evidence citation's source is present", "sop.docx" in full_text)
+    check("First evidence citation's quoted text is present", "Maximum allowed pressure is 150 PSI" in full_text)
+    check("Second evidence citation is present", "inspection_report.pdf" in full_text and "152 PSI" in full_text)
+
+    evidence_paragraphs = [p for p in reopened.paragraphs if "sop.docx" in p.text]
+    check("Evidence citation was actually found as its own paragraph", len(evidence_paragraphs) == 1)
+    check("Evidence source label is bold (real formatting, not just text)",
+          any(r.bold for r in evidence_paragraphs[0].runs if r.text.strip()))
+    check("Evidence quoted text is italic (real formatting, not just text)",
+          any(r.italic for r in evidence_paragraphs[0].runs if '"' in r.text))
+
+
+def test_create_document_evidence_missing_text_skipped_gracefully():
+    out_dir = TMP / "output"
+    result = create_document(
+        "Note With Sparse Evidence",
+        [{"heading": "Findings", "body": "Body text.", "evidence": [{"source": "x.pdf"}]}],  # no "text" key
+        str(out_dir),
+    )
+    check("Evidence entries missing 'text' don't crash create_document", "Created" in result)
+
+
+def test_create_document_backward_compatible_with_milestone_3_calls():
+    # The exact Milestone 3 calling convention — no source_documents, no evidence key.
+    result = create_document("Plain Old Note", [{"heading": "H", "body": "B"}], str(TMP / "output"))
+    check("Milestone 3-style calls (no evidence/source_documents) still work", "Created" in result)
+
+
 def main():
     test_wrap_untrusted_structure()
     test_wrap_untrusted_labels_an_injection_attempt()
@@ -291,6 +368,12 @@ def main():
     test_create_document_requires_sections()
     test_create_document_all_blank_sections_raises()
     test_create_document_sanitizes_filename()
+    test_create_document_includes_generated_date()
+    test_create_document_with_source_documents()
+    test_create_document_without_source_documents_omits_line()
+    test_create_document_renders_evidence_citations()
+    test_create_document_evidence_missing_text_skipped_gracefully()
+    test_create_document_backward_compatible_with_milestone_3_calls()
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")
     if not all(results):

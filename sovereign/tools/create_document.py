@@ -1,14 +1,17 @@
 """
 create_document() agent tool.
 
-Milestone 3 gives this a genuinely working (if simple) DOCX writer — a
-title plus heading/body sections — so the full tool-dispatch loop is
-real end to end today. The richer "Approval Note" template (structured
-sections tuned for the industrial workflow, formatted evidence
-citations) is Milestone 4 (feat/docx-generation); this is a working
-foundation for that, not the final version.
+Milestone 4 (feat/docx-generation): a structured Approval Note template
+— title, generated-on line, optional source-documents line, then
+ordered sections with heading/body and an optional evidence sub-list
+(source, location, quoted text) rendered distinctly from the narrative
+body, satisfying the brief's "preserve source/evidence references"
+requirement. Backward compatible with Milestone 3's plain
+{"heading","body"} sections — "evidence" and source_documents are both
+optional, so existing callers are unaffected.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import docx
@@ -18,8 +21,32 @@ class DocumentCreationError(Exception):
     pass
 
 
-def create_document(title: str, sections, output_dir: str) -> str:
-    """sections: list of {"heading": str, "body": str} dicts, in order."""
+def _add_evidence(doc, evidence):
+    doc.add_heading("Evidence", level=2)
+    for item in evidence:
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        source = (item.get("source") or "unknown source").strip()
+        location = (item.get("location") or "").strip()
+        label = f"{source} ({location})" if location else source
+
+        p = doc.add_paragraph(style="List Bullet")
+        bold_run = p.add_run(f"{label}: ")
+        bold_run.bold = True
+        quote_run = p.add_run(f'"{text}"')
+        quote_run.italic = True
+
+
+def create_document(title: str, sections, output_dir: str, source_documents=None) -> str:
+    """
+    sections: list of dicts, each —
+        heading: str
+        body: str
+        evidence: optional list of {"source": str, "location": str, "text": str}
+    source_documents: optional list of filenames, rendered as a short
+        traceability line under the title.
+    """
     title = (title or "").strip()
     if not title:
         raise DocumentCreationError("A title is required")
@@ -35,16 +62,27 @@ def create_document(title: str, sections, output_dir: str) -> str:
 
     d = docx.Document()
     d.add_heading(title, level=0)
+
+    meta = d.add_paragraph()
+    meta.add_run(f"Generated {datetime.now():%Y-%m-%d %H:%M}").italic = True
+
+    if source_documents:
+        src = d.add_paragraph()
+        src.add_run("Source documents: " + ", ".join(source_documents)).italic = True
+
     written_sections = 0
     for section in sections:
         heading = (section.get("heading") or "").strip()
         body = (section.get("body") or "").strip()
-        if not heading and not body:
+        evidence = section.get("evidence") or []
+        if not heading and not body and not evidence:
             continue
         if heading:
             d.add_heading(heading, level=1)
         if body:
             d.add_paragraph(body)
+        if evidence:
+            _add_evidence(d, evidence)
         written_sections += 1
 
     if written_sections == 0:
