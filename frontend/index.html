@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VEDA — Sovereign Industrial AI Workbench</title>
+
+<!--
+  M8-B architecture note (documented deliberately, not silently chosen):
+
+  This is a zero-build frontend. React, ReactDOM, and Babel's in-browser
+  JSX transform are loaded from CDN below; Tailwind runs as its in-browser
+  JIT (the "Play CDN" script). There is no npm install, no bundler, no
+  build step of any kind — starting the FastAPI server (which serves this
+  directory as static files, see api/app.py) IS running the frontend.
+
+  Why, given the M8 brief's stated preference for "React + Tailwind":
+  this sandbox has no network access, so nothing here could be verified
+  by actually running `npm install` — I can write correct React code
+  either way, but a build pipeline I cannot execute even once is a
+  bigger risk to carry into a demo than CDN script tags, which are a
+  well-worn, simple pattern and degrade obviously (a visibly broken page)
+  rather than subtly if something's wrong. It's also a straightforward,
+  reversible migration to a real Vite/CRA build later if this becomes a
+  longer-lived product — the component code itself (frontend/app.jsx,
+  screens.jsx, components.jsx) is plain modern JS/JSX using hooks, no
+  CDN-only APIs, so migrating just means adding a bundler and changing
+  these <script> tags to imports.
+
+  This machine's browser needs internet access once, to fetch these CDN
+  files. After that first load the API calls below all stay on
+  127.0.0.1 — the sovereignty story is about where inspection documents
+  and model inference happen, not about this UI's own script hosting.
+-->
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script>
+  // Tailwind Play CDN config — the design system's tokens live here so
+  // every component references e.g. bg-ink / text-muted / border-line
+  // rather than raw hex values scattered through the JSX.
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          paper:   '#FAFAF8',  // app background
+          surface: '#FFFFFF',  // card/panel background
+          ink:     '#141414',  // near-black — dark emphasis panels, active nav, primary headings
+          text:    '#1C1C1A',  // body text
+          muted:   '#8A8A85',  // secondary text, labels
+          line:    '#E7E5E1',  // hairline borders/dividers
+          ok:      '#1F6B45',  // desaturated green — indexed / completed / verified
+          warn:    '#9A4A12',  // desaturated amber/rust — blocked / failed / exceeded
+        },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  /* Micro-label style used throughout for section headers ("DOCUMENTS",
+     "SOVEREIGN MODE") — small, uppercase, tracked-out, muted. Kept as a
+     real CSS class (not a long Tailwind utility chain) since it's reused
+     verbatim in a dozen places across components.jsx/screens.jsx. */
+  .label-micro {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: #8A8A85;
+  }
+  body { background: #FAFAF8; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #E7E5E1; border-radius: 4px; }
+</style>
+</head>
+<body class="font-sans text-text antialiased">
+
+<div id="root">
+  <!-- Static pre-mount fallback: if a script below fails to load (e.g. no
+       internet reaching the CDNs), this stays on screen instead of a
+       blank page, and says exactly why. -->
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#8A8A85;">
+    Loading VEDA — if this doesn't clear, this machine may not have
+    internet access to fetch React/Tailwind from their CDNs.
+  </div>
+</div>
+
+<!-- Load order matters: lib/api.js has no JSX (plain <script>, runs
+     immediately); the three text/babel files below share one global
+     scope and execute in this order, so components.jsx's consts exist
+     by the time screens.jsx references them, and both exist by the
+     time app.jsx mounts. -->
+<script src="/lib/api.js"></script>
+<script type="text/babel" data-presets="react" src="/components.jsx"></script>
+<script type="text/babel" data-presets="react" src="/screens.jsx"></script>
+<script type="text/babel" data-presets="react" src="/app.jsx"></script>
+
+</body>
+</html>

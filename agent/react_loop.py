@@ -171,7 +171,8 @@ class ReactLoop:
         recent = [o.get("observation", "") for o in observations[-STAGNATION_WINDOW:]]
         return recent[0] != "" and len(set(recent)) == 1
 
-    def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None) -> str:
+    def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None,
+                 on_step=None) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete, MAX_STEPS reached, or cancelled.
@@ -188,6 +189,15 @@ class ReactLoop:
         instant the user says "stop", bypassing the process lock entirely
         so it takes effect even while this loop is mid-execution). Omit it
         to get the old, never-cancellable behaviour unchanged.
+
+        on_step: M8-A — optional callback(step_dict) invoked right after a
+        step is appended to `observations`, with that exact same dict
+        (same keys this method already builds below — nothing new is
+        computed for it). Lets a caller (e.g. the VEDA API) observe
+        progress without this method knowing anything about HTTP, tasks,
+        or a UI. Wrapped in try/except so a broken observer can never
+        break the task it's observing. Omit for the old, unobserved
+        behaviour, unchanged.
         """
         logger.info(f"Starting ReAct loop for task: {task}")
         observations = []
@@ -220,13 +230,19 @@ class ReactLoop:
             # Act: execute the action (Phase 1.5: verified, with 1 retry on failure)
             verified = self._execute_verified(response.action, response.action_payload or {}, f"step {steps}")
             observation = verified["observation"]
-            observations.append({
+            step_record = {
                 "step": steps,
                 "action": response.action,
                 "payload": response.action_payload,
                 "observation": observation,
                 "attempts": verified["attempts"]
-            })
+            }
+            observations.append(step_record)
+            if on_step is not None:
+                try:
+                    on_step(step_record)
+                except Exception as e:
+                    logger.debug(f"on_step observer raised (task continues): {e}")
             logger.info(f"Observation: {observation[:100]}")
 
             current_input = f"Observation from last step: {observation}"
@@ -248,7 +264,7 @@ class ReactLoop:
         return result
 
     def run_planned_task(self, task: str, brain, session, founder_context: str = "",
-                          initial_response=None, cancel_event=None) -> str:
+                          initial_response=None, cancel_event=None, on_step=None) -> str:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
@@ -270,17 +286,22 @@ class ReactLoop:
         between every planned step, and passed through to run_task on
         either fallback path so cancellation works identically regardless
         of which path a task ends up on.
+
+        on_step: M8-A — same observer callback as run_task, and passed
+        through to run_task unchanged on both fallback paths below, so a
+        caller gets progress updates regardless of which loop actually
+        ends up executing the task. See run_task's docstring for details.
         """
         if not self._looks_multi_step(task):
             logger.info("Task looks single-step — skipping Planner call")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event)
+                                  cancel_event=cancel_event, on_step=on_step)
 
         plan = planner.decompose(task, self.settings, founder_context)
         if not plan:
             logger.info("No plan available — falling back to adaptive ReAct loop")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event)
+                                  cancel_event=cancel_event, on_step=on_step)
 
         logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
         observations = []
@@ -315,13 +336,20 @@ class ReactLoop:
                 observation = response.text
                 attempts = None
 
-            observations.append({
+            step_record = {
                 "step": planned_step["step"],
                 "action": response.action,
+                "payload": response.action_payload,
                 "description": planned_step["description"],
                 "observation": observation,
                 "attempts": attempts
-            })
+            }
+            observations.append(step_record)
+            if on_step is not None:
+                try:
+                    on_step(step_record)
+                except Exception as e:
+                    logger.debug(f"on_step observer raised (task continues): {e}")
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
 
             if self._is_stagnant(observations):
