@@ -32,6 +32,7 @@ chromadb>=0.5.0
 # ─── Sovereign Workbench — document ingestion (SIH26117) ──────────────────
 pypdf>=5.0.0                    # PDF text extraction
 python-docx>=1.1.0              # DOCX text extraction (Milestone 1) and generation (later milestone)
+psutil>=6.0.0                   # subprocess-level network connection snapshot (Milestone 5)
 
 # ─── Ecosystem (Telegram bridge — Phase 2) ─────────────────────────────────
 python-telegram-bot>=21.0      # Bot API client (long-polling, no server needed)

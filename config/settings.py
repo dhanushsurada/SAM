@@ -8,8 +8,8 @@ import yaml
 import os
 import platform
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 CONFIG_PATH = Path(__file__).parent / "settings.yaml"
 BASE_DIR = Path(__file__).parent.parent
@@ -128,6 +128,11 @@ class Settings:
     # Generated deliverables (create_document) — deliberately separate
     # from sovereign_docs_dir (source documents to be ingested).
     sovereign_output_dir: str = str(SAM_DATA_DIR / "sovereign" / "output")
+    # Network egress evidence (Milestone 5) — dedicated path, deliberately
+    # not reusing either of the two existing (mutually inconsistent)
+    # logging conventions found in the Milestone 0 audit.
+    sovereign_network_log: str = str(SAM_DATA_DIR / "sovereign" / "network_guard.jsonl")
+    sovereign_allowed_hosts: List[str] = field(default_factory=list)  # extra trusted hosts beyond loopback + ollama_host
 
     # Runtime
     incognito: bool = False
