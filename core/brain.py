@@ -61,7 +61,7 @@ Action payload examples:
 - read_document: {"path": "/path/to/inspection_report.pdf"}
 - search_knowledge: {"query": "maximum allowed operating pressure"}
 - calculate: {"expression": "(150 - 148) / 150 * 100"}
-- create_document: {"title": "Approval Note", "sections": [{"heading": "Findings", "body": "..."}, {"heading": "Recommendation", "body": "..."}]}
+- create_document: {"title": "Approval Note", "source_documents": ["inspection_report.pdf", "sop.docx"], "sections": [{"heading": "Findings", "body": "...", "evidence": [{"source": "sop.docx", "location": "Pressure Limits", "text": "Maximum allowed pressure is 150 PSI."}]}, {"heading": "Recommendation", "body": "..."}]}
 
 If no action needed, set action to null and action_payload to null.
 Keep spoken responses concise — this is voice, not text.
