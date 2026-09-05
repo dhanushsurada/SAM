@@ -26,7 +26,7 @@ logger = logging.getLogger("SAM.Agent.Verifier")
 
 _FAILURE_SIGNALS = [
     "error executing", "could not find", "unknown action", "unknown control action",
-    "traceback", "exception:",
+    "traceback", "exception:", "sam_terminal_failed:",
 ]
 
 
