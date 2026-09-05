@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import Settings  # noqa: E402
-from ecosystem.device_registry import DeviceRegistry  # noqa: E402
-from ecosystem.telegram_bridge import TelegramBridge, NOT_PAIRED_MESSAGE  # noqa: E402
+from connect.core.device_registry import DeviceRegistry  # noqa: E402
+from interfaces.telegram.telegram_bridge import TelegramBridge, NOT_PAIRED_MESSAGE  # noqa: E402
 
 results = []
 
@@ -58,7 +58,7 @@ def test_device_registry():
     check("Revoke succeeds", reg.revoke(dev_id) is True)
     check("Revoked device no longer trusted", reg.is_trusted("chat123") is False)
 
-    import ecosystem.device_registry as dr_module
+    import connect.core.device_registry as dr_module
     old_ttl = dr_module.PAIRING_TOKEN_TTL_MINUTES
     dr_module.PAIRING_TOKEN_TTL_MINUTES = -1
     short_token = reg.create_pairing_token()
