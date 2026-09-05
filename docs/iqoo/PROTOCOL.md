@@ -1,0 +1,148 @@
+# iQOO Branch — Protocol
+
+## Endpoints (Phase 1)
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/iqoo/tasks` | Submit a task |
+| GET | `/api/iqoo/tasks/{task_id}` | Poll task status/result |
+| GET | `/api/iqoo/tasks/{task_id}/events` | SSE execution progress stream |
+| POST | `/api/iqoo/tasks/{task_id}/cancel` | Cancel a queued/running task |
+| POST | `/api/iqoo/tasks/{task_id}/retry` | Resubmit as a fresh task |
+| GET | `/api/iqoo/health` | Liveness, queue depth, brain/model reachability |
+| POST | `/api/iqoo/demo/reset` | **[Phase 3A]** Clear all task/event state (refuses if busy) |
+
+## Task creation
+
+`POST /api/iqoo/tasks`
+
+```json
+{
+  "instruction": "Turn this schema into a tested FastAPI backend",
+  "input_type": "text",
+  "attachments": []
+}
+```
+
+`input_type`: one of `text | voice | image | image+text | image+voice`.
+**Phase 1 executed `text` only.** Phase 2 adds real image/audio
+processing for the other four — see `PERCEPTION.md` for the vision and
+audio contracts, attachment shape, and MIME/size validation rules. Any
+attachment that fails validation (bad MIME, malformed base64, oversized,
+or missing for the declared `input_type`) is rejected with a `422` at
+task-creation time, before a task row is even created.
+
+Response (`201`):
+
+```json
+{
+  "task_id": "uuid",
+  "instruction": "...",
+  "input_type": "text",
+  "attachments": [],
+  "status": "queued",
+  "result_text": null,
+  "error": null,
+  "cancel_requested": false,
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+Malformed requests (missing/empty `instruction`) get a standard FastAPI
+`422` with field-level validation errors — no custom handling needed.
+
+## Task states
+
+```
+queued → received → understanding → perceiving → planning → executing → verifying → completed
+                        (text: skipped)                                            → failed
+                                                                                    → cancelled
+```
+
+`perceiving` (Phase 2): only entered for `input_type != "text"`. Runs
+`iqoo/gateway.py::_perceive` (vision/audio interpretation) before the
+Brain ever sees the task. A `text` task skips straight from `received`
+to `understanding`, identical to Phase 1.
+
+`queued`: row created, not yet picked up by the worker thread.
+`received`: PDR's first event, fired the instant the row is created —
+in Phase 1 this is emitted immediately after `queued` since there is
+no meaningful gap between the two yet (a longer queue in Phase 3's
+higher-concurrency testing may separate them further).
+
+`testing` is defined in the PDR's full state list but not yet emitted by
+anything in Phase 1 or 2 — see `ARCHITECTURE.md`'s "what's deliberately
+not done yet."
+
+## Execution events (SSE)
+
+`GET /api/iqoo/tasks/{task_id}/events` — `text/event-stream`. Each
+message:
+
+```json
+{
+  "type": "execution.step",
+  "task_id": "uuid",
+  "phase": "executing",
+  "message": "Step 1: control",
+  "timestamp": "..."
+}
+```
+
+The stream closes after a terminal-phase event (`completed`, `failed`,
+`cancelled`) or when the client disconnects. Heartbeat comment lines
+(`: heartbeat\n\n`) are sent during idle gaps so intermediate proxies
+(including Office Kit's mirrored connection) don't time the connection
+out.
+
+## Cancellation
+
+`POST /api/iqoo/tasks/{task_id}/cancel` sets a real `threading.Event`
+that `react_loop.run_planned_task`/`run_task` check between every step —
+the same mechanism `main.py` already uses for "stop it" (see that file's
+`_cancel_event`), not a UI-only flag. A queued-but-not-yet-started task
+is cancelled before the Brain is ever called.
+
+## Retry
+
+`POST /api/iqoo/tasks/{task_id}/retry` re-submits the original
+instruction/attachments as a **new** `task_id`, linked back via a
+`retried_from` field for debugging history. It does not resume
+mid-plan — that needs step-level checkpointing, out of scope.
+
+**[Phase 3A]** Only allowed once the original task has reached a
+terminal status (`completed`/`failed`/`cancelled`) — retrying a
+still-running task returns `409 Conflict` rather than creating two
+competing attempts at the same instruction.
+
+## Health
+
+```json
+{
+  "status": "ok",
+  "worker_alive": true,
+  "brain_reachable": true,
+  "vision_model_available": true,
+  "whisper_available": true,
+  "active_task": "uuid-or-null",
+  "queue_depth": 0,
+  "uptime_seconds": 123.4,
+  "version": "iqoo-phase3a"
+}
+```
+
+`brain_reachable` calls the existing `Brain._check_ollama()` — not
+duplicated, just surfaced. `vision_model_available` is `null` (not
+`false`) when Ollama itself couldn't be reached at all — distinct from
+"reachable but the model isn't pulled" (`false`). `whisper_available`
+only confirms `faster-whisper` is importable, not that transcription
+actually works. `status` becomes `"degraded"` if the worker thread has
+died or the brain is unreachable.
+
+## Demo reset
+
+**[Phase 3A]** `POST /api/iqoo/demo/reset` deletes every task row and
+all event history. Returns `409 Conflict` if a task is currently active
+or queued (never resets out from under running work). Never touches
+`memory/store.py` or `founder_mode`'s store — see `ARCHITECTURE.md`.

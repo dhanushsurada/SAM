@@ -164,13 +164,13 @@ def cmd_founder(show_all: bool = False):
 
 
 def cmd_devices():
-    from ecosystem.device_registry import DeviceRegistry
+    from connect.core.device_registry import DeviceRegistry
     registry = DeviceRegistry()
     registry.cleanup_expired_tokens()
     devices = registry.list_devices()
 
     if not devices:
-        print("No trusted devices. Run 'python -m ecosystem.pair_new_device' to pair one.")
+        print("No trusted devices. Run 'python -m interfaces.telegram.pair_new_device' to pair one.")
         return
 
     print(f"\n── TRUSTED DEVICES ({len(devices)}) ──────────────────")
@@ -182,7 +182,7 @@ def cmd_devices():
 
 
 def cmd_revoke_device(device_id: int):
-    from ecosystem.device_registry import DeviceRegistry
+    from connect.core.device_registry import DeviceRegistry
     registry = DeviceRegistry()
     if registry.revoke(device_id):
         print(f"Device {device_id} revoked — it can no longer send SAM commands.")
