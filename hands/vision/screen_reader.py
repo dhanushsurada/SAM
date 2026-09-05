@@ -11,6 +11,8 @@ import json
 import tempfile
 import requests
 from pathlib import Path
+import os
+import subprocess
 
 logger = logging.getLogger("SAM.Vision")
 
@@ -20,11 +22,47 @@ class ScreenReader:
         self.settings = settings
 
     def _take_screenshot(self) -> str:
-        """Take screenshot and return path."""
-        import subprocess
-        path = tempfile.mktemp(suffix=".png")
-        subprocess.run(["screencapture", "-x", path], check=True)
+        """Take a macOS screenshot and return a verified PNG path.
+
+        Keep captures in ``/tmp`` on macOS.  That is the location documented
+        in SAM's permission check and avoids depending on a GUI process's
+        inherited ``TMPDIR``.  Use the system binary explicitly: a desktop
+        launch environment can have a different PATH from an interactive
+        terminal.
+        """
+        fd, path = tempfile.mkstemp(suffix=".png", dir="/tmp" if os.name == "posix" else None)
+        os.close(fd)
+        try:
+            result = subprocess.run(
+                ["/usr/sbin/screencapture", "-x", path],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            self._remove_file(path)
+            raise
+
+        if result.returncode != 0:
+            self._remove_file(path)
+            detail = (result.stderr or result.stdout or "no diagnostic output").strip()
+            raise RuntimeError(
+                "macOS screen capture failed "
+                f"(exit {result.returncode}): {detail}. "
+                "Grant Screen Recording permission to the app that launched SAM "
+                "and restart that app."
+            )
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            self._remove_file(path)
+            raise RuntimeError("macOS screen capture returned success but produced no image")
         return path
+
+    @staticmethod
+    def _remove_file(path: str) -> None:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
 
     def _image_to_base64(self, path: str) -> str:
         with open(path, "rb") as f:
@@ -55,8 +93,7 @@ class ScreenReader:
                 timeout=60
             )
 
-            import os
-            os.unlink(screenshot_path)
+            self._remove_file(screenshot_path)
 
             if response.status_code == 200:
                 result = response.json().get("response", "")
@@ -109,8 +146,7 @@ If not found, return: {{"x": null, "y": null}}"""
                 timeout=60
             )
 
-            import os
-            os.unlink(screenshot_path)
+            self._remove_file(screenshot_path)
 
             if response.status_code != 200:
                 return None

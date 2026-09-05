@@ -155,13 +155,8 @@ class MemoryStore:
             return []
 
     def _get_embedding(self, text: str) -> List[float]:
-        import requests
-        response = requests.post(
-            f"{self.settings.ollama_host}/api/embeddings",
-            json={"model": self.settings.embedding_model, "prompt": text},
-            timeout=30
-        )
-        return response.json()["embedding"]
+        from core.embeddings import get_embedding
+        return get_embedding(text, self.settings.ollama_host, self.settings.embedding_model)
 
     def extract_and_save(self, user_input: str, response: str):
         try:
