@@ -135,18 +135,33 @@ class Brain:
         try:
             r = requests.get(f"{self.settings.ollama_host}/api/tags")
             models = [m["name"] for m in r.json().get("models", [])]
+            # Embedding models expose a different Ollama interface and cannot
+            # produce SAM's structured chat response.
+            chat_models = [model for model in models if "embed" not in model.lower()]
 
-            if self.settings.primary_model in models:
+            if self.settings.primary_model in chat_models:
                 return self.settings.primary_model
-            elif self.settings.fallback_model in models:
+            elif self.settings.fallback_model in chat_models:
                 logger.warning(
                     f"Primary model {self.settings.primary_model} not found. "
                     f"Using fallback: {self.settings.fallback_model}"
                 )
                 return self.settings.fallback_model
+            elif chat_models:
+                # SAM is local-first: choose an existing local chat model
+                # rather than requiring a particular model family. Ollama
+                # preserves its model-list order, giving this a stable,
+                # user-visible default until an explicit selection is saved.
+                selected = chat_models[0]
+                logger.warning(
+                    f"Configured model {self.settings.primary_model} not found. "
+                    f"Using installed model: {selected}"
+                )
+                return selected
             else:
                 raise RuntimeError(
-                    f"No SAM models found in Ollama. Run: ollama pull {self.settings.primary_model}"
+                    "No local chat models are installed in Ollama. Install a chat model "
+                    "with `ollama pull <model>`, then choose it in SAM's setup."
                 )
         except Exception as e:
             raise RuntimeError(f"Model check failed: {e}")

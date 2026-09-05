@@ -350,6 +350,31 @@ class SAM:
                 self.tts.speak(msg)
             return True
 
+        # Local model selection. Only installed Ollama models are accepted
+        # when Ollama is reachable; an offline choice is retained so SAM can
+        # be configured before its local service is started.
+        if t.startswith("model ") and len(t) > len("model "):
+            requested = text.strip()[len("model "):].strip()
+            try:
+                models = self.brain.list_installed_models()
+                if models and requested not in models:
+                    msg = f"{requested} is not installed. Available models: {', '.join(models)}."
+                    print(f"\n{self._display_name}: {msg}\n")
+                    self.tts.speak(msg)
+                    return True
+            except RuntimeError:
+                # Keep the chosen local model; it will be verified when SAM
+                # next reaches the local Ollama service.
+                pass
+
+            self.settings.primary_model = requested
+            self.settings.model_explicitly_set = True
+            self.settings.save()
+            msg = f"I'll use {requested}."
+            print(f"\n{self._display_name}: {msg}\n")
+            self.tts.speak(msg)
+            return True
+
         # Sleep / Stop
         if any(p in t for p in ["sam sleep", "go to sleep"]):
             msg = "Going to sleep. Call me when you need me."
@@ -391,13 +416,10 @@ class SAM:
     # ─── Lifecycle ────────────────────────────────────────────────────────
 
     def _run_first_run_setup(self):
-        """First run only (M6.2): name the assistant, then a
-        non-interactive readiness check using the EXISTING automatic
-        model-selection pipeline (Settings._select_model chose the
-        model already; this just calls Brain._ensure_model() to report
-        the real, current result — no new model router, no invented
-        model names, no choice UI where none existed before). Ordering
-        is deliberate: name, then model, then normal startup continues."""
+        """First run only: choose the display name, then select from models
+        that Ollama actually reports as installed. SAM never pulls models
+        automatically and still starts in a useful degraded mode when no
+        local model service is available."""
         print(f"\nWelcome. Let's get set up.\n")
 
         print("STEP 1 — Name your assistant")
@@ -419,8 +441,34 @@ class SAM:
 
         print("STEP 2 — Checking your local model setup")
         try:
-            model = self.brain._ensure_model()
-            print(f"Model check: using {model}.\n")
+            models = self.brain.list_installed_models()
+            if not models:
+                raise RuntimeError("No local models are installed in Ollama.")
+
+            default = self.settings.primary_model if self.settings.primary_model in models else models[0]
+            print(f"Available local models: {', '.join(models)}")
+            raw_model = input(f"Choose a primary model [{default}]: ").strip()
+            selected = raw_model or default
+            valid_selection = selected in models
+            if not valid_selection:
+                print(f"{selected} is not installed — using {default}.")
+                selected = default
+
+            self.settings.primary_model = selected
+            self.settings.model_explicitly_set = True
+            fallback_candidates = [model for model in models if model != selected]
+            if valid_selection and fallback_candidates:
+                raw_fallback = input(
+                    f"Optional fallback model [{self.settings.fallback_model}] "
+                    "(or 'skip'): "
+                ).strip()
+                if raw_fallback and raw_fallback.lower() != "skip":
+                    if raw_fallback in models:
+                        self.settings.fallback_model = raw_fallback
+                    else:
+                        print(f"{raw_fallback} is not installed — fallback unchanged.")
+            self.settings.save()
+            print(f"Model check: using {selected}.\n")
         except RuntimeError as e:
             print(f"Model check: {e}")
             print(f"({chosen} will still start — you'll just need that "
