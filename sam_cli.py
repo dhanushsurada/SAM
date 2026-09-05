@@ -355,7 +355,7 @@ def cmd_sync_status():
         with open(identity_path) as f:
             identity = json.load(f)
         print(f"\n✅ Identity: {identity.get('name', 'Unknown')}")
-        print(f"   Assistant name: {identity.get('assistant_name', 'SAM')}")
+        print(f"   Assistant name: {identity.get('assistant_name', 'VEDA')}")
     else:
         print("\n❌ No identity file")
 

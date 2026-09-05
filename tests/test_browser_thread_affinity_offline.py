@@ -23,6 +23,8 @@ Usage:
 """
 
 import sys
+import asyncio
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -133,11 +135,46 @@ def test_second_recovery_attempt_also_fails_reports_cleanly():
           mock_page.goto.call_count == 2)
 
 
+def test_sync_playwright_is_isolated_from_an_asyncio_caller():
+    """The Sync API must be entered on the dedicated worker, never from
+    the caller's running asyncio event loop."""
+    agent = BrowserAgent()
+    mock_ctx = MagicMock()
+    mock_browser = MagicMock()
+    mock_page = MagicMock()
+    mock_ctx.chromium.launch.return_value = mock_browser
+    mock_browser.new_page.return_value = mock_page
+    mock_page.goto.return_value = None
+    entered_from = []
+
+    def fake_sync_playwright():
+        try:
+            asyncio.get_running_loop()
+            loop_running = True
+        except RuntimeError:
+            loop_running = False
+        entered_from.append((threading.get_ident(), loop_running))
+        manager = MagicMock()
+        manager.__enter__.return_value = mock_ctx
+        return manager
+
+    async def call_browser():
+        return agent.execute(url="https://example.com", task="")
+
+    with patch("playwright.sync_api.sync_playwright", side_effect=fake_sync_playwright):
+        asyncio.run(call_browser())
+
+    check("Sync Playwright starts outside the caller's asyncio loop",
+          entered_from and entered_from[0][1] is False)
+    agent.close()
+
+
 def main():
     test_error_signature_detection()
     test_reactive_recovery_on_real_error()
     test_non_thread_errors_are_not_retried()
     test_second_recovery_attempt_also_fails_reports_cleanly()
+    test_sync_playwright_is_isolated_from_an_asyncio_caller()
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")
     if not all(results):
