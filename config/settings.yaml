@@ -38,6 +38,10 @@ founder_mode_enabled: true
 # telegram_bot_token: "123456:ABC-your-bot-token-from-BotFather"
 # telegram_bot_username: "your_sam_bot"
 
+# iQOO — Phone Task Gateway API server (interfaces/api/server.py)
+# api_host: "0.0.0.0"
+# api_port: 8420
+
 # Runtime
 incognito: false
 log_level: "INFO"

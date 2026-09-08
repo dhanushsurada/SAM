@@ -8,8 +8,8 @@ import yaml
 import os
 import platform
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 CONFIG_PATH = Path(__file__).parent / "settings.yaml"
 BASE_DIR = Path(__file__).parent.parent
@@ -21,29 +21,6 @@ PLATFORM = platform.system()
 IS_MAC = PLATFORM == "Darwin"
 IS_WIN = PLATFORM == "Windows"
 
-# M6.1/M6.2 — validates values headed for memory/identity.py's
-# assistant_name (the single source of truth for the user-facing
-# display name — see main.py). Not a Settings field itself: keeping a
-# same-named field here would create two competing sources of truth.
-MAX_ASSISTANT_NAME_LENGTH = 40
-
-
-def validate_assistant_name(name: str) -> str:
-    """Minimal validation for the assistant's user-facing display name.
-    Rejects None/empty/whitespace-only, excessively long, or
-    control-character-containing names. Returns the trimmed name.
-    Raises ValueError with a human-readable reason otherwise."""
-    if name is None:
-        raise ValueError("Display name cannot be empty")
-    trimmed = name.strip()
-    if not trimmed:
-        raise ValueError("Display name cannot be empty or whitespace-only")
-    if len(trimmed) > MAX_ASSISTANT_NAME_LENGTH:
-        raise ValueError(f"Display name is too long (max {MAX_ASSISTANT_NAME_LENGTH} characters)")
-    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
-        raise ValueError("Display name cannot contain control characters")
-    return trimmed
-
 
 def _ensure_data_dirs():
     """Create ~/.sam_data structure if it doesn't exist."""
@@ -54,8 +31,6 @@ def _ensure_data_dirs():
         SAM_DATA_DIR / "founder_mode" / "export",
         SAM_DATA_DIR / "skills" / "compiled",
         SAM_DATA_DIR / "logs",
-        SAM_DATA_DIR / "sovereign" / "documents",
-        SAM_DATA_DIR / "sovereign" / "output",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -65,20 +40,14 @@ _ensure_data_dirs()
 
 @dataclass
 class Settings:
-    # Identity — the assistant's user-facing display name lives in
-    # memory/identity.py's Identity.assistant_name (single source of
-    # truth, persistent), not here. See main.py.
+    # Identity
+    assistant_name: str = "SAM"
     user_name: str = "Dhanush"
 
     # Brain
     ollama_host: str = "http://localhost:11434"
     primary_model: str = "qwen2.5:14b"
     fallback_model: str = "qwen2.5:7b"
-    # M6.2 — set True once a person has explicitly chosen a model (first-run
-    # Step 2, or the runtime "model X" command) and it's been persisted via
-    # save(). Guards _select_model(): an explicit choice must never be
-    # silently overwritten by the RAM-based auto-pick below.
-    model_explicitly_set: bool = False
     model_context_length: int = 8192
     temperature: float = 0.7
     max_tokens: int = 1024
@@ -132,6 +101,14 @@ class Settings:
     telegram_bot_token: str = ""       # from @BotFather
     telegram_bot_username: str = ""    # bot's @username, without the @
 
+    # iQOO Hackathon 2026 branch — Phone Task Gateway API server
+    # (interfaces/api/server.py). Single source of truth for host/port:
+    # runtime/lifecycle/specs.py's health_url and sam_cli.py's doctor port
+    # check both read these same values, so the server and the things that
+    # probe it can never independently drift apart.
+    api_host: str = "0.0.0.0"
+    api_port: int = 8420
+
     # Phase 3 — Licensing. Matches the frozen principle: "no hard license
     # enforcement at launch — non-blocking warnings only." Default is a
     # warning at startup if unlicensed/invalid, never a lock-out. Flip to
@@ -141,32 +118,6 @@ class Settings:
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")
-
-    # SIH26117 — Sovereign Workbench, document ingestion (sovereign/ingestion/).
-    # Chunk size/overlap are word counts, not characters. Overlap must stay
-    # smaller than chunk_size (enforced in sovereign/ingestion/chunk.py).
-    sovereign_docs_dir: str = str(SAM_DATA_DIR / "sovereign" / "documents")
-    sovereign_chunk_size: int = 300
-    sovereign_chunk_overlap: int = 50
-    # Separate Chroma collection from memory's "sam_memory" — keeps document
-    # evidence and conversational memory from bleeding into each other.
-    # Used starting with the local-knowledge milestone, not Milestone 1.
-    sovereign_knowledge_collection: str = "sam_documents"
-    sovereign_vision_model: Optional[str] = None  # None -> reuse vision_model
-    sovereign_top_k: int = 5  # retrieval default, mirrors memory_top_k
-    # Generated deliverables (create_document) — deliberately separate
-    # from sovereign_docs_dir (source documents to be ingested).
-    sovereign_output_dir: str = str(SAM_DATA_DIR / "sovereign" / "output")
-    # Network egress evidence (Milestone 5) — dedicated path, deliberately
-    # not reusing either of the two existing (mutually inconsistent)
-    # logging conventions found in the Milestone 0 audit.
-    sovereign_network_log: str = str(SAM_DATA_DIR / "sovereign" / "network_guard.jsonl")
-    sovereign_allowed_hosts: List[str] = field(default_factory=list)  # extra trusted hosts beyond loopback + ollama_host
-    # Milestone 6 — explicit opt-in. Real task execution is only wrapped
-    # in SocketGuard when this is True. Must default False: browser and
-    # Telegram need real network access, and existing non-Sovereign SAM
-    # behavior must be unaffected unless a user deliberately turns this on.
-    sovereign_mode: bool = False
 
     # Runtime
     incognito: bool = False
@@ -214,11 +165,6 @@ class Settings:
             self.detected_ram_gb = 16
 
     def _select_model(self):
-        # An explicit choice (first-run Step 2, or the runtime "model X"
-        # command) always wins — RAM-based auto-detection only ever
-        # supplies a default when no explicit choice has been made yet.
-        if self.model_explicitly_set:
-            return
         if self.detected_ram_gb is None:
             return
         if self.detected_ram_gb >= 32:

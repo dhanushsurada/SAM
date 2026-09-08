@@ -7,8 +7,6 @@ Sandboxed — dangerous commands blocked.
 import logging
 import subprocess
 import shlex
-import os
-import platform
 from typing import Optional
 
 logger = logging.getLogger("SAM.Terminal")
@@ -65,18 +63,9 @@ class TerminalRunner:
             logger.info(f"Purpose: {description}")
 
         try:
-            # A shell pipeline otherwise reports only the exit status of its
-            # final command.  For example, ``grep missing | xargs sed`` used
-            # to look successful because xargs exited 0 even when grep failed.
-            # zsh ships with macOS; bash is the portable POSIX fallback.
-            shell = "/bin/zsh" if platform.system() == "Darwin" else "/bin/bash"
-            if not os.path.exists(shell):
-                shell = "/bin/sh"
-            shell_command = f"set -o pipefail; {command}"
             result = subprocess.run(
-                shell_command,
+                command,
                 shell=True,
-                executable=shell,
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -90,7 +79,7 @@ class TerminalRunner:
                 output += f"\nSTDERR: {result.stderr}"
 
             if result.returncode != 0:
-                output += f"\nSAM_TERMINAL_FAILED: exit code {result.returncode}"
+                output += f"\nExit code: {result.returncode}"
 
             self._history.append({
                 "command": command,
@@ -99,9 +88,7 @@ class TerminalRunner:
             })
 
             logger.info(f"Command output: {output[:200]}")
-            if result.returncode != 0:
-                return output.strip() or f"SAM_TERMINAL_FAILED: exit code {result.returncode}"
-            return output.strip() or "Command completed successfully"
+            return output.strip() or f"Command completed (exit code: {result.returncode})"
 
         except subprocess.TimeoutExpired:
             return "Command timed out after 60 seconds"

@@ -1,13 +1,24 @@
 # iQOO Branch — Progress
 
 Status labels used throughout, per the Phase 3 protocol:
-**IMPLEMENTED** · **TESTED OFFLINE** · **REAL-DEVICE TESTED** ·
-**HARDWARE VERIFIED** · **UNVERIFIED** · **DEFERRED**
+**IMPLEMENTED** · **TESTED OFFLINE** · **REAL-PROCESS TESTED** ·
+**REAL-DEVICE TESTED** · **HARDWARE VERIFIED** · **UNVERIFIED** · **DEFERRED**
+
+(REAL-PROCESS TESTED added at Phase 3B: a real local OS process was
+started/stopped/polled — meaningfully more than an offline mock, but
+NOT the same claim as REAL-DEVICE TESTED, which means actual iQOO/vivo
+hardware. The two are never collapsed into each other.)
 
 **PHASE 1:** COMPLETE
 **PHASE 2:** COMPLETE
 **PHASE 3A (Reliability & Recovery):** COMPLETE — IMPLEMENTED, TESTED OFFLINE.
-Awaiting explicit "Continue to Phase 3B."
+**PHASE 3A.5 (Migration to canonical SAM architecture):** COMPLETE — IMPLEMENTED, TESTED OFFLINE. See `PHASE_3A5_MIGRATION.md`.
+**PHASE 3B (SAM Runtime & Deployment):** COMPLETE — IMPLEMENTED, TESTED OFFLINE, REAL-PROCESS TESTED. See `docs/architecture/RUNTIME.md` and `docs/deployment/LOCAL_RUNTIME.md`.
+**PHASE 3B FOLLOW-UP (config centralization + two known-bug fixes + one newly-discovered fix):** COMPLETE — IMPLEMENTED, TESTED OFFLINE, REAL-PROCESS TESTED. Detailed below.
+
+No further software-only gap is currently identified against the PDR
+reference and phase docs. Remaining work is hardware/event-dependent —
+see **Next Action** at the bottom of this file.
 
 ---
 
@@ -180,3 +191,175 @@ plan, not yet started.
 **Last Commit:** Not yet committed — pending this checkpoint's
 completion report, per the "implement → test → document → commit →
 push → report → STOP" protocol.
+
+---
+
+## Phase 3A.5 — Migration to canonical SAM architecture (COMPLETE)
+
+**Status: IMPLEMENTED, TESTED OFFLINE (106/106 new architecture-boundary
+checks). Full detail in `PHASE_3A5_MIGRATION.md`; summarized here.**
+
+Restructured the iQOO-specific code into SAM's long-term canonical
+package layout, with zero behavior change:
+
+- `iqoo/{gateway,task_store,events,schemas,server,vision_adapter,
+  audio_adapter,media_validation,errors}.py` → `interfaces/api/*` and
+  `multimodal/{audio,vision}/*`.
+- `ecosystem/{telegram_bridge,pair_new_device}.py` → `interfaces/telegram/*`.
+- `ecosystem/device_registry.py` → `connect/core/device_registry.py`.
+- `client/` → `interfaces/web/`.
+
+`iqoo/` and `ecosystem/` are kept as thin forwarding shims (e.g.
+`iqoo/server.py` is just `from interfaces.api.server import app, main`)
+— nothing that imports the old paths breaks. `connect/bridges/vivo_iqoo/`
+exists as a documentation stub only; no vendor SDK, pairing mechanism, or
+transport layer was fabricated for it.
+
+`tests/test_architecture_boundaries_offline.py` (106 checks) verifies the
+migration didn't just move files but preserved identity and behavior:
+shim objects are the *same object* as their canonical counterparts (not
+re-implementations), HTTP routes are unchanged, and the on-disk
+`~/.sam_data/iqoo/tasks.db` path did not move (no data migration
+needed).
+
+**Not committed** — sits in the working tree, per the
+implement→test→document→(await approval)→commit protocol.
+
+## Phase 3B — SAM Runtime & Deployment (COMPLETE)
+
+**Status: IMPLEMENTED, TESTED OFFLINE (85/85 new checks across three
+suites), REAL-PROCESS TESTED. Full detail in
+`docs/architecture/RUNTIME.md` and `docs/deployment/LOCAL_RUNTIME.md`;
+summarized here.**
+
+Added `runtime/` — a small process-lifecycle layer that knows how to
+start, stop, restart, and health-check SAM's three independent entry
+points (`main.py`, `interfaces/api/server.py`,
+`interfaces/telegram/telegram_bridge.py`) without changing what any of
+them do:
+
+- `runtime/lifecycle/specs.py` — `ProcessSpec` + `default_specs()`.
+- `runtime/lifecycle/manager.py` — `SAMRuntime` (start/stop/restart,
+  PID-reuse-safe signaling via `cmdline_fragment`).
+- `runtime/lifecycle/state.py` — one JSON state file per process under
+  `~/.sam_data/runtime/`.
+- `runtime/health/status.py` — six-state `RuntimeStatus`
+  (`RUNNING`/`DEGRADED`/`STOPPED`/`STARTING`/`STOPPING`/`FAILED`).
+- `sam_cli.py` — `start`/`stop`/`restart`/`status`/`doctor` wired to
+  `SAMRuntime`.
+
+**Honest readiness-signal distinction, not glossed over:** only `api` has
+a real HTTP health endpoint. `voice` and `telegram` expose no queryable
+readiness signal at all today, so their "ready" check is genuinely just
+"still alive after a short grace period" — not equivalent to `api`'s
+check, and documented as such rather than presented with the same
+confidence.
+
+**Real bug found and fixed:** `cmd_skills` was referenced in
+`sam_cli.py`'s command dispatch table but never defined — a `NameError`
+on import that crashed *every* CLI command, since Python evaluates the
+whole dispatch dict at module load time. Pre-existing since the CLI's
+initial commit; found and fixed as part of this checkpoint's audit, not
+a Phase 3B regression.
+
+**REAL-PROCESS TESTED** (not REAL-DEVICE TESTED — see the status-label
+note at the top of this file): `interfaces.api.server` started as an
+actual local OS process via `sam start api`, polled live via `sam
+status`/`sam doctor`, restarted (confirmed via a *different* PID), and
+stopped gracefully. `voice` and `telegram` have not been REAL-PROCESS
+TESTED — see the hardware validation checklist under Next Action.
+
+### Phase 3B follow-up — config centralization + two known-bug fixes (COMPLETE, this session)
+
+Three small, separately-scoped fixes, each IMPLEMENTED, TESTED OFFLINE,
+and REAL-PROCESS TESTED where applicable:
+
+1. **Config centralization.** `RUNTIME.md` §6 flagged this as an open
+   gap: `interfaces/api/server.py`'s host/port,
+   `runtime/lifecycle/specs.py`'s `health_url`, and `sam_cli.py doctor`'s
+   port-free check each held an independent literal `0.0.0.0:8420` —
+   three copies that happened to agree, not centralization. Added
+   `Settings.api_host`/`api_port` (default unchanged); all three now
+   read the same `Settings()` instance. Proven end-to-end with a real
+   process bound to a *non-default* overridden port (54999), not just an
+   offline mock. `tests/test_runtime_config_offline.py` — 16/16.
+2. **`cmd_logs` path mismatch, fixed.** `main.py` wrote its log file to a
+   bare relative path `"logs/sam.log"` — resolved against whatever the
+   process's current working directory happened to be, and a *different*
+   file than `sam_cli.py`'s `cmd_logs`, which reads
+   `SAM_DATA_DIR/logs/sam.log`. This only ever appeared to work because
+   the repo ships a committed `logs/.gitkeep` at its own root. `main.py`
+   now writes to the same `SAM_DATA_DIR`-based path `cmd_logs` already
+   read from — the same fix pattern as (1): make both sides read one
+   shared expression instead of holding independent copies.
+3. **`pgrep -f main.py` false-positive risk, narrowed.** `sam status`'s
+   legacy "SAM process" line ran a system-wide `pgrep -f main.py`, which
+   any unrelated process with "main.py" anywhere in its command line
+   would match. Now prefers the Phase-3B runtime-tracked state (one
+   specific recorded PID, liveness-checked, cmdline-fragment-checked)
+   when it exists; falls back to the original pgrep only when SAM was
+   started outside `sam start` (e.g. `python main.py` run directly) —
+   and that fallback is now honestly labeled best-effort rather than
+   shown with the same confidence as a verified match. This does not
+   eliminate the false-positive risk for that fallback path entirely (a
+   truly collision-proof check would need `/proc`-based cwd
+   verification, Linux-only, judged out of proportion to the reported
+   bug); it narrows the risk substantially for the common `sam start`
+   path.
+
+`tests/test_cli_diagnostics_offline.py` — 14/14, covering both (2) and
+(3) functionally: a real throwaway log file is written and read back
+end-to-end; a real (but non-SAM) dummy process stands in for PID-liveness
+and PID-reuse scenarios.
+
+4. **Process leak in `test_runtime_cli_offline.py`, found and fixed —
+   not one of the two originally-known bugs, discovered during this
+   session's own investigation.** While tracking down why a real
+   `interfaces.api.server` process kept turning up unexpectedly during
+   this session's testing, traced it to
+   `test_every_command_survives_dispatch()`: it runs `start api`, `stop
+   api`, `restart api` as three genuinely separate real subprocesses
+   (each `sam_cli.py` invocation is its own OS process — a `mock.patch`
+   in the test's own process can't reach into a different one), but each
+   got its own fresh, disconnected `HOME`. `stop api` was therefore
+   checking a completely different, empty `~/.sam_data` than the one
+   `start api` had just written its state to — it could never actually
+   find or stop what `start` spawned. Confirmed empirically via
+   bisection (running each suite alone, checking for a leftover process
+   after each), not assumed. Fixed by having `start`/`stop`/`restart api`
+   specifically share one `HOME` with each other, plus an unconditional
+   safety-net stop after the loop — using the real, already-proven
+   `SAMRuntime.stop()` directly (a bare `os.kill(SIGTERM)` was tried
+   first and found insufficient: this process doesn't exit within 1s of
+   a bare SIGTERM, and `SAMRuntime.stop()`'s poll-and-escalate-to-SIGKILL
+   behavior is exactly why it's the right tool to reuse here rather than
+   reinventing a weaker version). Verified by running the suite 5
+   consecutive times and confirming zero leaked processes after every
+   run, not just once. No new checks added (still 31/31,
+   `test_runtime_cli_offline.py`) — this fixed how the suite manages its
+   own subprocess resources, not what it verifies.
+
+**Full regression after this follow-up: 513/513, 20 suites, 0 failures**
+(up from 499/499/19 before this follow-up, and 483/483/18 before that —
+each increase is exactly the new suite's own check count. Item 4 above
+doesn't change this number: it fixed a resource leak, not a check
+count.)
+
+**Not committed** — same as 3A.5/3B, sits in the working tree pending
+explicit approval.
+
+---
+
+**Next Action:** No further software-only gap is currently justified
+against the PDR reference + phase docs. Remaining work is
+hardware/event-dependent: `voice`/`telegram` real-process start, real
+vision/audio model quality, real phone round-trip, live Telegram bot,
+real Office Kit, Windows/macOS `sam doctor` paths, and the PDR's own
+≥9/10-repeated-runs bar — none of which can be honestly produced from a
+sandbox. 3C–3H numbering is explicitly not treated as required scope
+(the authoritative PDR defines three official phases, not eight).
+
+**Last Commit:** Still not committed — 3A.5, 3B, and this follow-up all
+sit in the working tree together, pending explicit approval, per the
+"implement → test → document → (commit if authorized) → package →
+report → stop" protocol.

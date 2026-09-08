@@ -81,11 +81,8 @@ class TextToSpeech:
 
         audio_chunks = []
         for result in self._kokoro_pipeline(text, voice=voice, speed=speed):
-            # Kokoro 0.9.x yields Result objects; earlier releases yielded
-            # (graphemes, phonemes, audio) tuples. Support both APIs.
-            if hasattr(result, "audio"):
-                chunk = result.audio
-            elif isinstance(result, (tuple, list)):
+            # Kokoro yields (graphemes, phonemes, audio) tuples
+            if isinstance(result, (tuple, list)):
                 chunk = result[-1]
             else:
                 chunk = result
@@ -95,8 +92,6 @@ class TextToSpeech:
 
             # Ensure it's a proper 1D numpy array
             try:
-                if hasattr(chunk, "detach"):
-                    chunk = chunk.detach().cpu().numpy()
                 chunk = np.array(chunk, dtype=np.float32).flatten()
                 if chunk.size > 0:
                     audio_chunks.append(chunk)
@@ -162,9 +157,7 @@ class TextToSpeech:
         self._pyttsx3_engine.runAndWait()
 
     def _speak_print(self, text: str):
-        from memory.identity import Identity
-        display_name = Identity().load().get("assistant_name", "VEDA")
-        print(f"\n[{display_name}]: {text}\n")
+        print(f"\n[SAM]: {text}\n")
 
     # ─── Audio Playback ───────────────────────────────────────────────────
 
