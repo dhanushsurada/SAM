@@ -7,7 +7,6 @@ Falls back to keyboard input if model files missing.
 
 import logging
 import threading
-from pathlib import Path
 import numpy as np
 from typing import Callable
 
@@ -29,17 +28,6 @@ class WakeWordListener:
             # Download default models if missing
             import openwakeword
             openwakeword.utils.download_models()
-
-            # openWakeWord 0.6.0 only downloads an ONNX feature model when
-            # its TFLite sibling is absent. A partial prior download therefore
-            # leaves Model(..., inference_framework="onnx") unusable. Repair
-            # precisely those required ONNX feature files before loading.
-            model_dir = Path(openwakeword.__file__).parent / "resources" / "models"
-            for feature in openwakeword.FEATURE_MODELS.values():
-                onnx_name = Path(feature["download_url"]).with_suffix(".onnx").name
-                if not (model_dir / onnx_name).exists():
-                    onnx_url = feature["download_url"].replace(".tflite", ".onnx")
-                    openwakeword.utils.download_file(onnx_url, str(model_dir))
 
             from openwakeword.model import Model
             self._model = Model(
@@ -109,17 +97,15 @@ class WakeWordListener:
         Press ENTER to trigger SAM.
         This is the active mode until openWakeWord models are confirmed working.
         """
-        from memory.identity import Identity
-        display_name = Identity().load().get("assistant_name", "VEDA")
         print("\n" + "="*50)
-        print(f"{display_name} KEYBOARD MODE")
-        print(f"Press ENTER to speak to {display_name}")
+        print("SAM KEYBOARD MODE")
+        print("Press ENTER to speak to SAM")
         print("Type 'quit' to exit")
         print("="*50 + "\n")
 
         while self._running:
             try:
-                user_input = input(f">> Press ENTER to activate {display_name}: ")
+                user_input = input(">> Press ENTER to activate SAM: ")
                 if user_input.lower().strip() == "quit":
                     self._running = False
                     break

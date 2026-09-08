@@ -64,6 +64,22 @@ def _startup():
     logger.info("iQOO phone gateway started")
 
 
+@app.on_event("shutdown")
+def _shutdown():
+    # Phase 3B, Checkpoint 3: this handler was previously missing entirely.
+    # TaskGateway.shutdown() has existed since Phase 3A but had no caller
+    # anywhere in the codebase (confirmed by a repo-wide grep during the
+    # Checkpoint 1 audit) — the worker thread is daemon=True and was simply
+    # killed on process exit, mid-task if one was running, with no chance
+    # to persist state or exit cleanly. This wires the existing method up
+    # so SIGTERM (sent by runtime.lifecycle.SAMRuntime.stop(), or Ctrl+C,
+    # or anything else) actually reaches it via uvicorn's own shutdown
+    # event, instead of being silently dropped as before.
+    if _gateway is not None:
+        _gateway.shutdown()
+        logger.info("iQOO phone gateway shut down")
+
+
 # ─── Task API ────────────────────────────────────────────────────────────
 
 @app.post("/api/iqoo/tasks", response_model=TaskRecord, status_code=201)
@@ -204,9 +220,11 @@ if CLIENT_DIR.exists():
 
 def main():
     import uvicorn
+    from config.settings import Settings
+    settings = Settings()
     logging.basicConfig(level=logging.INFO,
                          format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
-    uvicorn.run(app, host="0.0.0.0", port=8420)
+    uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 
 
 if __name__ == "__main__":

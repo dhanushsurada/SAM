@@ -112,24 +112,15 @@ class DeviceRegistry:
                 conn.commit()
                 return False
 
-            # Does this external_id already have a record under a different row?
+            # Is this external_id already trusted under a different row?
             existing = conn.execute(
-                "SELECT id, status FROM devices WHERE channel = ? AND external_id = ? AND id != ?",
-                (channel, external_id, row_id)
+                "SELECT id FROM devices WHERE channel = ? AND external_id = ? AND status = 'trusted'",
+                (channel, external_id)
             ).fetchone()
             if existing:
-                existing_id, existing_status = existing
-                if existing_status != "trusted":
-                    now = datetime.now().isoformat()
-                    conn.execute(
-                        "UPDATE devices SET device_name = ?, status = 'trusted', "
-                        "pairing_token = NULL, token_expires_at = NULL, paired_at = ?, last_active = ? "
-                        "WHERE id = ?",
-                        (device_name, now, now, existing_id)
-                    )
                 conn.execute("DELETE FROM devices WHERE id = ?", (row_id,))
                 conn.commit()
-                logger.info(f"external_id {external_id} already exists — reused device record and consumed token")
+                logger.info(f"external_id {external_id} already trusted — cleaned up spare token row")
                 return True
 
             now = datetime.now().isoformat()

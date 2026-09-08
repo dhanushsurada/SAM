@@ -7,7 +7,6 @@ Opens URLs, fills forms, extracts data, navigates pages.
 import logging
 import json
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 logger = logging.getLogger("SAM.Browser")
@@ -19,18 +18,19 @@ class BrowserAgent:
         self._browser = None
         self._page = None
         self._started = False
-        # Playwright's Sync API must never be started from a thread with an
-        # active asyncio event loop, and every object it creates must remain
-        # on the same OS thread. The rest of SAM deliberately has a
-        # synchronous Hand interface, so keep that interface and confine all
-        # Sync Playwright calls to this one long-lived worker instead of
-        # attempting to run an async loop inside the ReAct loop.
-        self._executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="SAM-Playwright"
-        )
-        # This records the dedicated worker for diagnostics. It is no longer
-        # the caller thread: text input and async integrations may invoke
-        # execute() from any thread safely.
+        # Bug fixed here (found via real Mac testing): Playwright's sync API
+        # binds its dispatcher to whichever OS thread created it — it is
+        # NOT safe to call from a different thread. main.py's input
+        # handling spawns a fresh thread per message, so turn 2's browser
+        # call could land on a completely different thread than turn 1's —
+        # and turn 1's thread has since exited, permanently breaking every
+        # future browser call for the rest of the session with
+        # "cannot switch to a different thread (which happens to have
+        # exited)". This was confirmed in testing: the FIRST turn's
+        # multi-step browser use worked flawlessly (same thread throughout
+        # that one turn), but the very next separate message's first
+        # browser call failed immediately, and every one after that failed
+        # identically for the rest of the session.
         self._owner_thread_id = None
 
     def _start(self):
@@ -93,10 +93,6 @@ class BrowserAgent:
         return "cannot switch to a different thread" in msg or "greenlet" in msg
 
     def execute(self, url: str = "", task: str = "") -> str:
-        """Run browser work on Playwright's dedicated synchronous thread."""
-        return self._executor.submit(self._execute, url, task).result()
-
-    def _execute(self, url: str = "", task: str = "") -> str:
         """
         Navigate to URL and complete the given task. Returns result as text.
 
@@ -208,9 +204,6 @@ class BrowserAgent:
 
     def screenshot(self, path: str = None) -> str:
         """Take screenshot of browser page."""
-        return self._executor.submit(self._screenshot, path).result()
-
-    def _screenshot(self, path: str = None) -> str:
         if path is None:
             import tempfile
             path = tempfile.mktemp(suffix=".png")
@@ -218,13 +211,13 @@ class BrowserAgent:
         return path
 
     def get_page_url(self) -> str:
-        return self._executor.submit(self._get_page_url).result()
-
-    def _get_page_url(self) -> str:
         return self._page.url if self._page else ""
 
     def close(self):
-        try:
-            self._executor.submit(self._force_close).result()
-        finally:
-            self._executor.shutdown(wait=True)
+        if self._started:
+            try:
+                self._browser.close()
+                self._playwright_ctx.__exit__(None, None, None)
+                self._started = False
+            except Exception:
+                pass
