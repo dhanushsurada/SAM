@@ -108,27 +108,59 @@ fi
 
 echo "  Using Python: $($PYTHON --version)"
 
-$PYTHON -m venv .venv
+if [ -d ".venv" ] && [ -x ".venv/bin/python3" ]; then
+    echo "  Existing .venv found — reusing it (run 'rm -rf .venv' first for a clean rebuild)"
+else
+    if [ -d ".venv" ]; then
+        echo -e "${YELLOW}  .venv exists but looks incomplete — recreating it${NC}"
+        rm -rf .venv
+    fi
+    $PYTHON -m venv .venv
+fi
 source .venv/bin/activate
 pip install --upgrade pip --quiet
 
 echo -e "${GREEN}[6/8] Installing Python packages...${NC}"
+# Safe to re-run: pip install is idempotent and repairs a partial/broken
+# env (missing or outdated packages) without touching unrelated ones.
 pip install -r requirements.txt --quiet
 
 echo "  Installing Playwright browsers..."
 playwright install chromium
 
-echo -e "${GREEN}[7/8] Creating directory structure...${NC}"
-mkdir -p logs
-mkdir -p memory/store/chroma
-mkdir -p founder_mode/store
-mkdir -p founder_mode/export
-mkdir -p skills/compiled
-mkdir -p skills/library
+echo -e "${GREEN}[7/8] Initializing ~/.sam_data...${NC}"
+# All persistent SAM data lives under ~/.sam_data (see config/settings.py),
+# not inside the repo — this survives reinstalls/clones. The old
+# repo-relative dirs this step used to create (logs/, memory/store/,
+# founder_mode/store/, skills/compiled/, skills/library/) are no longer
+# read by any code path (memory/store.py, founder_mode/manager.py, and
+# skills/compiler.py all migrated to ~/.sam_data — see skills/compiler.py's
+# docstring for that migration's history). Left untouched here, never
+# deleted, in case anything legacy is still sitting in them.
+mkdir -p "$HOME/.sam_data/logs"
+mkdir -p "$HOME/.sam_data/memory/chroma"
+mkdir -p "$HOME/.sam_data/founder_mode/export"
+mkdir -p "$HOME/.sam_data/skills/compiled"
 
 echo -e "${GREEN}[8/8] Installing launchd agent (auto-start on boot)...${NC}"
 PLIST_PATH="$HOME/Library/LaunchAgents/ai.sam.assistant.plist"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Idempotent reinstall: if the agent is already loaded, unload it *before*
+# overwriting its plist. Without this, launchd keeps running the job as it
+# was defined at last load while the file on disk changes underneath it —
+# the two silently drift apart until the next reboot happens to re-read it.
+AGENT_WAS_LOADED=false
+if launchctl list 2>/dev/null | grep -q "ai.sam.assistant"; then
+    AGENT_WAS_LOADED=true
+    echo "  Existing agent is loaded — unloading before update..."
+    if ! launchctl unload "$PLIST_PATH" 2>/tmp/sam_launchd_unload_err; then
+        echo -e "${YELLOW}  WARNING: launchctl unload reported an error:${NC}"
+        cat /tmp/sam_launchd_unload_err
+        echo -e "${YELLOW}  Continuing — the plist will still be rewritten and (re)loaded below.${NC}"
+    fi
+    rm -f /tmp/sam_launchd_unload_err
+fi
 
 cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -161,8 +193,19 @@ cat > "$PLIST_PATH" << EOF
 </plist>
 EOF
 
-launchctl load "$PLIST_PATH" 2>/dev/null || true
-echo "  launchd agent installed at $PLIST_PATH"
+if launchctl load "$PLIST_PATH" 2>/tmp/sam_launchd_load_err; then
+    if [ "$AGENT_WAS_LOADED" = true ]; then
+        echo "  launchd agent reinstalled (was already running) at $PLIST_PATH"
+    else
+        echo "  launchd agent freshly installed at $PLIST_PATH"
+    fi
+else
+    echo -e "${RED}  ERROR: launchctl load failed:${NC}"
+    cat /tmp/sam_launchd_load_err
+    echo -e "${YELLOW}  The plist was written to $PLIST_PATH but is not loaded.${NC}"
+    echo -e "${YELLOW}  SAM will still run manually (see 'To start SAM now' below); auto-start on boot will not work until this is resolved.${NC}"
+fi
+rm -f /tmp/sam_launchd_load_err
 
 echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════════════════════╗${NC}"

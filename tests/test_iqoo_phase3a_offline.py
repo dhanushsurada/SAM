@@ -411,6 +411,10 @@ def test_health_reports_expanded_diagnostics():
         check("Health does not leak task instruction content",
               "instruction" not in health and "result_text" not in health)
 
+        from interfaces.api.gateway import GATEWAY_VERSION
+        check("Health version field is sourced from the GATEWAY_VERSION constant, not an inline literal",
+              health["version"] == GATEWAY_VERSION)
+
         mock_brain._check_ollama.return_value = False
         health_degraded = gateway.health()
         check("Health degrades to 'degraded' when the brain is unreachable",

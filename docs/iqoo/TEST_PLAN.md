@@ -275,12 +275,15 @@ Original Phase 1 disconnected-client/reconnect/timeout details:
    proving a client can resume a dropped stream without losing in-flight
    events published before it reconnected (the event queue has no
    replay/backlog). This is explicitly deferred to Phase 3.
-3. **Timeout handling** — no task-level timeout exists yet in
-   `iqoo/gateway.py`; a stuck Brain or perception call blocks that task
-   indefinitely (though the worker thread and other queued tasks are
-   unaffected — confirmed for perception specifically by
-   `test_gateway_perception_timeout_like_failure`). Phase 3 scope per
-   the PDR.
+3. **Timeout handling** — ~~no task-level timeout exists yet in
+   `iqoo/gateway.py`~~. **Resolved in Phase 3A.** `interfaces/api/gateway.py`
+   now enforces `task_timeout_seconds` (`_run_task_with_timeout`) so a
+   stuck Brain or perception call fails that task instead of blocking
+   indefinitely (though the worker thread and other queued tasks were
+   already unaffected — confirmed for perception specifically by
+   `test_gateway_perception_timeout_like_failure`). See
+   `test_task_timeout_reports_promptly_and_does_not_get_clobbered` and
+   `test_queue_continues_after_timeout` in `test_iqoo_phase3a_offline.py`.
 
 (Items 2 and 3 immediately above are preserved as they read at the time
 Phase 1/2 shipped — i.e. genuinely open then. Both were resolved in

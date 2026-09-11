@@ -80,6 +80,29 @@ genuinely cannot check this — you'll have to confirm it yourself." A
 the environment is *set up correctly*, not whether SAM happens to be running
 right now.
 
+### New in Phase 4: configured-model check
+
+`sam doctor` used to stop at "Ollama running" — confirming *some* model was
+pulled, but not the one SAM is actually configured to use. It now checks
+`settings.primary_model` against the same `/api/tags` response, no extra
+request. Real transcript, this sandbox, Ollama not running (a genuinely
+common state — the case this addition is most likely to actually matter for
+first-run, before anyone's started Ollama yet):
+
+```
+❌ [FAIL      ] Ollama running — not reachable at http://localhost:11434 — start with: ollama serve
+❓ [UNVERIFIED] Configured model pulled — Ollama unreachable — could not check
+```
+
+With Ollama reachable, this becomes one of:
+
+```
+✅ [PASS      ] Configured model 'qwen2.5:14b' pulled
+```
+```
+❌ [FAIL      ] Configured model 'qwen2.5:14b' pulled — not found among pulled models — run: ollama pull qwen2.5:14b
+```
+
 ## Where things live
 
 - `~/.sam_data/runtime/<name>.json` — one state file per managed process
@@ -88,6 +111,49 @@ right now.
   a genuinely-dead pid the same way regardless.
 - `~/.sam_data/iqoo/tasks.db`, `~/.sam_data/ecosystem/devices.db` —
   unchanged by Phase 3B, still where they were.
+- Everything persistent lives under `~/.sam_data/` — `memory/chroma/`,
+  `founder_mode/` (+ `export/`), `skills/compiled/`, `logs/`. **Phase 4
+  fix:** `setup.sh` used to also create a second, dead set of these same
+  directories relative to the repo itself (`./logs/`, `./memory/store/`,
+  etc.) — leftover from before the `~/.sam_data` migration, never actually
+  read by `memory/store.py`, `founder_mode/manager.py`, or
+  `skills/compiler.py` (all three already pointed at `~/.sam_data`; see
+  `skills/compiler.py`'s docstring for that migration's own history). The
+  installer now creates only the real ones. If you have an old
+  installation with both sets on disk, the repo-relative ones are safe to
+  delete — nothing reads them — but the installer won't touch them for you
+  either way.
+
+## Installing / reinstalling SAM (Phase 4)
+
+Three installers, one shared structure: check platform → Python →
+PortAudio → Ollama → RAM-tiered model pull → venv → `pip install` →
+Playwright Chromium → initialize `~/.sam_data`.
+
+- **`setup.sh` (macOS).** Safe to run again on an existing install: reuses
+  a valid `.venv` instead of recreating it (checks for `.venv/bin/python3`;
+  if `.venv` exists but looks incomplete, it's rebuilt, not silently left
+  broken); `ollama pull` is already idempotent server-side; the `launchd`
+  agent is unloaded before its plist is replaced if one's already running,
+  then reloaded, with the real `launchctl` exit code checked — the old
+  behavior silently swallowed load failures. Never touches an existing
+  `~/.sam_data` or your `settings.yaml`.
+- **`setup_windows.ps1` (Windows).** Same `.venv` reuse pattern, same
+  `~/.sam_data` target. The Task Scheduler step already used
+  `-Force`, which safely replaces an existing task — no separate
+  unload step needed there, unlike launchd. **Implemented, not verified
+  on real Windows hardware** — no environment to test it against so far.
+- **`setup_linux.sh` (Linux, new in Phase 4).** Debian/Ubuntu (`apt`)
+  only — checks for `apt` explicitly and exits cleanly elsewhere rather
+  than guessing. `portaudio19-dev` via `apt`, Ollama via its official Linux
+  install script, RAM read from `/proc/meminfo`. Same venv-reuse and
+  `~/.sam_data` behavior as macOS. **No auto-start-on-boot in this first
+  version** — no systemd unit yet, start manually. **Implemented, not
+  verified on real Linux hardware.**
+
+None of the three will silently pull large models without printing what
+it's doing first, and none will delete or overwrite `~/.sam_data` or an
+existing `settings.yaml` on a rerun.
 
 ## Troubleshooting
 
@@ -103,20 +169,24 @@ something else holds the port will surface as a startup failure with the
 process's own output, not a silent hang.
 
 **`sam status` claims SAM is running when you know it isn't (or the
-reverse).** That's the *existing*, pre-Phase-3B `SAM running (PID: ...)`
+reverse).** ~~That's the *existing*, pre-Phase-3B `SAM running (PID: ...)`
 line specifically — it uses `pgrep -f main.py`, a loose substring match
-against every process's full command line, unrelated to the runtime work
-in this phase. It's a known, pre-existing quirk (see
-`docs/architecture/RUNTIME.md` and the Checkpoint 1 audit) — the newer
-`voice`/`api`/`telegram` lines below it use the actual PID-matched state
-files and don't share this issue.
+against every process's full command line~~ **Fixed since this doc was
+written.** `cmd_status` now checks the same PID-matched state-file path the
+`voice`/`api`/`telegram` lines below it already used, and only falls back
+to the old loose `pgrep -f main.py` match if SAM was started manually
+outside `sam start` (no state file to check) — and that fallback line is
+now honestly labeled "best-effort match — not started via `sam start`"
+rather than shown with the same confidence as a verified match. See
+`sam_cli.py::cmd_status` and the code comment there for the fix history.
 
 **`sam logs` shows nothing even though SAM has clearly been running.**
-Also pre-existing, also unrelated to Phase 3B: `main.py` writes its log to
-`./logs/sam.log` (relative to wherever you launched it from), while
-`sam logs` reads `~/.sam_data/logs/sam.log` — two different files. Not
-touched here since it's outside `runtime/`'s boundary; flagged for
-whenever `main.py`'s own logging setup is next in scope.
+~~Also pre-existing, also unrelated to Phase 3B: `main.py` writes its log
+to `./logs/sam.log`... while `sam logs` reads `~/.sam_data/logs/sam.log` —
+two different files~~ **Fixed since this doc was written.** `main.py` now
+writes its log to `~/.sam_data/logs/sam.log`, the same path `sam logs`
+reads. See `main.py`'s logging setup and the code comment there for the
+fix history.
 
 **Telegram or voice won't start under `runtime`.** The mechanism itself
 (spawn, track, signal, reap) is the same code path proven against the real
@@ -134,3 +204,13 @@ than POSIX signals, following the same platform-branch pattern
 `config/settings.py` already uses for hardware detection. This has never
 run on an actual Windows machine — only implemented by pattern-matching an
 existing convention. Treat it as unverified until someone tries it there.
+
+**I set `primary_model` in `~/.sam_data/settings.yaml`, but SAM keeps
+using a different model after restart.** ~~`_select_model()` unconditionally
+overwrote `primary_model` with a RAM-tier default every startup, regardless
+of what settings.yaml said — YAML's value survived for one line of
+`__post_init__` before being silently clobbered~~ **Fixed since this doc
+was written.** A `model_explicitly_set` flag now guards that: set the first
+time `primary_model` appears in your config, checked by `_select_model()`
+before it does any RAM-tier auto-selection. `sam doctor`'s configured-model
+check (above) will tell you which model is actually in effect either way.

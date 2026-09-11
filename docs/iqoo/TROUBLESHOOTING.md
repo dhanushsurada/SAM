@@ -5,9 +5,13 @@
 - `ModuleNotFoundError: fastapi` / `uvicorn` — `pip install -r requirements.txt`
   (they were added in this branch, see the iQOO section at the bottom of
   the file).
-- Port 8420 already in use — another `iqoo/server.py` instance is
-  probably still running from a previous demo; kill it or change the
-  port in `iqoo/server.py::main()`.
+- Port 8420 already in use — another SAM API server instance (started via
+  `sam start api`, `python -m interfaces.api.server`, or the legacy
+  `python -m iqoo.server` shim — they're the same process) is probably
+  still running from a previous demo; kill it (`sam stop api` if it was
+  started that way) or change `api_port` in `config/settings.py`, the
+  single source of truth for the port everywhere (server bind, `sam
+  doctor`'s check, and `runtime`'s health URL all read it from there).
 
 ## Phone can't reach the server
 

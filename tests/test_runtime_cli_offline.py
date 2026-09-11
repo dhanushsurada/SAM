@@ -270,6 +270,122 @@ def test_cmd_doctor_smoke():
     check("cmd_doctor() reports at least one check", any(word in out for word in ("PASS", "WARN", "FAIL", "UNVERIFIED")))
 
 
+# ─── C: skills path fix (Known Issue #2) ────────────────────────────────
+
+def test_skill_compiles_to_path_cli_actually_reads():
+    """Regression for the skills path mismatch: SkillCompiler used to
+    write to <repo>/skills/, while cmd_skills and cmd_sync_status always
+    read from SAM_DATA_DIR/skills/ — a compiled skill would silently
+    never appear in the CLI. Proves the round trip for real: compile a
+    skill, then confirm both CLI commands that report on skills see it."""
+    home = Path(tempfile.mkdtemp(prefix="sam_skills_test_home_"))
+    try:
+        compile_snippet = (
+            "from skills.compiler import SkillCompiler\n"
+            "from config.settings import Settings\n"
+            "c = SkillCompiler(Settings())\n"
+            "for _ in range(3):\n"
+            "    c.record_successful_task('open safari and go to github', "
+            "[{'action': 'open_app', 'target': 'Safari'}])\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", compile_snippet],
+            cwd=str(REPO_ROOT), env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            capture_output=True, text=True, timeout=15,
+        )
+        check("skill compiles cleanly (3 successful runs of the same pattern)",
+              proc.returncode == 0 and _no_uncaught_python_error(proc))
+
+        expected_db = home / ".sam_data" / "skills" / "skills.db"
+        expected_compiled_dir = home / ".sam_data" / "skills" / "compiled"
+        check("compiled skill DB lands under SAM_DATA_DIR, not the repo", expected_db.exists())
+        compiled_files = list(expected_compiled_dir.glob("*.json")) if expected_compiled_dir.exists() else []
+        check("exactly one compiled skill JSON lands under SAM_DATA_DIR, not the repo",
+              len(compiled_files) == 1)
+
+        skills_proc = run_cli(["skills"], home=home)
+        check("'sam skills' finds the skill it just compiled",
+              bool(compiled_files) and compiled_files[0].stem in skills_proc.stdout)
+
+        status_proc = run_cli(["sync-status"], home=home)
+        check("'sam sync-status' reports the compiled skill count correctly",
+              "Compiled skills: 1" in status_proc.stdout)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def test_legacy_skills_data_migrates_non_destructively():
+    """Regression for the migration path: if a real checkout already had
+    compiled skills under the old <repo>/skills/ location before the
+    path fix, that data must not be silently stranded or deleted. Fully
+    isolated temp directories throughout — never touches the real
+    repository's skills/ directory."""
+    from skills.compiler import _migrate_legacy_skills_data
+
+    old_dir = Path(tempfile.mkdtemp(prefix="sam_skills_legacy_old_"))
+    new_dir = Path(tempfile.mkdtemp(prefix="sam_skills_legacy_new_"))
+    try:
+        old_db = old_dir / "skills.db"
+        old_compiled = old_dir / "compiled"
+        old_compiled.mkdir()
+        new_db = new_dir / "skills.db"
+        new_compiled = new_dir / "compiled"
+
+        import sqlite3 as _sqlite3
+        with _sqlite3.connect(old_db) as conn:
+            conn.execute(
+                "CREATE TABLE skill_candidates (id INTEGER PRIMARY KEY, task_pattern TEXT, "
+                "compiled INTEGER, skill_name TEXT)")
+            conn.execute("INSERT INTO skill_candidates VALUES (1, 'legacy pattern', 1, 'skill_legacy_1')")
+            conn.commit()
+        (old_compiled / "skill_legacy_1.json").write_text(
+            '{"name": "skill_legacy_1", "pattern": "legacy pattern"}')
+
+        _migrate_legacy_skills_data(old_db, old_compiled, new_db, new_compiled)
+        check("migration copies the legacy DB to the new location", new_db.exists())
+        check("migration copies the legacy compiled skill JSON to the new location",
+              (new_compiled / "skill_legacy_1.json").exists())
+        check("migration leaves the old DB in place (copy, not move)", old_db.exists())
+        check("migration leaves the old compiled JSON in place (copy, not move)",
+              (old_compiled / "skill_legacy_1.json").exists())
+
+        _migrate_legacy_skills_data(old_db, old_compiled, new_db, new_compiled)
+        check("migration is idempotent — re-running it doesn't error or remove anything",
+              new_db.exists() and (new_compiled / "skill_legacy_1.json").exists())
+
+        new_db.write_bytes(b"marker: already-populated new-location db")
+        other_old_dir = Path(tempfile.mkdtemp(prefix="sam_skills_legacy_other_"))
+        try:
+            other_old_db = other_old_dir / "skills.db"
+            other_old_db.write_bytes(b"a different, unrelated legacy db")
+            _migrate_legacy_skills_data(other_old_db, old_compiled, new_db, new_compiled)
+            check("migration never overwrites an already-populated new-location DB",
+                  new_db.read_bytes() == b"marker: already-populated new-location db")
+        finally:
+            shutil.rmtree(other_old_dir, ignore_errors=True)
+    finally:
+        shutil.rmtree(old_dir, ignore_errors=True)
+        shutil.rmtree(new_dir, ignore_errors=True)
+
+
+def test_no_legacy_data_is_a_clean_noop():
+    """Fresh-install case: no legacy data anywhere. Must not error, and
+    must not create anything at the old location."""
+    from skills.compiler import _migrate_legacy_skills_data
+    old_dir = Path(tempfile.mkdtemp(prefix="sam_skills_legacy_none_old_"))
+    new_dir = Path(tempfile.mkdtemp(prefix="sam_skills_legacy_none_new_"))
+    try:
+        old_db = old_dir / "skills.db"  # deliberately never created
+        old_compiled = old_dir / "compiled"  # deliberately never created
+        new_db = new_dir / "skills.db"
+        new_compiled = new_dir / "compiled"
+        _migrate_legacy_skills_data(old_db, old_compiled, new_db, new_compiled)
+        check("migration with no legacy data anywhere is a clean no-op", not new_db.exists())
+    finally:
+        shutil.rmtree(old_dir, ignore_errors=True)
+        shutil.rmtree(new_dir, ignore_errors=True)
+
+
 def main():
     print("=== A: every dispatchable command survives dispatch ===")
     test_every_command_survives_dispatch()
@@ -278,6 +394,11 @@ def main():
     print("\n=== B: cmd_start/cmd_stop/cmd_restart delegate correctly ===")
     test_cmd_start_stop_restart_output()
     test_cmd_doctor_smoke()
+
+    print("\n=== C: skills path fix (Known Issue #2) ===")
+    test_skill_compiles_to_path_cli_actually_reads()
+    test_legacy_skills_data_migrates_non_destructively()
+    test_no_legacy_data_is_a_clean_noop()
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")
     if not all(results):

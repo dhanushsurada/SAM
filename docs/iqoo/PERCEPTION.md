@@ -7,8 +7,8 @@ multimodal task schema. For the overall pipeline diagram see
 
 ## What perception is and isn't
 
-Perception (`iqoo/vision_adapter.py`, `iqoo/audio_adapter.py`,
-`iqoo/gateway.py::_perceive`) converts phone attachments into plain
+Perception (`multimodal/vision/adapter.py`, `multimodal/audio/adapter.py`,
+`interfaces/api/gateway.py::_perceive`) converts phone attachments into plain
 text. That text is folded into the `instruction` string handed to
 `Brain.process()` exactly the way a typed task always was. **The Brain,
 Planner, and ReAct loop never see an image or an audio byte** — only
@@ -20,7 +20,7 @@ planning or execution decisions itself.
 - Attachment `kind: "image"`, `mime_type` one of `image/jpeg`,
   `image/png`, `image/webp`, `data`: base64-encoded bytes (no `data:`
   URL prefix), max 8MB decoded.
-- `iqoo/vision_adapter.py::VisionAdapter.interpret(attachment, instruction)`
+- `multimodal/vision/adapter.py::VisionAdapter.interpret(attachment, instruction)`
   calls Ollama's `/api/generate` with the image and a prompt asking for
   a literal, thorough description framed by the instruction — same
   request shape as `hands/vision/screen_reader.py::ScreenReader.read()`,
@@ -37,7 +37,7 @@ planning or execution decisions itself.
 - Attachment `kind: "audio"`, `mime_type` one of `audio/webm`,
   `audio/wav`, `audio/x-wav`, `audio/mp4`, `audio/ogg`, `audio/mpeg`,
   `data`: base64-encoded bytes, max 15MB decoded.
-- `iqoo/audio_adapter.py::AudioAdapter.transcribe(attachment)` writes the
+- `multimodal/audio/adapter.py::AudioAdapter.transcribe(attachment)` writes the
   decoded bytes to a temp file and reuses `ears/stt.py`'s existing
   faster-whisper model (same `settings.whisper_model`, same
   `.transcribe(path, language="en", beam_size=5, vad_filter=True)` call
@@ -82,12 +82,12 @@ image+text | image+voice`.
 ```
 
 Validated in two layers:
-1. `iqoo/schemas.py`'s Pydantic model — MIME allowlist, base64
-   well-formedness, size limit (via `iqoo/media_validation.py`), and
+1. `interfaces/api/schemas.py`'s Pydantic model — MIME allowlist, base64
+   well-formedness, size limit (via `multimodal/media_validation.py`), and
    that the declared `input_type` actually has the attachment(s) it
    requires. Failures here are a clean `422` before a task is ever
    created.
-2. `iqoo/gateway.py::_perceive`'s own guard — belt-and-suspenders check
+2. `interfaces/api/gateway.py::_perceive`'s own guard — belt-and-suspenders check
    that the required attachment is actually present in the task record,
    in case something reaches the gateway without going through the
    Pydantic layer.
@@ -104,7 +104,7 @@ with any typed text, if present).
 For `image+voice`: transcript + typed text (if any) + the same
 `[Image context]` block, with vision's own framing instruction preferring
 the transcript over the typed field (see the code comment in
-`iqoo/gateway.py::_perceive` — this was a real bug caught by
+`interfaces/api/gateway.py::_perceive` — this was a real bug caught by
 `tests/test_iqoo_phase2_offline.py` before being fixed).
 
 ## Backward compatibility

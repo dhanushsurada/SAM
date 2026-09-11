@@ -68,8 +68,8 @@ Phone result, with live progress and real cancellation.
 
 - Any Office Kit hardware (Phase 1+2 were built and tested on same-WiFi
   HTTP only — see `OFFICE_KIT.md` for the untested assumptions).
-- Reliability infrastructure: demo reset, seeded environment, 10-run
-  regression (Phase 3).
+- Reliability infrastructure: seeded environment, 10-run regression
+  (Phase 3). Demo reset itself now exists — see below — these two don't.
 - Real hardware validation of any kind — see "What Phase 2 has NOT been
   run against" above.
 
@@ -78,6 +78,7 @@ Phone result, with live progress and real cancellation.
 Each task submission is a fresh `task_id` — running the same instruction
 twice never corrupts shared state (verified in
 `tests/test_iqoo_phase1_offline.py::test_gateway_retry` and
-`::test_api_endpoints`). There is currently no dedicated "reset the demo
-environment between runs" script; that's explicitly Phase 3
-(`hackathon/demo/`) scope.
+`::test_api_endpoints`). `POST /api/iqoo/demo/reset` (Phase 3A; see
+`PROTOCOL.md`) clears all task/event state between runs — call it
+directly; there's no separate CLI/script wrapper, and none is needed for
+a single `curl` call before a demo run.

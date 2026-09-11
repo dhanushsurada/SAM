@@ -1,5 +1,12 @@
 # SAM Roadmap — Corrected Status (July 2026)
 
+> **Update, September 2026:** Phase 4 — Installation, Deployment &
+> Onboarding — happened after this snapshot was written. Status, platform
+> verification, and remaining blockers:
+> `docs/PHASE_4_INSTALLATION_DEPLOYMENT.md`. Everything below is the
+> unedited July snapshot; it predates Phase 4 and the iQOO branch and
+> hasn't been re-verified against the current tree.
+
 This replaces the two external "phase map" analyses you shared. Both got
 real things wrong in ways that matter for decisions — corrected below
 against what's actually built, tested, and running, not estimated.
