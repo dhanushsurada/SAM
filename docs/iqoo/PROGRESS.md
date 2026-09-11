@@ -363,3 +363,97 @@ sandbox. 3C–3H numbering is explicitly not treated as required scope
 sit in the working tree together, pending explicit approval, per the
 "implement → test → document → (commit if authorized) → package →
 report → stop" protocol.
+
+---
+
+## Post-3B Audit Fixes (this session)
+
+A fresh, from-the-ZIP audit (not trusting this document's own prior
+claims) found six concrete defects and confirmed them against actual
+code/test execution before fixing any of them:
+
+1. **`multimodal/audio/adapter.py`** — `transcribe()` called
+   `self._get_stt()` (real, first-use, network-dependent Whisper model
+   load) *before* validating the base64 payload. Malformed input paid
+   for a model load instead of failing fast — reproduced live as
+   `test_iqoo_phase2_offline.py` crashing at 21/51 in an environment
+   without a cached model. Fixed: validation now runs first.
+2. **`sam_cli.py::cmd_activate()`** — removed an unreachable, orphaned
+   block (dead body of an old `cmd_skills` implementation) left behind
+   after a prior fix patched around it instead of removing it.
+3. **`interfaces/api/gateway.py`** — the health endpoint's `"version"`
+   field was a hardcoded, stale `"iqoo-phase3a"` literal. Replaced with
+   a single `GATEWAY_VERSION` constant (`"iqoo-phase3b"`), with a new
+   regression check that the health response actually reads from it.
+4. **`client/`** — confirmed via full-repo grep (zero remaining code
+   references anywhere) and a direct read of `interfaces/api/server.py`
+   (which only ever mounted `interfaces/web/`) that this was a dead,
+   byte-identical-logic duplicate left over from the 3A.5 move. Removed;
+   added `test_legacy_client_directory_removed` to
+   `test_architecture_boundaries_offline.py` to guard against it
+   reappearing — confirmed the new check actually fails without the fix
+   before confirming it passes with it.
+5. **Skills path mismatch** — `skills/compiler.py` wrote to
+   `<repo>/skills/` while `sam_cli.py`'s `cmd_skills`/`cmd_sync_status`
+   always read from `SAM_DATA_DIR/skills/`; a compiled skill would
+   silently never appear in the CLI. `SkillCompiler` now uses
+   `SAM_DATA_DIR` like every other persistent-data subsystem. Since it
+   wasn't known whether any real checkout had legacy data at the old
+   location, added `_migrate_legacy_skills_data()` — copy-only, never
+   deletes/moves the old files, idempotent, no-ops cleanly if there's
+   nothing to migrate. (Checked this repo's own `skills/compiled/`
+   directly: it only ever held a `.gitkeep`, so no data was actually at
+   risk here — but the migration path is real and has its own coverage
+   for the case where it would be.) Added 3 new tests to
+   `test_runtime_cli_offline.py` (12 checks): an end-to-end
+   compile-then-CLI-reads-it round trip, a migration test using fully
+   isolated temp directories (never touches the real repo) proving
+   copy-not-move/idempotency/no-clobber, and a clean-no-op test for the
+   no-legacy-data case.
+6. **Documentation staleness, both directions** — `PERCEPTION.md` (6
+   references) and `PROTOCOL.md` (1 reference) still pointed at
+   pre-3A.5 `iqoo/*.py` paths instead of the canonical
+   `multimodal/`/`interfaces/api/` locations; corrected. `PROTOCOL.md`
+   also had the same stale `"iqoo-phase3a"` example as item 3, fixed to
+   match. `LOCAL_RUNTIME.md` described the log-path mismatch and the
+   `pgrep` false-positive as still-open — both are already fixed in
+   code (confirmed directly, with the fix history sitting in code
+   comments); corrected, with the `pgrep` one described precisely as
+   *mitigated* (reliable state-file check first, honestly-labeled
+   best-effort fallback) rather than fully eliminated, since that's
+   what's actually true. `DEMO.md` said no demo-reset mechanism existed
+   yet ("Phase 3 scope") when `POST /api/iqoo/demo/reset` had already
+   shipped in Phase 3A; corrected. `TROUBLESHOOTING.md` told a reader to
+   change the port in `iqoo/server.py::main()`, a function that no
+   longer exists on that shim; corrected to point at
+   `config/settings.py`'s `api_port`. `TEST_PLAN.md` claimed task-level
+   timeout didn't exist yet ("Phase 3 scope per the PDR") — confirmed
+   directly against `interfaces/api/gateway.py` that it's implemented
+   and tested (Phase 3A); corrected with a pointer to the real tests.
+   Left untouched, deliberately: historical narrative in `PROGRESS.md`
+   (this file), `PHASE_3A5_MIGRATION.md`'s migration table, and
+   `ARCHITECTURE.md`'s explicitly-labeled "Phase 1 as built" diagram —
+   those correctly describe past state, not current, and editing them
+   would erase an accurate record rather than fix a stale one.
+   (`ARCHITECTURE.md` did get one surgical addition: a note that its
+   diagram's `client/` line, unlike the still-live `iqoo/*` shim paths
+   next to it, now points to something fully removed.)
+
+**Full regression after this checkpoint: 528/528, 20 suites, 0
+failures**, plus `python -m compileall` clean across the whole tree and
+a targeted import check on every touched module. This is not directly
+comparable to the 513/513 figure above item-for-item — item 3 and item 5
+each added new checks (1 and 12 respectively) that didn't exist before,
+and item 1 recovered `test_iqoo_phase2_offline` from a mid-run crash
+back to its full 51/51 — but every suite that was clean before this
+checkpoint is still clean now, and nothing here removed or weakened an
+existing check.
+
+**Not committed** — same status as everything else in this file, sits in
+the working tree pending explicit approval.
+
+**Next Action:** Phase 4 (Installation & deployment) — confirmed by
+direct read of `setup.sh`, `setup_windows.ps1`, and the root `README.md`
+to have zero coverage of anything past the original Phase 0 voice
+assistant. This is the largest remaining gap against the PDR's
+"install → run" expectation.

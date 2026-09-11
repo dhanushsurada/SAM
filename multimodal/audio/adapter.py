@@ -61,12 +61,19 @@ class AudioAdapter:
         Returns the transcript. Raises PerceptionError on any failure —
         including a genuinely silent/empty recording, so a task never
         silently proceeds with a missing instruction."""
-        stt = self._get_stt()
-
+        # Validate/decode the attachment BEFORE acquiring the STT model.
+        # _get_stt() can trigger a real, first-use, network-dependent
+        # Whisper model load; without that fixed order, malformed input
+        # pays for (and can fail on) a model load before ever reaching
+        # this validation, surfacing a confusing network/model error
+        # instead of the actual problem. Fail fast on bad input; only
+        # load the model once input is known-good.
         try:
             audio_bytes = base64.b64decode(attachment["data"], validate=True)
         except Exception as e:
             raise PerceptionError(f"Could not decode audio attachment: {e}") from e
+
+        stt = self._get_stt()
 
         suffix = AUDIO_MIME_SUFFIX.get(attachment.get("mime_type", ""), ".bin")
         tmp_path = tempfile.mktemp(suffix=suffix)

@@ -61,11 +61,21 @@ ollama pull moondream
 
 # ─── Python Environment ───────────────────────────────────────────────────
 Write-Host "[5/7] Creating Python virtual environment..." -ForegroundColor Green
-python -m venv .venv
+if ((Test-Path ".venv") -and (Test-Path ".venv\Scripts\python.exe")) {
+    Write-Host "  Existing .venv found — reusing it (delete .venv first for a clean rebuild)"
+} else {
+    if (Test-Path ".venv") {
+        Write-Host "  .venv exists but looks incomplete — recreating it" -ForegroundColor Yellow
+        Remove-Item -Recurse -Force ".venv"
+    }
+    python -m venv .venv
+}
 .\.venv\Scripts\Activate.ps1
 pip install --upgrade pip --quiet
 
 Write-Host "  Installing Python packages..."
+# Safe to re-run: pip install is idempotent and repairs a partial/broken
+# env without touching unrelated packages.
 pip install -r requirements.txt --quiet
 
 Write-Host "  Installing Windows-specific packages..."
@@ -74,13 +84,19 @@ pip install pyttsx3 pywinauto --quiet
 Write-Host "  Installing Playwright browsers..."
 playwright install chromium
 
-# ─── Directory Structure ──────────────────────────────────────────────────
-Write-Host "[6/7] Creating directories..." -ForegroundColor Green
-New-Item -ItemType Directory -Force -Path logs | Out-Null
-New-Item -ItemType Directory -Force -Path memory\store\chroma | Out-Null
-New-Item -ItemType Directory -Force -Path founder_mode\store | Out-Null
-New-Item -ItemType Directory -Force -Path founder_mode\export | Out-Null
-New-Item -ItemType Directory -Force -Path skills\compiled | Out-Null
+# ─── Data Directories ─────────────────────────────────────────────────────
+Write-Host "[6/7] Initializing $env:USERPROFILE\.sam_data..." -ForegroundColor Green
+# Persistent SAM data lives under %USERPROFILE%\.sam_data (see
+# config/settings.py's Path.home() / ".sam_data", which resolves here on
+# Windows), not inside the repo. The old repo-relative dirs this step used
+# to create are no longer read by any code path (memory/store.py,
+# founder_mode/manager.py, and skills/compiler.py all migrated to
+# SAM_DATA_DIR — see skills/compiler.py's docstring). Left untouched here.
+$samData = "$env:USERPROFILE\.sam_data"
+New-Item -ItemType Directory -Force -Path "$samData\logs" | Out-Null
+New-Item -ItemType Directory -Force -Path "$samData\memory\chroma" | Out-Null
+New-Item -ItemType Directory -Force -Path "$samData\founder_mode\export" | Out-Null
+New-Item -ItemType Directory -Force -Path "$samData\skills\compiled" | Out-Null
 
 # ─── Windows Task Scheduler (auto-start) ─────────────────────────────────
 Write-Host "[7/7] Setting up auto-start via Task Scheduler..." -ForegroundColor Green

@@ -3,25 +3,72 @@ SKILLS — Compiler
 Detects repeated task patterns and compiles them into fast executables.
 Compiled skills bypass LLM thinking — drastically reduce latency.
 Hermes-inspired approach.
+
+Storage location (fixed — see PROGRESS.md / audit notes): this used to
+write to <repo>/skills/skills.db and <repo>/skills/compiled/, the only
+persistent-data subsystem in SAM that didn't live under SAM_DATA_DIR
+(~/.sam_data). sam_cli.py's `cmd_skills` and `cmd_sync_status` always
+read from SAM_DATA_DIR, so a real developer who had ever compiled a
+skill would see it "disappear" from the CLI's point of view — not
+actually lost, just written somewhere the CLI never looked. Storage now
+lives under SAM_DATA_DIR like everything else; `_migrate_legacy_skills_data`
+below copies any pre-existing data at the old location forward once,
+non-destructively (old files are left in place, never deleted or moved),
+so nothing is lost either way.
 """
 
 import json
 import logging
+import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List
 
+from config.settings import SAM_DATA_DIR
+
 logger = logging.getLogger("SAM.Skills")
 
-SKILLS_DB_PATH = Path(__file__).parent / "skills.db"
-COMPILED_PATH = Path(__file__).parent / "compiled"
+SKILLS_DB_PATH = SAM_DATA_DIR / "skills" / "skills.db"
+COMPILED_PATH = SAM_DATA_DIR / "skills" / "compiled"
+
+# Where this data lived before the fix above — kept only as a migration
+# source, never written to again.
+_LEGACY_SKILLS_DB_PATH = Path(__file__).parent / "skills.db"
+_LEGACY_COMPILED_PATH = Path(__file__).parent / "compiled"
+
+
+def _migrate_legacy_skills_data(old_db: Path, old_compiled: Path, new_db: Path, new_compiled: Path) -> None:
+    """One-time, idempotent, copy-only migration of any pre-existing
+    skills data from the old repo-relative location to the canonical
+    SAM_DATA_DIR location. Never deletes or moves the old files — safe
+    to call on every startup, and a no-op once the new location already
+    has the data (or the old location never had any)."""
+    try:
+        if old_db.exists() and not new_db.exists():
+            new_db.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(old_db, new_db)
+            logger.info(f"Migrated legacy skills database {old_db} -> {new_db} (old file left in place)")
+    except OSError as e:
+        logger.warning(f"Could not migrate legacy skills database {old_db} -> {new_db}: {e}")
+
+    try:
+        if old_compiled.is_dir():
+            new_compiled.mkdir(parents=True, exist_ok=True)
+            for src in old_compiled.glob("*.json"):
+                dest = new_compiled / src.name
+                if not dest.exists():
+                    shutil.copy2(src, dest)
+                    logger.info(f"Migrated legacy compiled skill {src} -> {dest} (old file left in place)")
+    except OSError as e:
+        logger.warning(f"Could not migrate legacy compiled skills {old_compiled} -> {new_compiled}: {e}")
 
 
 class SkillCompiler:
     def __init__(self, settings):
         self.settings = settings
-        COMPILED_PATH.mkdir(exist_ok=True)
+        _migrate_legacy_skills_data(_LEGACY_SKILLS_DB_PATH, _LEGACY_COMPILED_PATH, SKILLS_DB_PATH, COMPILED_PATH)
+        COMPILED_PATH.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _init_db(self):

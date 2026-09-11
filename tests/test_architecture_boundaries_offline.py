@@ -291,6 +291,19 @@ def test_persistent_data_paths_unchanged():
           DEVICES_DB_PATH.parent.name == "ecosystem" and DEVICES_DB_PATH.parent.parent.name == ".sam_data")
 
 
+# ─── I: legacy client/ directory fully retired ─────────────────────────────
+
+def test_legacy_client_directory_removed():
+    """The pre-3A.5 top-level client/ was a byte-identical duplicate of
+    interfaces/web/ — never mounted/served by interfaces/api/server.py
+    (which mounts only interfaces/web/), and confirmed by a full-repo
+    grep to have zero remaining code references anywhere. Removed as
+    dead weight and a divergence risk; this guards against it silently
+    reappearing."""
+    check("legacy top-level client/ directory does not exist",
+          not (REPO_ROOT / "client").exists())
+
+
 def main():
     print("=== A: Canonical implementations exist ===")
     test_canonical_implementations_exist()
@@ -316,6 +329,9 @@ def main():
     print("\n=== H: HTTP + persistent-data compatibility ===")
     test_http_api_contract_unchanged()
     test_persistent_data_paths_unchanged()
+
+    print("\n=== I: Legacy client/ directory fully retired ===")
+    test_legacy_client_directory_removed()
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")
     if not all(results):

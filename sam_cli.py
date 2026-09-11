@@ -217,8 +217,23 @@ def cmd_doctor():
         r = requests.get(f"{ollama_host}/api/tags", timeout=3)
         models = [m["name"] for m in r.json().get("models", [])]
         record("Ollama running", "PASS", f"{len(models)} model(s) pulled")
+
+        # Reuses the /api/tags response above rather than a second request —
+        # confirms the *specific* configured model is actually pulled, not
+        # just that some model(s) are. Phase 4.1 audit finding: this was
+        # previously only implied by the comment above, never checked.
+        configured_model = getattr(settings, "primary_model", None) if settings else None
+        if configured_model:
+            if configured_model in models:
+                record(f"Configured model '{configured_model}' pulled", "PASS")
+            else:
+                record(f"Configured model '{configured_model}' pulled", "FAIL",
+                       f"not found among pulled models — run: ollama pull {configured_model}")
+        else:
+            record("Configured model pulled", "WARN", "no primary_model in settings to check")
     except Exception:
         record("Ollama running", "FAIL", f"not reachable at {ollama_host} — start with: ollama serve")
+        record("Configured model pulled", "UNVERIFIED", "Ollama unreachable — could not check")
 
     try:
         from runtime import SAMRuntime, RuntimeStatus
@@ -482,29 +497,6 @@ def cmd_activate(license_file: str):
     mgr = LicenseManager()
     ok, message = mgr.install_license(license_file)
     print(f"\n{'✅' if ok else '❌'} {message}\n")
-
-
-
-    db_path = SAM_DATA_DIR / "skills" / "skills.db"
-    if not db_path.exists():
-        print("No compiled skills yet.")
-        return
-
-    with sqlite3.connect(db_path) as conn:
-        rows = conn.execute(
-            "SELECT skill_name, task_pattern, success_count FROM skill_candidates WHERE compiled=1"
-        ).fetchall()
-
-    if not rows:
-        print("No compiled skills yet. Skills compile after 3 successful completions.")
-        return
-
-    print(f"\n── COMPILED SKILLS ({len(rows)}) ─────────────────────")
-    for name, pattern, uses in rows:
-        print(f"\n  {name}")
-        print(f"  Pattern: {pattern}")
-        print(f"  Uses: {uses}")
-    print()
 
 
 # ─── Founder Mode Actions ─────────────────────────────────────────────────

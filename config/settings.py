@@ -48,6 +48,12 @@ class Settings:
     ollama_host: str = "http://localhost:11434"
     primary_model: str = "qwen2.5:14b"
     fallback_model: str = "qwen2.5:7b"
+    # True once the user has explicitly chosen primary_model (via
+    # ~/.sam_data/settings.yaml, first-run setup, or a runtime model-change
+    # command) — guards _select_model()'s RAM-tier auto-detection from
+    # silently overwriting that choice on every restart. False means
+    # "still on the automatic default," and RAM-tier selection applies.
+    model_explicitly_set: bool = False
     model_context_length: int = 8192
     temperature: float = 0.7
     max_tokens: int = 1024
@@ -143,6 +149,15 @@ class Settings:
             for key, value in data.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
+            # A file that sets primary_model but has no persisted
+            # model_explicitly_set of its own (e.g. a hand-written override,
+            # or one written before this field existed) is the clearest
+            # signal we have that the choice was intentional. If the file
+            # DOES carry model_explicitly_set (anything .save() produces
+            # always includes it), that persisted value already took effect
+            # via the loop above — don't second-guess it either way.
+            if "primary_model" in data and "model_explicitly_set" not in data:
+                self.model_explicitly_set = True
 
     def _detect_hardware(self):
         try:
@@ -165,6 +180,8 @@ class Settings:
             self.detected_ram_gb = 16
 
     def _select_model(self):
+        if self.model_explicitly_set:
+            return
         if self.detected_ram_gb is None:
             return
         if self.detected_ram_gb >= 32:

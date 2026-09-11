@@ -7,6 +7,11 @@ REAL WORLD
    │ text (voice/camera entry points exist, not yet wired to execution)
    ▼
 PHONE CLIENT (client/, vanilla JS)
+   [Phase 1 path — client/ was superseded by interfaces/web/ in the
+    Phase 3A.5 migration and later removed outright as a dead, unserved
+    duplicate; unlike iqoo/server.py and iqoo/gateway.py below, which
+    remain live compatibility shims, client/ no longer exists at all.
+    See PHASE_3A5_MIGRATION.md.]
    │ HTTP POST / SSE GET  (same-WiFi today; Office Kit-compatible — see OFFICE_KIT.md)
    ▼
 iqoo/server.py  (FastAPI — standalone process, does NOT touch main.py)

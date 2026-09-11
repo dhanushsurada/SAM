@@ -67,6 +67,11 @@ logger = logging.getLogger("SAM.iQOO.Gateway")
 # stall the entire competition demo for the rest of the event slot.
 DEFAULT_TASK_TIMEOUT_SECONDS = 600
 
+# Single source of truth for the /api/iqoo/health "version" field below.
+# Update this one constant when the current phase changes — do not
+# hardcode the string inline at the call site.
+GATEWAY_VERSION = "iqoo-phase3b"
+
 
 class TaskAlreadyActiveError(Exception):
     """Raised by retry_task() when asked to retry a task that hasn't
@@ -182,7 +187,7 @@ class TaskGateway:
             "active_task": active,
             "queue_depth": self._queue.qsize(),
             "uptime_seconds": round(time.time() - self._started_at, 1),
-            "version": "iqoo-phase3a",
+            "version": GATEWAY_VERSION,
         }
 
     def reset_demo_state(self) -> int:

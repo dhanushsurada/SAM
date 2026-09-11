@@ -42,4 +42,7 @@ uvicorn[standard]>=0.29.0        # ASGI server for iqoo/server.py
 httpx>=0.27.0                    # Only needed for tests/test_iqoo_phase1_offline.py (TestClient)
 
 # ─── Utilities ─────────────────────────────────────────────────────────────
-python-dotenv>=1.0.0
+# (python-dotenv removed here — Phase 4.2 audit confirmed zero imports
+# anywhere in the codebase, no indirect .env sourcing in any shell/JS file,
+# and no pyproject.toml/setup.cfg. YAML via config/settings.py is the one
+# real configuration mechanism. See Phase 4 audit notes.)

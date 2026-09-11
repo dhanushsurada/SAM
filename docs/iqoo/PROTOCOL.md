@@ -61,7 +61,7 @@ queued → received → understanding → perceiving → planning → executing 
 ```
 
 `perceiving` (Phase 2): only entered for `input_type != "text"`. Runs
-`iqoo/gateway.py::_perceive` (vision/audio interpretation) before the
+`interfaces/api/gateway.py::_perceive` (vision/audio interpretation) before the
 Brain ever sees the task. A `text` task skips straight from `received`
 to `understanding`, identical to Phase 1.
 
@@ -128,7 +128,7 @@ competing attempts at the same instruction.
   "active_task": "uuid-or-null",
   "queue_depth": 0,
   "uptime_seconds": 123.4,
-  "version": "iqoo-phase3a"
+  "version": "iqoo-phase3b"
 }
 ```
 
