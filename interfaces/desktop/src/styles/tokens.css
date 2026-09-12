@@ -1,0 +1,78 @@
+/**
+ * SAM design tokens.
+ *
+ * Values are space-separated RGB triplets (not hex) so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` pattern can apply opacity per-use — see
+ * tailwind.config.ts. Dark is the default (SAM reads as an instrument panel
+ * for an autonomous process, most legible dark); [data-theme="light"] on
+ * <html> swaps the set below.
+ *
+ * Status colors intentionally differ in literal value between themes, not
+ * just the neutrals — the brighter dark-mode success/warn/danger need to be
+ * deepened for light backgrounds or they lose contrast. Same semantic role,
+ * tuned per theme, same pattern as most mature design systems use.
+ */
+
+:root {
+  /* neutrals */
+  --sam-void: 12 14 18;       /* #0C0E12 base background */
+  --sam-surface: 21 24 29;    /* #15181D panels, cards */
+  --sam-line: 38 43 49;       /* #262B31 borders */
+  --sam-ink: 237 239 242;     /* #EDEFF2 primary text */
+  --sam-mute: 138 144 153;    /* #8A9099 secondary text */
+
+  /* accent — deliberately not Claude's #D97757: more saturated, more true
+     orange, less pink, so it reads as SAM's own on sight */
+  --sam-ember: 242 118 30;      /* #F2761E */
+  --sam-ember-ink: 20 10 4;     /* near-black text for use ON ember fills */
+  /* Same value as --sam-ember in dark mode, but a *separate* token: ember
+     used as text/icon/link color directly against the page background
+     needs a different value in light mode than ember used as a solid
+     button fill needs (see the light-theme override below) — one value
+     can't serve both without failing contrast in one direction or the
+     other. Computed, not eyeballed: see PHASE5_PLAN.md's step 10 notes. */
+  --sam-ember-text: 242 118 30;
+
+  /* status semantics — map 1:1 to the state vocabulary in the product brief */
+  --sam-success: 79 190 142;     /* #4FBE8E  SUCCESS / verified */
+  --sam-warn: 232 185 63;        /* #E8B93F  WAITING / NEEDS_CONFIRMATION / unverified-but-pending */
+  --sam-danger: 229 72 77;       /* #E5484D  FAILED */
+  --sam-unverified: 148 154 166; /* #949AA6  UNAVAILABLE / UNVERIFIED — reads as "unknown", not "bad".
+                                     Was 107/114/128: computed contrast against void was ~4.0:1, under
+                                     the 4.5:1 AA floor for the small text this renders as (task ids,
+                                     timestamps). This value computes to ~6.8:1. */
+
+  --sam-radius-sm: 6px;
+  --sam-radius-md: 10px;
+  --sam-radius-lg: 14px;
+  --sam-motion-fast: 120ms;
+  --sam-motion-state: 180ms;
+}
+
+:root[data-theme="light"] {
+  --sam-void: 250 250 249;    /* #FAFAF9 */
+  --sam-surface: 255 255 255; /* #FFFFFF */
+  --sam-line: 227 224 219;    /* #E3E0DB */
+  --sam-ink: 23 24 26;        /* #17181A */
+  --sam-mute: 107 110 115;    /* #6B6E73 */
+
+  /* Deepened from the base --sam-ember (242/118/30): that value against
+     this theme's near-white surfaces computed to ~2.7:1 as text, well
+     under the 4.5:1 AA floor. This computes to ~5.1-5.3:1. The fill use
+     (--sam-ember itself, with --sam-ember-ink text on top) doesn't have
+     this problem and is intentionally left alone — the two tokens exist
+     precisely so fixing one doesn't break the other. */
+  --sam-ember-text: 176 78 10; /* #B04E0A */
+
+  --sam-success: 22 130 90;    /* #16825A deepened for contrast on white */
+  --sam-warn: 161 111 8;       /* #A16F08 deepened — raw gold fails on white */
+  --sam-danger: 197 48 53;     /* #C53035 deepened */
+  --sam-unverified: 90 95 102; /* #5A5F66 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sam-motion-fast: 0ms;
+    --sam-motion-state: 0ms;
+  }
+}

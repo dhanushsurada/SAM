@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAM</title>
+    <meta name="description" content="SAM — local-first autonomous AI assistant." />
+
+    <!--
+      Google Fonts CDN for now, for iteration speed. SAM's own doctrine is
+      local-first with no unnecessary network calls — before shipping,
+      consider self-hosting these two families (download the woff2 files
+      into /public/fonts and swap this for local @font-face rules in
+      src/styles/globals.css) so the app has zero third-party requests at
+      runtime. Left as a CDN link deliberately, not by oversight.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
