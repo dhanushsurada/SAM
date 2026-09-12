@@ -1,0 +1,56 @@
+@import "./tokens.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-void text-ink font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  code,
+  kbd,
+  samp,
+  .font-mono-data {
+    @apply font-mono;
+    font-feature-settings: "zero", "ss01";
+  }
+
+  /* Visible keyboard focus everywhere, styled rather than suppressed —
+     never `outline: none` without a replacement. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--sam-ember));
+    outline-offset: 2px;
+    border-radius: var(--sam-radius-sm);
+  }
+
+  ::selection {
+    background: rgb(var(--sam-ember) / 0.28);
+  }
+}
+
+/* Belt-and-suspenders reduced-motion: tokens.css zeroes the duration
+   variables already; this also collapses anything hard-coded outside them
+   (e.g. a third-party component's own CSS animation). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
