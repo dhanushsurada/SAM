@@ -48,7 +48,8 @@ Always respond with valid JSON in this exact structure:
 }
 
 Action payload examples:
-- control: {"type": "click", "description": "click the send button"} or {"type": "type", "text": "hello world"}
+- control: {"type": "click", "description": "the send button"} — describe the visual target only; the "type" field already says "click", so don't repeat the verb in the description
+- control: {"type": "type", "text": "hello world"}
 - browser: {"url": "https://...", "task": "find the price of MacBook Air M3"}
 - terminal: {"command": "ls -la", "description": "list files in current directory"}
 - vision: {"task": "read what is on the screen", "click_after": false}

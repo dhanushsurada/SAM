@@ -20,6 +20,11 @@ PLATFORM = platform.system()
 IS_MAC = PLATFORM == "Darwin"
 IS_WIN = PLATFORM == "Windows"
 
+# Absolute path to the macOS system binary — not subject to PATH manipulation.
+# Mirrors hands/vision/screen_reader.py's SCREENCAPTURE_BIN; duplicated rather
+# than shared since the two modules don't otherwise share any state.
+SCREENCAPTURE_BIN = "/usr/sbin/screencapture"
+
 
 class ComputerController:
     def __init__(self):
@@ -99,16 +104,50 @@ class ComputerController:
     # ─── Screenshot ───────────────────────────────────────────────────────
 
     def screenshot(self, path: str = None) -> str:
-        """Take screenshot cross-platform. Returns path to PNG."""
+        """
+        Take a screenshot cross-platform and return the saved PNG's path.
+
+        Raises RuntimeError with an actionable diagnostic on failure
+        instead of letting a bare exception through (PyAutoGUI path) or
+        silently trusting check=True to catch it (screencapture fallback
+        path) — same reasoning as hands/vision/screen_reader.py's
+        _take_screenshot(): on macOS, the most likely real-world cause is
+        Screen Recording permission not granted, which applies to the
+        PyAutoGUI capture path here just as much as the direct
+        `screencapture` fallback, since both ultimately hit the same OS
+        gate. (Left path/tempfile handling untouched — forcing an
+        explicit /tmp here, as the vision module does, would break the
+        Windows branch, since /tmp isn't a real directory there.)
+        """
         if path is None:
             path = tempfile.mktemp(suffix=".png")
 
-        if self._pyautogui:
-            self._pyautogui.screenshot(path)
-        elif IS_MAC:
-            subprocess.run(["screencapture", "-x", path], check=True)
-        elif IS_WIN:
-            self._screenshot_windows(path)
+        try:
+            if self._pyautogui:
+                self._pyautogui.screenshot(path)
+            elif IS_MAC:
+                result = subprocess.run(
+                    [SCREENCAPTURE_BIN, "-x", path],
+                    capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
+                    raise RuntimeError(
+                        f"screencapture failed (exit {result.returncode}): {diagnostic}")
+            elif IS_WIN:
+                self._screenshot_windows(path)
+        except Exception as e:
+            if IS_MAC:
+                raise RuntimeError(
+                    f"Screenshot capture failed: {e}. This is usually caused "
+                    f"by macOS not having granted Screen Recording permission "
+                    f"to the app SAM is running in — System Settings -> "
+                    f"Privacy & Security -> Screen Recording — then fully "
+                    f"quit and reopen the app (macOS requires a restart after "
+                    f"granting this, not just re-running)."
+                ) from e
+            raise RuntimeError(f"Screenshot capture failed: {e}") from e
+
         return path
 
     def _screenshot_windows(self, path: str):
@@ -308,7 +347,19 @@ end tell
     # ─── AppleScript (macOS only) ─────────────────────────────────────────
 
     def _applescript(self, script: str) -> str:
-        """Execute AppleScript. No-op on Windows."""
+        """
+        Execute AppleScript and return its stdout. No-op on Windows.
+
+        Raises RuntimeError (with osascript's own stderr) on failure
+        instead of silently returning an empty string. Previously
+        open_app()'s only caller reported "Opened: {app}" regardless of
+        whether `tell application "{app}" to activate` actually resolved
+        to a real, running application — same silent-failure shape as
+        the _take_screenshot() fix in hands/vision/screen_reader.py, and
+        the same fix. Confirmed no other caller in the codebase depends
+        on this never raising (set_volume/notify/get_frontmost_app/
+        get_all_windows/close_app currently have no external callers).
+        """
         if not IS_MAC:
             logger.debug("AppleScript called on non-Mac — skipped")
             return ""
@@ -316,6 +367,11 @@ end tell
             ["osascript", "-e", script],
             capture_output=True, text=True, timeout=30
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"osascript failed (exit {result.returncode}): "
+                f"{(result.stderr or result.stdout or 'no output').strip()}"
+            )
         return result.stdout.strip()
 
     # Keep public alias for any code that calls it directly

@@ -8,11 +8,18 @@ Fallback: LLaVA (7B, more capable)
 import logging
 import base64
 import json
+import subprocess
 import tempfile
 import requests
 from pathlib import Path
 
 logger = logging.getLogger("SAM.Vision")
+
+# Absolute path to the macOS system binary — not subject to PATH manipulation,
+# and guaranteed present on every real macOS install (unlike a bare
+# "screencapture", which depends on the calling process's PATH being set up
+# the way a normal Terminal session's is).
+SCREENCAPTURE_BIN = "/usr/sbin/screencapture"
 
 
 class ScreenReader:
@@ -20,10 +27,34 @@ class ScreenReader:
         self.settings = settings
 
     def _take_screenshot(self) -> str:
-        """Take screenshot and return path."""
-        import subprocess
-        path = tempfile.mktemp(suffix=".png")
-        subprocess.run(["screencapture", "-x", path], check=True)
+        """
+        Take a screenshot via macOS's screencapture and return the saved
+        PNG's path.
+
+        Raises RuntimeError (with the tool's own stderr plus a permission
+        hint) instead of silently returning a path to a missing/corrupt
+        image when capture itself fails. The most common real-world cause
+        (see docs/VISION_COORDINATE_FIX.md item #1) is macOS not having
+        granted Screen Recording permission to the app SAM is running in —
+        previously this was invisible here and surfaced only as a
+        confusing downstream "could not find X on screen" from
+        find_element(), with no hint about the real cause.
+        """
+        path = tempfile.mktemp(suffix=".png", dir="/tmp")
+        result = subprocess.run(
+            [SCREENCAPTURE_BIN, "-x", path],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
+            raise RuntimeError(
+                f"screencapture failed (exit {result.returncode}): {diagnostic}. "
+                f"This is usually caused by macOS not having granted Screen "
+                f"Recording permission to the app SAM is running in — System "
+                f"Settings -> Privacy & Security -> Screen Recording — then "
+                f"fully quit and reopen the app (macOS requires a restart after "
+                f"granting this, not just re-running)."
+            )
         return path
 
     def _image_to_base64(self, path: str) -> str:
@@ -82,12 +113,24 @@ class ScreenReader:
         corner, which is exactly why PyAutoGUI's own fail-safe kept firing
         ("mouse moving to a corner of the screen") — nothing was actually
         moving there accidentally, it was being told to, every time.
+
+        Also strips a leading action-verb phrase ("click on ", "tap ",
+        "select ", etc.) from the description before asking the vision
+        model to find it. core/brain.py's own action-payload prompt
+        example shows `{"type": "click", "description": "click the send
+        button"}` — so the Brain reliably produces descriptions like
+        "click the Visual Studio Code application in the search results"
+        (the exact phrase from real testing that vision then failed to
+        find). Moondream is asked to point at a visual object, not parse
+        an imperative sentence, so stripping the verb before it ever
+        reaches the prompt makes matching noticeably more reliable.
         """
         try:
+            clean_description = self._clean_target_description(description)
             screenshot_path = self._take_screenshot()
             image_b64 = self._image_to_base64(screenshot_path)
 
-            prompt = f"""Look at this screenshot and find: {description}
+            prompt = f"""Look at this screenshot and find: {clean_description}
 Return ONLY this JSON, nothing else — no explanation, no extra text:
 {{"x": 0.0, "y": 0.0}}
 Where x and y are the NORMALIZED position as a fraction of screen width/height,
@@ -134,18 +177,43 @@ If not found, return: {{"x": null, "y": null}}"""
             # PyAutoGUI fail-safe crash into a clean, retryable
             # "could not find X" result instead.
             if abs(x) < 1e-6 and abs(y) < 1e-6:
-                logger.warning(f"Vision returned (0,0) for '{description}' — "
+                logger.warning(f"Vision returned (0,0) for '{clean_description}' — "
                                 f"treating as not-found rather than clicking the corner")
                 return None
 
             pixel_x, pixel_y = self._to_pixel_coords(x, y)
-            logger.info(f"Found '{description}' at normalized ({x:.3f}, {y:.3f}) "
+            logger.info(f"Found '{clean_description}' at normalized ({x:.3f}, {y:.3f}) "
                         f"-> pixel ({pixel_x}, {pixel_y})")
             return (pixel_x, pixel_y)
 
         except Exception as e:
             logger.error(f"Element finding error: {e}")
             return None
+
+    _ACTION_VERB_PREFIXES = (
+        "double click on ", "double-click on ", "double click ", "double-click ",
+        "right click on ", "right-click on ", "right click ", "right-click ",
+        "click on ", "click ", "tap on ", "tap ", "select ", "press ", "choose ",
+    )
+
+    @classmethod
+    def _clean_target_description(cls, description: str) -> str:
+        """
+        Strips ONE leading action-verb phrase (see _ACTION_VERB_PREFIXES)
+        from a target description before it's sent to the vision model —
+        e.g. "click the Visual Studio Code application in the search
+        results" becomes "the Visual Studio Code application in the
+        search results". Does not otherwise rewrite the description, and
+        leaves it unchanged if it doesn't start with a known verb phrase
+        (e.g. "play the video", "center button" pass through untouched).
+        """
+        text = (description or "").strip()
+        lowered = text.lower()
+        for prefix in cls._ACTION_VERB_PREFIXES:
+            if lowered.startswith(prefix):
+                stripped = text[len(prefix):].strip()
+                return stripped or text
+        return text
 
     @staticmethod
     def _parse_coordinates(raw: str):
