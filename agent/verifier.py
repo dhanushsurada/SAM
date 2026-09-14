@@ -27,6 +27,17 @@ logger = logging.getLogger("SAM.Agent.Verifier")
 _FAILURE_SIGNALS = [
     "error executing", "could not find", "unknown action", "unknown control action",
     "traceback", "exception:",
+    # Phase 1 (Hands reliability): text introduced by react_loop's post-action
+    # re-observation for click/type (see _execute_control) — a click whose
+    # target is still visible afterward, or a screen-state check that itself
+    # couldn't read the screen, are both real failure signals now that we
+    # actually look.
+    "may not have registered", "could not read screen",
+    # Same for open_app: the wrong (or no) app in the foreground. Retrying
+    # here just re-issues "activate", which is harmless if the first attempt
+    # is still mid-launch — so treating this as retryable can genuinely help,
+    # not just add noise.
+    "is in the foreground instead",
 ]
 
 

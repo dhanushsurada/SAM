@@ -17,6 +17,14 @@ logger = logging.getLogger("SAM.Agent")
 
 MAX_STEPS = 10  # Safety limit on autonomous steps
 STAGNATION_WINDOW = 3  # Abort early if this many consecutive observations are identical
+CLICK_RECHECK_TOLERANCE_PX = 40  # Phase 1: how close a re-found target has to be to its
+# pre-click location to count as "still sitting right there" (see _execute_control's
+# click branch) rather than "vision found something else nearby after the screen changed"
+OPEN_APP_POLL_INTERVAL_S = 0.3  # Phase 1: how often to re-check get_frontmost_app() after
+OPEN_APP_POLL_TIMEOUT_S = 1.8   # open_app() -- an already-running app typically becomes
+# frontmost almost immediately (first check, no extra wait); these numbers give a
+# cold-launching app a bit of room without stalling every open_app call. Untested against
+# a real cold launch on real hardware -- tune if 1.8s proves too short (or needlessly long).
 
 
 class ReactLoop:
@@ -139,6 +147,66 @@ class ReactLoop:
     def _looks_multi_step(self, task: str) -> bool:
         t = f" {task.lower()} "
         return any(sig in t for sig in self._MULTI_STEP_SIGNALS)
+
+    @staticmethod
+    def _same_spot(a: tuple, b: tuple) -> bool:
+        """True if two (x, y) pixel points are within
+        CLICK_RECHECK_TOLERANCE_PX of each other — used to tell "the same
+        element is still sitting right there" from "vision found
+        something else, some distance away, after the screen changed"."""
+        return (abs(a[0] - b[0]) <= CLICK_RECHECK_TOLERANCE_PX
+                and abs(a[1] - b[1]) <= CLICK_RECHECK_TOLERANCE_PX)
+
+    @staticmethod
+    def _same_app(requested: str, frontmost: str) -> bool:
+        """
+        Loose match between the app name the Brain asked to open and
+        what's actually frontmost. Real display names vary a lot for the
+        same app -- "VS Code" / "Visual Studio Code" / "Code" are all the
+        same application, and neither "VS Code" nor "Visual Studio Code"
+        is a substring of the other, so a pure substring check misses
+        exactly the app from the original bug report. Matches if either
+        string contains the other (handles "Chrome" / "Google Chrome"),
+        OR if they share their last word (handles "VS Code" / "Visual
+        Studio Code", since both end in "code"). Still a heuristic --
+        e.g. two unrelated apps that happen to share a generic last word
+        would false-match -- but it covers the common real cases without
+        a hand-maintained name-alias table.
+        """
+        a, b = requested.strip().lower(), frontmost.strip().lower()
+        if not a or not b:
+            return False
+        if a in b or b in a:
+            return True
+        a_words, b_words = a.split(), b.split()
+        return bool(a_words) and bool(b_words) and a_words[-1] == b_words[-1]
+
+    def _poll_for_frontmost_match(self, controller, app: str):
+        """
+        Polls get_frontmost_app() for up to OPEN_APP_POLL_TIMEOUT_S,
+        returning as soon as the frontmost app matches `app` (_same_app)
+        instead of checking exactly once, right after issuing the
+        activate command -- macOS can take a moment to bring a
+        cold-launched app to the foreground.
+
+        Returns (matched: bool, last_seen: str | None). last_seen is
+        None only if get_frontmost_app() itself never once succeeded
+        (e.g. the System Events automation permission isn't granted) --
+        that's a different, more fundamental problem than "still
+        launching", and is reported as such by the caller.
+        """
+        deadline = time.monotonic() + OPEN_APP_POLL_TIMEOUT_S
+        last_seen = None
+        while True:
+            try:
+                last_seen = controller.get_frontmost_app()
+                if last_seen and self._same_app(app, last_seen):
+                    return True, last_seen
+            except Exception as e:
+                logger.debug(f"get_frontmost_app() failed during open_app verification: {e}")
+            if time.monotonic() >= deadline:
+                return False, last_seen
+            time.sleep(OPEN_APP_POLL_INTERVAL_S)
 
     def _is_stagnant(self, observations: list) -> bool:
         """
@@ -401,16 +469,53 @@ class ReactLoop:
             # First use vision to find where to click
             vision = self._get_vision()
             coords = vision.find_element(description)
-            if coords:
-                controller.click(coords[0], coords[1])
-                return f"Clicked on '{description}' at {coords}"
-            else:
+            if not coords:
                 return f"Could not find '{description}' on screen"
+
+            controller.click(coords[0], coords[1])
+
+            # Phase 1 (Hands reliability): OBSERVE AGAIN with a fresh
+            # screenshot instead of reporting success purely because a
+            # click command was issued. Re-look for the same target: if
+            # it's still there in essentially the same spot, the click
+            # most likely didn't register (stale/wrong coordinates, an
+            # unresponsive control, or the UI hadn't finished rendering);
+            # if it's gone or has moved well away from where it was,
+            # that's real evidence the screen changed in response to the
+            # click. This is a heuristic, not a guarantee — some elements
+            # (e.g. Dock icons) legitimately stay visible after a
+            # successful click — but it directly catches the concrete
+            # failure mode from testing (clicking a Spotlight/menu/dialog
+            # result that should dismiss and doesn't).
+            recheck = vision.find_element(description)
+            if recheck and self._same_spot(recheck, coords):
+                return (f"Clicked '{description}' at {coords}, but the same "
+                        f"target is still visible in the same place afterward "
+                        f"— the click may not have registered.")
+            return (f"Clicked on '{description}' at {coords}; it's no longer "
+                    f"visible in the same spot afterward, consistent with the "
+                    f"click taking effect.")
 
         elif action_type == "type":
             text = payload.get("text", "")
             controller.type_text(text)
-            return f"Typed: {text}"
+
+            # Phase 1 (Hands reliability): give the next reasoning step
+            # something real to look at instead of only its own request
+            # echoed back. Previously this always returned a bare
+            # "Typed: {text}" regardless of whether anything on screen
+            # actually reflected it — with no observation of the
+            # resulting state, the loop had no way to tell "it typed, now
+            # click the result" from "nothing happened, try again", which
+            # is exactly what produced the repeated "Typed: VS Code" loop
+            # seen in testing.
+            vision = self._get_vision()
+            screen_state = vision.read(
+                "Briefly describe what is currently visible on screen, "
+                "especially any search box contents, search results, menu "
+                "items, or dialogs. One or two sentences."
+            )
+            return f"Typed: {text}. Screen now shows: {screen_state}"
 
         elif action_type == "hotkey":
             keys = payload.get("keys", [])
@@ -420,7 +525,22 @@ class ReactLoop:
         elif action_type == "open_app":
             app = payload.get("app", "")
             controller.open_app(app)
-            return f"Opened: {app}"
+
+            # Phase 1 (Hands reliability): verify the app actually became
+            # frontmost instead of trusting that issuing the AppleScript
+            # "activate" command without error means it's now open and in
+            # front. Uses get_frontmost_app() (a direct, fast System
+            # Events query) rather than a vision call — it's an exact
+            # answer with no screenshot/LLM round-trip needed.
+            matched, frontmost = self._poll_for_frontmost_match(controller, app)
+            if matched:
+                return f"Opened: {app}, confirmed in the foreground."
+            if frontmost is None:
+                return (f"Opened: {app} (could not confirm what's in the "
+                        f"foreground afterward — see logs).")
+            return (f"Opened: {app}, but '{frontmost}' is in the foreground "
+                    f"instead — {app} may not have launched yet, may still "
+                    f"be loading, or the name may not match exactly.")
 
         elif action_type == "screenshot":
             path = controller.screenshot()
