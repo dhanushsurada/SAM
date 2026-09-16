@@ -53,6 +53,20 @@ from typing import Optional
 from interfaces.api.task_store import TaskStore, TERMINAL_STATUSES
 from interfaces.api.events import EventBus
 from multimodal.errors import PerceptionError, PerceptionCancelled
+
+# Phase 2 (task lifecycle): run_planned_task()/run_task() now report an honest
+# TaskOutcome.status (success/failed/stopped_after_retries/unable_to_verify/
+# cancelled — see agent/react_loop.py). Both the frontend's IqooPhase/
+# TERMINAL_PHASES union (interfaces/desktop/src/api/types.ts) and this
+# backend's own task_store.TERMINAL_STATUSES are a closed
+# completed/failed/cancelled vocabulary, so the finer distinction is mapped
+# onto it here rather than passed through raw — an unrecognized status would
+# not trip task_store's "once terminal, stays terminal" guard (it isn't in
+# TERMINAL_STATUSES), and the frontend would not treat it as done either,
+# leaving the task looking stuck rather than showing a clear failure.
+# outcome.status and the result text itself still carry the fuller
+# distinction for anything else (logs, reflection, main.py, Telegram).
+_OUTCOME_TO_GATEWAY_STATUS = {"success": "completed", "cancelled": "cancelled"}
 from multimodal.vision.adapter import VisionAdapter
 from multimodal.audio.adapter import AudioAdapter
 
@@ -375,13 +389,15 @@ class TaskGateway:
                 return
 
             final_response = response
+            final_status = "completed"  # default: no action was needed, the Brain's
+            # direct answer stands as-is (nothing was executed to have failed)
 
             if response.action and response.action not in (None, "none"):
                 def _on_event(phase: str, message: str):
                     self.task_store.update_status(task_id, phase)
                     self.event_bus.publish(task_id, phase, message)
 
-                real_result_text = self.react_loop.run_planned_task(
+                outcome = self.react_loop.run_planned_task(
                     task=instruction,
                     brain=self.brain,
                     session=session,
@@ -390,7 +406,9 @@ class TaskGateway:
                     cancel_event=cancel_event,
                     on_event=_on_event,
                 )
-                final_response = replace(response, text=real_result_text)
+                final_response = replace(response, text=outcome)
+                final_status = _OUTCOME_TO_GATEWAY_STATUS.get(
+                    getattr(outcome, "status", None), "failed")
 
             if cancel_event.is_set():
                 self.task_store.update_status(task_id, "cancelled", result_text=final_response.text)
@@ -402,8 +420,8 @@ class TaskGateway:
                              memory_store=self.memory.get_store(self.settings))
             self.founder_mode.capture_if_relevant(instruction, final_response)
 
-            self.task_store.update_status(task_id, "completed", result_text=final_response.text)
-            self.event_bus.publish(task_id, "completed", final_response.text)
+            self.task_store.update_status(task_id, final_status, result_text=final_response.text)
+            self.event_bus.publish(task_id, final_status, final_response.text)
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)

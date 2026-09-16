@@ -26,6 +26,41 @@ OPEN_APP_POLL_TIMEOUT_S = 1.8   # open_app() -- an already-running app typically
 # cold-launching app a bit of room without stalling every open_app call. Untested against
 # a real cold launch on real hardware -- tune if 1.8s proves too short (or needlessly long).
 
+# Phase 2 (task lifecycle): the honest-outcome vocabulary run_task()/run_planned_task()
+# report via TaskOutcome.status below. Deliberately reuses MAX_STEPS and STAGNATION_WINDOW
+# as the bounds that decide between these, rather than introducing a separate "retry
+# budget" constant -- those are the existing abstractions that already bound a task.
+STATUS_SUCCESS = "success"                        # finished, and nothing along the way
+# was left unresolved after its retry.
+STATUS_FAILED = "failed"                          # finished (Brain said done, or the plan
+# ran to its end), but at least one action never verified as successful even after retry.
+STATUS_STOPPED_AFTER_RETRIES = "stopped_after_retries"  # stopped early: repetition
+# detected (identical observations, or the identical action failing repeatedly) before
+# reaching a natural end.
+STATUS_UNABLE_TO_VERIFY = "unable_to_verify"      # hit MAX_STEPS without reaching either
+# a clean success or a clear stuck-repetition signal -- genuinely ambiguous.
+STATUS_CANCELLED = "cancelled"                    # the caller's cancel_event fired.
+
+
+class TaskOutcome(str):
+    """
+    The text result of run_task()/run_planned_task(), exactly as before --
+    behaves as a plain str in every way (equality, formatting, slicing,
+    concatenation, `in`, sqlite3/json/dataclass field assignment, all of
+    it -- verified directly, not assumed) so every existing caller and
+    test that treats the return value as a string keeps working
+    unchanged. The one addition is `.status`, one of the STATUS_*
+    constants above, for callers that want the honest
+    success/failed/stopped_after_retries/unable_to_verify/cancelled
+    distinction without parsing the prose. Any *derived* string (e.g.
+    result.lower()) reverts to a plain str per normal Python str
+    semantics -- only the direct return value itself carries `.status`.
+    """
+    def __new__(cls, text: str, status: str):
+        obj = super().__new__(cls, text)
+        obj.status = status
+        return obj
+
 
 class ReactLoop:
     def __init__(self, settings, founder_mode=None):
@@ -223,8 +258,75 @@ class ReactLoop:
         recent = [o.get("observation", "") for o in observations[-STAGNATION_WINDOW:]]
         return recent[0] != "" and len(set(recent)) == 1
 
+    @staticmethod
+    def _action_key(observation: dict):
+        """
+        A comparable identity for an executed step -- same action type +
+        same payload -- used by _is_repeating_failed_action below to
+        detect "trying the identical thing repeatedly" independent of how
+        the *resulting* observation text happens to read. Returns None
+        for a step that wasn't an action (a plain text response, or a
+        malformed payload) -- there's nothing meaningful to call
+        "repeated" there, so it never counts toward a repeat.
+        """
+        action = observation.get("action")
+        if not action:
+            return None
+        payload = observation.get("payload")
+        if payload is None:
+            payload = observation.get("description")
+        try:
+            return (action, json.dumps(payload, sort_keys=True, default=str))
+        except Exception:
+            return (action, str(payload))
+
+    def _is_repeating_failed_action(self, observations: list) -> bool:
+        """
+        Detects choosing the exact same action + payload STAGNATION_WINDOW
+        times in a row where *every* one of those attempts failed
+        verification. Complements _is_stagnant(): that method compares
+        observation *text*, which Phase 1 made descriptive rather than a
+        bare repeated self-report (e.g. vision.read()'s free-text
+        phrasing can vary slightly between attempts even when the
+        underlying problem — and the action chosen in response to it —
+        stays exactly the same), so a loop can now be genuinely stuck on
+        one action without ever producing three byte-identical
+        observations. This is the direct, action-identity signal for
+        that case.
+        """
+        if len(observations) < STAGNATION_WINDOW:
+            return False
+        recent = observations[-STAGNATION_WINDOW:]
+        if any(o.get("success", True) for o in recent):
+            return False  # at least one recent attempt verified fine -- not stuck
+        keys = {self._action_key(o) for o in recent}
+        return len(keys) == 1 and None not in keys
+
+    @staticmethod
+    def _last_action_unresolved(observations: list) -> bool:
+        """
+        True if the most recently *executed* action (skipping any pure
+        text steps, which have no attempts) never verified as successful,
+        even after its retry. Used at each "the loop finished normally"
+        exit point to tell a genuine success from "I reached the end, but
+        the last thing I did never worked" — reaching the end of a plan,
+        or the Brain saying it's done, doesn't by itself mean the task
+        actually succeeded, and previously nothing checked.
+
+        Deliberately checks only the *last* executed action, not "was
+        there ever a failure anywhere in the history": an earlier action
+        failing and then a later, different action succeeding is a
+        recovery, not an unresolved problem (see TEST C in the Phase 2
+        brief) — only whether things ended in a working state should
+        turn an otherwise-clean finish into a reported failure.
+        """
+        for o in reversed(observations):
+            if o.get("attempts") is not None:
+                return not o.get("success", True)
+        return False
+
     def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None,
-                 on_event=None) -> str:
+                 on_event=None) -> TaskOutcome:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete, MAX_STEPS reached, or cancelled.
@@ -241,6 +343,11 @@ class ReactLoop:
         instant the user says "stop", bypassing the process lock entirely
         so it takes effect even while this loop is mid-execution). Omit it
         to get the old, never-cancellable behaviour unchanged.
+
+        Returns a TaskOutcome (see class docstring) -- a plain str for
+        every existing caller, with `.status` for callers that want the
+        honest success/failed/stopped_after_retries/unable_to_verify/
+        cancelled distinction (Phase 2).
         """
         logger.info(f"Starting ReAct loop for task: {task}")
         observations = []
@@ -254,7 +361,7 @@ class ReactLoop:
                 logger.info("Task cancelled by user request")
                 result = "Stopped."
                 self._safe_reflect(task, observations, result)
-                return result
+                return TaskOutcome(result, STATUS_CANCELLED)
 
             steps += 1
             logger.info(f"ReAct step {steps}/{MAX_STEPS}")
@@ -268,7 +375,9 @@ class ReactLoop:
             if response.action is None or response.action == "none":
                 logger.info("Task complete — no more actions needed")
                 self._safe_reflect(task, observations, response.text)
-                return response.text
+                status = (STATUS_FAILED if self._last_action_unresolved(observations)
+                          else STATUS_SUCCESS)
+                return TaskOutcome(response.text, status)
 
             # Act: execute the action (Phase 1.5: verified, with 1 retry on failure)
             self._safe_event(on_event, "executing", f"Step {steps}: {response.action}")
@@ -281,30 +390,37 @@ class ReactLoop:
                 "action": response.action,
                 "payload": response.action_payload,
                 "observation": observation,
-                "attempts": verified["attempts"]
+                "attempts": verified["attempts"],
+                "success": verified["success"],
             })
             logger.info(f"Observation: {observation[:100]}")
 
             current_input = f"Observation from last step: {observation}"
+            if not verified["success"]:
+                current_input += (
+                    "\n\nThat did not verify as successful even after a retry. Do not "
+                    "just repeat the same action — re-check what's actually on screen "
+                    "and choose a different approach, or say there's nothing more you "
+                    "can do if no reasonable alternative exists.")
             response = None  # force fresh reasoning on the next iteration
 
-            if self._is_stagnant(observations):
-                logger.warning(f"Stagnation detected — same observation repeated "
+            if self._is_stagnant(observations) or self._is_repeating_failed_action(observations):
+                logger.warning(f"Stagnation detected — stuck repeating without progress "
                                 f"{STAGNATION_WINDOW}x in a row, aborting early instead "
                                 f"of burning the remaining steps")
-                result = (f"I got stuck repeating the same result "
-                          f"('{observations[-1]['observation'][:80]}') without making "
-                          f"progress, so I stopped instead of continuing to retry.")
+                result = (f"I got stuck repeating the same approach without making "
+                          f"progress ('{observations[-1]['observation'][:80]}'), so I "
+                          f"stopped instead of continuing to retry.")
                 self._safe_reflect(task, observations, result)
-                return result
+                return TaskOutcome(result, STATUS_STOPPED_AFTER_RETRIES)
 
         logger.warning(f"ReAct loop reached max steps ({MAX_STEPS})")
         result = "I ran out of steps before completing the task. Please try again."
         self._safe_reflect(task, observations, result)
-        return result
+        return TaskOutcome(result, STATUS_UNABLE_TO_VERIFY)
 
     def run_planned_task(self, task: str, brain, session, founder_context: str = "",
-                          initial_response=None, cancel_event=None, on_event=None) -> str:
+                          initial_response=None, cancel_event=None, on_event=None) -> TaskOutcome:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
@@ -331,6 +447,14 @@ class ReactLoop:
         fired at plan creation, before/after each step's execution, and on
         stagnation abort. Additive and backward-compatible: default None
         means zero behaviour change for existing callers. See _safe_event.
+
+        Returns a TaskOutcome (see class docstring) -- a plain str for
+        every existing caller, with `.status` for callers that want the
+        honest success/failed/stopped_after_retries/unable_to_verify/
+        cancelled distinction (Phase 2). Reaching the end of the plan is
+        NOT by itself treated as success — Phase 2: a plan that ran every
+        step but never actually got a step to verify is reported as
+        failed, not silently as if it had gone fine.
         """
         if not self._looks_multi_step(task):
             logger.info("Task looks single-step — skipping Planner call")
@@ -353,7 +477,7 @@ class ReactLoop:
                 logger.info("Planned task cancelled by user request")
                 result = "Stopped."
                 self._safe_reflect(task, observations, result)
-                return result
+                return TaskOutcome(result, STATUS_CANCELLED)
 
             if steps_run >= MAX_STEPS:
                 logger.warning(f"Planned task exceeded MAX_STEPS ({MAX_STEPS}) — stopping early")
@@ -378,31 +502,38 @@ class ReactLoop:
                                   f"{'verified' if verified['success'] else 'failed verification'}")
                 observation = verified["observation"]
                 attempts = verified["attempts"]
+                success = verified["success"]
             else:
                 observation = response.text
                 attempts = None
+                success = True  # no action was taken — nothing to have failed
 
             observations.append({
                 "step": planned_step["step"],
                 "action": response.action,
+                "payload": response.action_payload,
                 "description": planned_step["description"],
                 "observation": observation,
-                "attempts": attempts
+                "attempts": attempts,
+                "success": success,
             })
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
 
-            if self._is_stagnant(observations):
-                logger.warning(f"Stagnation detected — same observation repeated "
+            if self._is_stagnant(observations) or self._is_repeating_failed_action(observations):
+                logger.warning(f"Stagnation detected — stuck repeating without progress "
                                 f"{STAGNATION_WINDOW}x in a row, aborting the plan early")
-                result = (f"I got stuck repeating the same result "
-                          f"('{observation[:80]}') without making progress, so I "
-                          f"stopped instead of continuing through the rest of the plan.")
+                result = (f"I got stuck repeating the same approach without making "
+                          f"progress ('{observation[:80]}'), so I stopped instead of "
+                          f"continuing through the rest of the plan.")
                 self._safe_reflect(task, observations, result)
-                return result
+                return TaskOutcome(result, STATUS_STOPPED_AFTER_RETRIES)
 
         final_text = observations[-1]["observation"] if observations else "Task could not be started."
         self._safe_reflect(task, observations, final_text)
-        return final_text
+        if not observations:
+            return TaskOutcome(final_text, STATUS_FAILED)
+        status = STATUS_FAILED if self._last_action_unresolved(observations) else STATUS_SUCCESS
+        return TaskOutcome(final_text, status)
 
     def _safe_event(self, on_event, phase: str, message: str):
         """iQOO Phase 1 adapter: optional progress callback, additive and
@@ -434,10 +565,20 @@ class ReactLoop:
             f"Step {o['step']} ({o['description']}): {o['observation']}" for o in observations
         ) if observations else "None yet."
 
+        failure_note = ""
+        if observations and not observations[-1].get("success", True):
+            failure_note = (
+                "\n\nThe most recent step above did not verify as successful even "
+                "after a retry. Do not just repeat the same action for this step — "
+                "re-check what's actually on screen and choose a different approach, "
+                "or respond with action: null and an honest status if no reasonable "
+                "alternative exists."
+            )
+
         return (
             f"Overall task: {task}\n\n"
             f"Full plan:\n{plan_text}\n\n"
-            f"Steps completed so far:\n{obs_text}\n\n"
+            f"Steps completed so far:\n{obs_text}{failure_note}\n\n"
             f"Now execute step {current_step['step']}: {current_step['description']}\n"
             f"If this step needs an action, specify it. If it's already satisfied by the "
             f"conversation so far, respond with action: null and a short status."
