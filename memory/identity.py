@@ -15,7 +15,7 @@ IDENTITY_PATH = SAM_DATA_DIR / "identity.json"
 
 DEFAULT_IDENTITY = {
     "name": "Dhanush",
-    "assistant_name": "SAM",
+    "assistant_name": "VEDA",
     "about": "First-year B.Tech CSE student at NSRIT Visakhapatnam. Building SAM.",
     "projects": [
         "SAM — local AI assistant",

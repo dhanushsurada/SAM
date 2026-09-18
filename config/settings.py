@@ -38,6 +38,25 @@ def _ensure_data_dirs():
 _ensure_data_dirs()
 
 
+def validate_assistant_name(name: str) -> str:
+    """
+    Validates a proposed assistant display name -- used for first-run
+    naming (main.py's _run_first_run_setup) and the runtime "name X"
+    command. Returns the name unchanged when valid; raises ValueError
+    with a specific reason otherwise. Restored (Phase 1 consolidation
+    pass) from tests/test_identity_setup_offline.py's contract, which
+    is the only surviving specification for this function in this
+    checkout (no git history available to recover the original from).
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Assistant name cannot be empty or whitespace-only")
+    if len(name) > 50:
+        raise ValueError("Assistant name is too long (50 characters max)")
+    if any(c in name for c in ("\x00", "\n", "\r")):
+        raise ValueError("Assistant name cannot contain control characters")
+    return name
+
+
 @dataclass
 class Settings:
     # Identity
@@ -120,6 +139,26 @@ class Settings:
     # warning at startup if unlicensed/invalid, never a lock-out. Flip to
     # True only once you deliberately want enforcement.
     license_enforcement_enabled: bool = False
+
+    # Sovereign Mode / SIH — sovereign/. Restored (Phase 1 consolidation
+    # pass): sovereign/security/network_guard.py, sovereign/tools/,
+    # sovereign/ingestion/pipeline.py, and sovereign/knowledge/vector_index.py
+    # all already read these directly; api/app.py and api/task_runner.py
+    # (sovereign_mode, sovereign_output_dir, sovereign_docs_dir) do too.
+    # Defaults are the values those modules' own code already assumed when
+    # called without an explicit override (see each module for where each
+    # default comes from) — nothing here changes their behavior, it just
+    # makes the attribute they were already reading actually exist.
+    sovereign_mode: bool = False  # never on by default — opt in explicitly
+    sovereign_docs_dir: str = str(SAM_DATA_DIR / "sovereign" / "docs")
+    sovereign_output_dir: str = str(SAM_DATA_DIR / "sovereign" / "output")
+    sovereign_network_log: str = str(SAM_DATA_DIR / "sovereign" / "network_guard.jsonl")
+    sovereign_knowledge_collection: str = "sam_documents"  # per vector_index.py's own module docstring
+    sovereign_chunk_size: int = 300     # matches ingestion/pipeline.py's ingest_file() default
+    sovereign_chunk_overlap: int = 50   # matches ingestion/pipeline.py's ingest_file() default
+    sovereign_top_k: int = 5            # matches search_knowledge.py's own getattr(..., 5) fallback
+    sovereign_vision_model: Optional[str] = None  # None -> read_document.py/pipeline.py fall back to vision_model
+    sovereign_allowed_hosts: Optional[list] = None  # extra hosts beyond loopback + ollama_host; network_guard.py already treats None as []
 
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")

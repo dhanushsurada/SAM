@@ -161,7 +161,15 @@ class Brain:
 
     def _build_messages(self, session) -> list:
         """Build the full message list for the LLM."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # First-run identity naming (Phase 1 consolidation pass): SYSTEM_PROMPT
+        # itself stays a plain module-level constant (so the control-vocabulary/
+        # verb-stripping tests that check it directly keep working unchanged);
+        # only the live system message gets the assistant's actual configured
+        # name substituted in. A no-op replace when it's still "SAM" (the
+        # common case, and always true before any first-run naming has run).
+        assistant_name = (session.identity or {}).get("assistant_name") or "SAM"
+        system_content = SYSTEM_PROMPT.replace("You are SAM —", f"You are {assistant_name} —", 1)
+        messages = [{"role": "system", "content": system_content}]
 
         # Identity context
         if session.identity:

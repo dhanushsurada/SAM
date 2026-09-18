@@ -41,7 +41,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SAM")
 
-from config.settings import Settings
+from config.settings import Settings, validate_assistant_name
 from ears.wake_word import WakeWordListener
 from ears.text_input import TextInputListener
 from ears.stt import SpeechToText
@@ -54,11 +54,100 @@ from founder_mode.manager import FounderModeManager
 from agent.react_loop import ReactLoop
 
 
+def run_task_with_optional_sovereign_mode(
+    loop, settings, task, brain, session,
+    founder_context="", initial_response=None, cancel_event=None,
+    on_step=None,
+):
+    """
+    Runs a task through ReactLoop.run_planned_task() -- the exact same
+    call SAM._process() below already makes directly -- optionally
+    wrapped in a SocketGuard when settings.sovereign_mode is on.
+
+    This is the Milestone 6 wiring sovereign/security/network_guard.py's
+    own module docstring names as the one piece that capability was
+    "fully tested standalone" but not yet connected to: "Wiring this to
+    automatically wrap every real SAM task run (main.py / sam_cli.py) is
+    Milestone 6." api/task_runner.py and every sovereign end-to-end test
+    already import and call this by name — restored here from that
+    extensive call-site/test contract (this checkout has no git history
+    to recover the original from), not redesigned: nothing about
+    SocketGuard, NetworkGuardReport, or run_planned_task changed to make
+    this fit.
+
+    Returns (result_text, network_report). network_report is a real
+    NetworkGuardReport when sovereign_mode is on; when it's off, it's
+    None -- "not measured", not a fabricated zero-count report, the same
+    principle network_guard.py's own snapshot_connections() already
+    follows when psutil isn't installed.
+
+    Evidence is written to settings.sovereign_network_log even when the
+    task raises -- a failed task still needs an audit trail, not a
+    silently missing one -- and the exception itself always propagates
+    to the caller afterward; it is never swallowed here.
+
+    on_step: accepted so api/task_runner.py's call signature doesn't
+    break, but not currently wired to anything. ReactLoop.run_task/
+    run_planned_task have no per-step callback hook for it -- only the
+    coarser-grained on_event(phase, message) the iQOO adapter already
+    uses. Wiring real step-by-step streaming would mean changing
+    react_loop.py's own execution loop, which is Phase 2/ReAct-loop
+    territory and out of bounds for a regression-repair pass; nothing
+    currently tests or depends on on_step actually firing.
+    """
+    if not settings.sovereign_mode:
+        result_text = loop.run_planned_task(
+            task=task, brain=brain, session=session,
+            founder_context=founder_context,
+            initial_response=initial_response, cancel_event=cancel_event,
+        )
+        return result_text, None
+
+    from sovereign.security import SocketGuard
+    from sovereign.security.network_guard import write_evidence_log
+
+    guard = SocketGuard(settings, task_label=task)
+    try:
+        with guard:
+            result_text = loop.run_planned_task(
+                task=task, brain=brain, session=session,
+                founder_context=founder_context,
+                initial_response=initial_response, cancel_event=cancel_event,
+            )
+        return result_text, guard.report()
+    finally:
+        write_evidence_log(guard.report(), settings)
+
+
 class SAM:
     def __init__(self, start_in_text_mode: bool = False):
         logger.info("SAM initialising...")
         self.settings = Settings()
         self.identity = Identity()
+        # First-run identity naming (Phase 1 consolidation pass, restored
+        # from tests/test_identity_setup_offline.py's M6.2 contract --
+        # this checkout's git history doesn't go back far enough to
+        # recover the original implementation from, so this is
+        # reconstructed from that test file's 20 scenarios, which is the
+        # only surviving specification for the exact decision rule
+        # below):
+        #   setup_completed True  -> not first-run, whatever the name is
+        #   setup_completed False -> first-run (an interrupted run, resume it)
+        #   no setup_completed key, assistant_name == "SAM" -> not first-run
+        #     (a pre-existing install from before this flow existed --
+        #     don't force a legacy SAM install into a naming prompt)
+        #   no setup_completed key, anything else -> first-run (the
+        #     untouched DEFAULT_IDENTITY a brand new install starts with,
+        #     assistant_name == "VEDA")
+        identity_data = self.identity.load()
+        if identity_data.get("setup_completed") is True:
+            self._is_first_run = False
+        elif identity_data.get("setup_completed") is False:
+            self._is_first_run = True
+        else:
+            self._is_first_run = identity_data.get("assistant_name") != "SAM"
+        self._display_name = identity_data.get("assistant_name") or "VEDA"
+        self._name_overridden_via_cli = False
         self.memory = MemoryRetriever()
         self.founder_mode = FounderModeManager(settings=self.settings)
         self.brain = Brain(self.settings)
@@ -250,6 +339,21 @@ class SAM:
             self.tts.speak(msg)
             return True
 
+        # Runtime rename (M6.2): "name NOVA" -> validate, persist, take
+        # effect immediately. Invalid/empty is rejected silently, keeping
+        # the current name rather than raising into the caller -- the
+        # command was still "handled" (return True either way), just
+        # with no effect when the proposed name doesn't validate.
+        if t == "name" or t.startswith("name "):
+            proposed = text.strip()[len("name"):].strip()
+            try:
+                new_name = validate_assistant_name(proposed)
+            except ValueError:
+                return True
+            self._display_name = new_name
+            self.identity.update({"assistant_name": new_name, "setup_completed": True})
+            return True
+
         # Sleep / Stop
         if any(p in t for p in ["sam sleep", "go to sleep"]):
             msg = "Going to sleep. Call me when you need me."
@@ -266,6 +370,46 @@ class SAM:
             return True
 
         return False
+
+    def _run_first_run_setup(self):
+        """
+        First-run naming flow (M6.2), restored from tests/
+        test_identity_setup_offline.py's contract. STEP 1 (name) always
+        runs and completes before STEP 2 (model) starts/prints -- several
+        tests assert that ordering directly.
+
+        STEP 2 here deliberately stays a plain, non-blocking status line,
+        not a real installed-model check -- that's model-selection/
+        capability-router territory, explicitly out of scope for this
+        pass (see the auto-RAM-tier selection Settings._select_model()
+        already does at construction time, which this does not duplicate
+        or second-guess).
+        """
+        print("\n=== SAM first-run setup ===")
+        print("STEP 1: Name your assistant")
+        if self._name_overridden_via_cli:
+            chosen = self._display_name
+            print(f"Using the name given on the command line: {chosen}")
+        else:
+            chosen = None
+            for _ in range(5):
+                raw = input("What would you like to call your assistant? [VEDA]: ").strip() or "VEDA"
+                try:
+                    chosen = validate_assistant_name(raw)
+                    break
+                except ValueError as e:
+                    print(f"  {e} — try again.")
+            if chosen is None:
+                chosen = "VEDA"
+        self._display_name = chosen
+        self.identity.update({"assistant_name": chosen, "setup_completed": True})
+        self._is_first_run = False
+        print(f"Setup complete — I'll go by {chosen}.")
+
+        print("\nSTEP 2: Model check")
+        print(f"Configured model: {self.settings.primary_model} "
+              f"(change anytime via settings or a model-select command)")
+        print("=== Setup finished ===\n")
 
     # ─── Mode Switching ───────────────────────────────────────────────────
 
@@ -295,6 +439,9 @@ class SAM:
 
         signal.signal(signal.SIGINT, self._shutdown)
         signal.signal(signal.SIGTERM, self._shutdown)
+
+        if self._is_first_run:
+            self._run_first_run_setup()
 
         # Phase 3: non-blocking license check. Per the frozen principle
         # ("no hard license enforcement at launch — non-blocking warnings
@@ -355,9 +502,19 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable TTS — print responses only"
     )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Set the assistant's name on first run (skips the interactive name prompt)"
+    )
     args = parser.parse_args()
 
     sam = SAM(start_in_text_mode=args.text)
+
+    if args.name:
+        sam._display_name = validate_assistant_name(args.name)
+        sam._name_overridden_via_cli = True
 
     if args.silent:
         sam.settings.tts_engine = "none"

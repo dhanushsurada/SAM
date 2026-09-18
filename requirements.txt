@@ -40,6 +40,8 @@ cryptography>=42.0.0            # Ed25519 signing/verification for offline licen
 fastapi>=0.110.0                 # Task gateway HTTP + SSE API
 uvicorn[standard]>=0.29.0        # ASGI server for iqoo/server.py
 httpx>=0.27.0                    # Only needed for tests/test_iqoo_phase1_offline.py (TestClient)
+python-multipart>=0.0.9          # Required by api/app.py's File(...)/UploadFile document-upload route --
+                                  # FastAPI raises at route-registration time without it installed
 
 # ─── Utilities ─────────────────────────────────────────────────────────────
 # (python-dotenv removed here — Phase 4.2 audit confirmed zero imports
