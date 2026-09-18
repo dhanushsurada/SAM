@@ -135,12 +135,41 @@ class BrowserAgent:
     def _do_execute(self, url: str, task: str) -> str:
         if url:
             logger.info(f"Navigating to: {url}")
-            self._page.goto(url, wait_until="networkidle", timeout=30000)
+            # Reform 7 (Hands reliability, Phase 3): was
+            # wait_until="networkidle" here. That waits for 500ms with NO
+            # network activity at all -- fine for a static page, but
+            # pages that keep a persistent connection open (analytics
+            # beacons, websockets, polling) never go idle, so this could
+            # silently eat the entire 30s timeout before falling through.
+            # YouTube is exactly this kind of page. domcontentloaded
+            # fires promptly and reliably instead; _settle() below adds a
+            # short, BOUNDED best-effort wait on top for pages that do
+            # finish loading data quickly, without blocking on ones that
+            # never will.
+            self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            self._settle()
 
         if not task:
             return self._get_page_content()
 
         return self._perform_task(task)
+
+    def _settle(self, timeout_ms: int = 4000):
+        """
+        Best-effort, bounded wait for the page to go quiet after a
+        navigation or a click that may have triggered one (a full page
+        load or an SPA-style client-side transition) — reduces the
+        "read/click before the page actually finished rendering" race
+        that previously showed up as intermittent "No content found" on
+        pages with real content. Deliberately NOT the primary gate (see
+        _do_execute) — just a capped top-up on top of domcontentloaded,
+        so a page that never goes fully idle (YouTube, most SPAs) simply
+        proceeds after timeout_ms instead of blocking the task.
+        """
+        try:
+            self._page.wait_for_load_state("networkidle", timeout=timeout_ms)
+        except Exception:
+            pass  # Never idle, or timed out -- proceed with what's loaded.
 
     def _perform_task(self, task: str) -> str:
         """Perform a specific task on the current page."""
@@ -170,19 +199,134 @@ class BrowserAgent:
         except Exception as e:
             return f"Could not extract content: {e}"
 
+    # Words stripped from a click task before it's tried as a page-text
+    # match — verbs and generic filler that would never appear as the
+    # actual label of the thing being clicked.
+    _CLICK_FILLER_WORDS = {
+        "click", "clicking", "select", "selecting", "choose", "choosing",
+        "the", "a", "an", "on", "to", "please", "now", "then", "and",
+        "first", "top", "result", "results", "item", "option", "link",
+        "button", "video", "play", "open", "watch", "titled", "called",
+        "named",
+    }
+
+    @classmethod
+    def _extract_click_targets(cls, task: str) -> list:
+        """
+        Builds an ordered list of candidate strings to try matching
+        against the page's text, most specific first. Replaces the old
+        strategy of trying every word longer than 3 characters in
+        left-to-right order — on a content-dense page (a YouTube search
+        results list, full of recommended/related text) that reliably
+        clicked the first coincidental word match rather than the
+        actually-requested item, which is the direct, evidenced cause of
+        "can reach the search results but has difficulty actually
+        clicking/selecting a video."
+
+        Order:
+          1. Any quoted phrase in the task ("..." or '...') — the
+             clearest possible signal of an exact on-page label/title.
+          2. The task with a leading click/select verb and generic
+             filler words stripped, kept as ONE phrase — catches a
+             title the Brain wrote out without quotes.
+          3. Individual remaining significant words (len > 3), longest
+             first rather than left-to-right — last-resort fallback,
+             kept from the original implementation, but preferring the
+             most specific (least likely to coincidentally match
+             something else) word first.
+        """
+        import re
+        candidates = []
+
+        for quoted in re.findall(r'"([^"]{3,80})"|\'([^\']{3,80})\'', task):
+            phrase = (quoted[0] or quoted[1]).strip()
+            if phrase and phrase not in candidates:
+                candidates.append(phrase)
+
+        all_words = [w.strip("'\"") for w in re.findall(r"[A-Za-z0-9'-]+", task)]
+        all_words = [w for w in all_words if w]
+        meaningful = [w for w in all_words if w.lower() not in cls._CLICK_FILLER_WORDS]
+
+        if meaningful:
+            phrase = " ".join(meaningful)
+            if phrase not in candidates:
+                candidates.append(phrase)
+
+        # Last-resort word pool: normally the filler-stripped words above,
+        # but a fully generic task ("click the first video result", no
+        # title or other distinguishing text at all) filters down to
+        # nothing there — falling back to every word minus just the
+        # leading verb means something is still attempted, matching what
+        # the word-by-word strategy this replaces would at least try,
+        # rather than giving up before a single click.
+        word_pool = meaningful or [
+            w for w in all_words
+            if w.lower() not in ("click", "clicking", "select", "selecting",
+                                  "choose", "choosing", "the", "a", "an")
+        ]
+        # Dedup while preserving first-occurrence order before sorting by
+        # length: sorting a *set* of same-length words would tie-break
+        # using Python's per-process string-hash randomization, making
+        # the fallback order non-deterministic between runs for no
+        # benefit. A stable sort over an order-preserving list makes the
+        # tie-break "whichever word appeared first in the task text" —
+        # deterministic and easier to reason about when debugging.
+        seen = set()
+        ordered_unique = []
+        for w in word_pool:
+            if len(w) > 3 and w not in seen:
+                seen.add(w)
+                ordered_unique.append(w)
+        for word in sorted(ordered_unique, key=len, reverse=True):
+            if word not in candidates:
+                candidates.append(word)
+
+        return candidates
+
     def _smart_click(self, task: str) -> str:
-        """Find and click an element based on task description."""
+        """
+        Find and click an element based on a free-text task description.
+
+        Tries each candidate from _extract_click_targets() in order
+        (most specific first) via Playwright's get_by_text(exact=False)
+        — a case-insensitive substring match against the page's actual
+        text, scoped with .first so a phrase matching several elements
+        still resolves to one rather than raising strict-mode ambiguity.
+
+        Verification (Reform 7/9): captures the page URL before and
+        after the click, with a bounded settle wait in between so an
+        SPA-style transition has a chance to land first. A changed URL
+        is real, cheap, reliable evidence the click actually navigated
+        somewhere — not just that Playwright's click() call returned.
+        Phrasing below is deliberately aligned with the SAME failure
+        vocabulary agent/verifier.py already recognizes from the control
+        (vision/PyAutoGUI) click path ("could not find", "may not have
+        registered") — one Verifier failure-signal list covers both
+        click paths, control and browser, with no changes needed there.
+        """
         try:
-            # Try to find by text content
-            words = task.lower().replace("click", "").strip().split()
-            for word in words:
-                if len(word) > 3:
-                    try:
-                        self._page.click(f"text={word}", timeout=5000)
-                        return f"Clicked element containing '{word}'"
-                    except Exception:
-                        continue
-            return "Could not find element to click"
+            candidates = self._extract_click_targets(task)
+            if not candidates:
+                return "Could not find element to click — no clear target in the task description"
+
+            before_url = self._page.url
+            for candidate in candidates:
+                try:
+                    self._page.get_by_text(candidate, exact=False).first.click(timeout=5000)
+                except Exception:
+                    continue
+
+                self._settle()
+                after_url = self._page.url
+                if after_url != before_url:
+                    return (f"Clicked element matching '{candidate}'; page navigated "
+                            f"from {before_url} to {after_url} — consistent with the "
+                            f"click taking effect.")
+                return (f"Clicked element matching '{candidate}', but the page URL "
+                        f"is still {after_url} afterward — the click may not have "
+                        f"registered, or this page updates without a URL change.")
+
+            return f"Could not find element to click for: {task}"
         except Exception as e:
             return f"Click error: {e}"
 

@@ -124,6 +124,42 @@ class ScreenReader:
         find). Moondream is asked to point at a visual object, not parse
         an imperative sentence, so stripping the verb before it ever
         reaches the prompt makes matching noticeably more reliable.
+
+        Coordinate convention (Reform 2, Hands reliability Phase 3 —
+        documenting this end-to-end per that phase's request, after
+        verifying the math against the code rather than assuming it
+        needs to change for Retina displays):
+
+            vision model output  →  normalized (x, y), each 0.0-1.0,
+                                     as a FRACTION of the screenshot
+                                     image _take_screenshot() actually
+                                     captured (via macOS's
+                                     `screencapture`, at that display's
+                                     real backing resolution — 2x/3x
+                                     pixels on Retina).
+            _to_pixel_coords()    →  pixel = fraction * pyautogui.size()
+                                     — pyautogui.size() returns the
+                                     LOGICAL/point resolution, the same
+                                     coordinate space pyautogui.click()
+                                     itself expects.
+            ComputerController    →  click(pixel_x, pixel_y) — same
+                                     space as pyautogui.size(), so this
+                                     is self-consistent by construction.
+
+        This is already correct on a Retina display, and NOT because the
+        scale factor is being tracked anywhere — it's sidestepped
+        entirely. A normalized fraction is resolution-independent: (0.5,
+        0.5) means "the middle of the image" whether that image is
+        1512x982 or a 2x-Retina 3024x1964 capture of the exact same
+        screen. Scaling that fraction by pyautogui.size() (rather than by
+        the screenshot's own raw pixel dimensions) is what keeps the
+        result correct regardless of backing scale factor, since
+        pyautogui.size() and pyautogui.click() always agree with each
+        other on what coordinate space they're using, whatever it
+        actually is on a given platform. Changing this to account for
+        Retina scaling explicitly, as one might reflexively expect to
+        need to, would be a bug, not a fix — it would double-apply a
+        correction this design already gets for free.
         """
         try:
             clean_description = self._clean_target_description(description)
@@ -182,6 +218,26 @@ If not found, return: {{"x": null, "y": null}}"""
                 return None
 
             pixel_x, pixel_y = self._to_pixel_coords(x, y)
+
+            # Phase 3 (Hands reliability): the same "not found" treatment
+            # as the (0,0) check above, extended to any result that lands
+            # outside the real screen entirely — e.g. the model returning
+            # a value that isn't actually a 0.0-1.0 fraction (so
+            # _to_pixel_coords' defensive raw-pixel passthrough kicks in)
+            # and produces something like (5000, 3). No real on-screen
+            # element can be there, so this is caught here — with a
+            # specific, logged reason — rather than passed through to
+            # ComputerController.click(), which would also refuse it, but
+            # two layers away and without knowing this was a vision
+            # answer rather than a bad coordinate from anywhere else.
+            width, height = self._get_screen_size()
+            if not (0 <= pixel_x <= width) or not (0 <= pixel_y <= height):
+                logger.warning(f"Vision returned out-of-bounds pixel "
+                                f"({pixel_x}, {pixel_y}) for "
+                                f"'{clean_description}' on a {width}x{height} "
+                                f"screen — treating as not-found")
+                return None
+
             logger.info(f"Found '{clean_description}' at normalized ({x:.3f}, {y:.3f}) "
                         f"-> pixel ({pixel_x}, {pixel_y})")
             return (pixel_x, pixel_y)

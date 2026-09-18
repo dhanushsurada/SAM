@@ -7,6 +7,24 @@
 > unedited July snapshot; it predates Phase 4 and the iQOO branch and
 > hasn't been re-verified against the current tree.
 
+> **Update, September 2026 (Hands / desktop-control reliability
+> reform):** one item in the "real gaps" list below — "The intermittent
+> 'No content found' browser race condition" — is now fixed; see
+> `docs/HANDS_PHASE3_RELIABILITY_REFORM.md`, which also closes several
+> Hands-layer gaps this snapshot doesn't mention at all (screenshot
+> default location, `open_app` name resolution, action methods silently
+> no-op'ing without PyAutoGUI, click coordinate bounds, and YouTube/
+> results-page click targeting). "Reflection's lessons still aren't fed
+> back" and "Brain's bias toward blind clicking over the browser tool"
+> below are both still open — deliberately not folded into that reform,
+> which stayed scoped to Hands execution-layer bugs rather than
+> Brain-prompt/behavior redesign. (Note: this snapshot's own "✅ Done"
+> list below uses "Phase 3" for Licensing — a different, unrelated
+> "Phase 3," from before this project settled on reusing phase numbers
+> per work-stream rather than as one global counter. The Hands reform
+> doc above is titled "(Phase 3)" after the brief that requested it, not
+> after this doc's numbering.)
+
 This replaces the two external "phase map" analyses you shared. Both got
 real things wrong in ways that matter for decisions — corrected below
 against what's actually built, tested, and running, not estimated.
