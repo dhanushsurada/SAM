@@ -10,7 +10,7 @@ Platform auto-detected. Same API surface on both OS.
 
 import logging
 import subprocess
-import tempfile
+import time
 import platform
 import os
 
@@ -24,6 +24,39 @@ IS_WIN = PLATFORM == "Windows"
 # Mirrors hands/vision/screen_reader.py's SCREENCAPTURE_BIN; duplicated rather
 # than shared since the two modules don't otherwise share any state.
 SCREENCAPTURE_BIN = "/usr/sbin/screencapture"
+
+# Phase 3 (Hands reliability): where a user-requested "take a screenshot"
+# action saves its file by default. Deterministic and discoverable on
+# purpose — see screenshot()'s docstring for the bug this fixes. Mirrors
+# config/settings.py's SAM_DATA_DIR (~/.sam_data) convention as a plain
+# duplicated constant rather than an import, for the same reason
+# SCREENCAPTURE_BIN above is duplicated instead of shared: hands/ modules
+# stay importable on their own, without pulling in config/settings.py's
+# own import-time side effects (it creates several ~/.sam_data
+# subdirectories as soon as it's imported) or its yaml dependency.
+# os.path.expanduser("~") resolves correctly on both macOS and Windows.
+SCREENSHOTS_DIR = os.path.join(os.path.expanduser("~"), ".sam_data", "screenshots")
+
+# Phase 3 (Hands reliability): common macOS display-name aliases for
+# open_app()'s name resolution below. Not an exhaustive app database —
+# just the handful of well-known cases where the name someone would
+# naturally say ("VS Code", "Chrome") doesn't match the exact name
+# AppleScript's `tell application` needs to resolve it, and the
+# installed-app fuzzy-match fallback (_resolve_mac_app_name) either
+# can't help (no local install to scan against, e.g. in this repo's own
+# offline tests) or would require a real filesystem scan. Checked first
+# because it's instant; the fuzzy scan below is the general-purpose
+# fallback for anything not in this small table.
+MAC_APP_NAME_ALIASES = {
+    "vs code": "Visual Studio Code",
+    "vscode": "Visual Studio Code",
+    "chrome": "Google Chrome",
+    "word": "Microsoft Word",
+    "excel": "Microsoft Excel",
+    "powerpoint": "Microsoft PowerPoint",
+    "outlook": "Microsoft Outlook",
+    "teams": "Microsoft Teams",
+}
 
 
 class ComputerController:
@@ -52,54 +85,97 @@ class ComputerController:
         except ImportError:
             logger.warning("pywinauto not installed — pip install pywinauto")
 
+    # ─── Reform 3/4/9 guards ────────────────────────────────────────────────
+    # Every mouse/keyboard action below used to silently do nothing when
+    # PyAutoGUI wasn't loaded (`if self._pyautogui: ...`, no else) — no
+    # exception, no log line the caller could see, no return value to
+    # check. agent/react_loop.py's execute() only reports what a step's
+    # OWN observation says happened; with nothing raised here, a click or
+    # a whole typed string could vanish silently and still be described
+    # as if it had been attempted. That's a worse gap than the
+    # screenshot/AppleScript false-successes Phase 1 already closed, for
+    # the same underlying reason this phase exists: "the executor ran"
+    # must never be treated as "the action happened." Coordinates get the
+    # matching guard: never click/move without valid, in-bounds numbers,
+    # and never silently clamp a bad one into an arbitrary real position.
+
+    def _require_pyautogui(self, action_name: str):
+        if self._pyautogui is None:
+            raise RuntimeError(
+                f"Cannot {action_name} — PyAutoGUI is not installed or "
+                f"failed to load. Run: pip install pyautogui"
+            )
+
+    def _validate_coords(self, x, y):
+        if isinstance(x, bool) or isinstance(y, bool) or \
+           not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            raise RuntimeError(
+                f"Refusing to click/move: coordinates must be numeric, "
+                f"got ({x!r}, {y!r})")
+        width, height = self.get_screen_size()
+        if not (0 <= x <= width) or not (0 <= y <= height):
+            raise RuntimeError(
+                f"Refusing to click/move to ({x}, {y}) — outside the real "
+                f"screen bounds (0-{width}, 0-{height}). This is rejected "
+                f"here rather than silently clamped to the nearest valid "
+                f"point, which would just substitute one arbitrary "
+                f"position for another.")
+
     # ─── Mouse ────────────────────────────────────────────────────────────
 
     def click(self, x: int, y: int, button: str = "left"):
-        if self._pyautogui:
-            self._pyautogui.click(x, y, button=button)
-            logger.info(f"Clicked ({x}, {y})")
+        self._require_pyautogui("click")
+        self._validate_coords(x, y)
+        self._pyautogui.click(x, y, button=button)
+        logger.info(f"Clicked ({x}, {y})")
 
     def double_click(self, x: int, y: int):
-        if self._pyautogui:
-            self._pyautogui.doubleClick(x, y)
+        self._require_pyautogui("double-click")
+        self._validate_coords(x, y)
+        self._pyautogui.doubleClick(x, y)
 
     def right_click(self, x: int, y: int):
-        if self._pyautogui:
-            self._pyautogui.click(x, y, button="right")
+        self._require_pyautogui("right-click")
+        self._validate_coords(x, y)
+        self._pyautogui.click(x, y, button="right")
 
     def move_to(self, x: int, y: int, duration: float = 0.3):
-        if self._pyautogui:
-            self._pyautogui.moveTo(x, y, duration=duration)
+        self._require_pyautogui("move the mouse")
+        self._validate_coords(x, y)
+        self._pyautogui.moveTo(x, y, duration=duration)
 
     def scroll(self, x: int, y: int, clicks: int):
-        if self._pyautogui:
-            self._pyautogui.scroll(clicks, x=x, y=y)
+        self._require_pyautogui("scroll")
+        self._validate_coords(x, y)
+        self._pyautogui.scroll(clicks, x=x, y=y)
 
     def drag(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.5):
-        if self._pyautogui:
-            self._pyautogui.drag(x2 - x1, y2 - y1, duration=duration)
+        self._require_pyautogui("drag")
+        self._validate_coords(x1, y1)
+        self._validate_coords(x2, y2)
+        self._pyautogui.drag(x2 - x1, y2 - y1, duration=duration)
 
     # ─── Keyboard ─────────────────────────────────────────────────────────
 
     def type_text(self, text: str, interval: float = 0.02):
-        if self._pyautogui:
-            self._pyautogui.write(text, interval=interval)
+        self._require_pyautogui("type")
+        self._pyautogui.write(text, interval=interval)
 
     def hotkey(self, *keys):
-        if self._pyautogui:
-            self._pyautogui.hotkey(*keys)
+        self._require_pyautogui("send hotkey")
+        self._pyautogui.hotkey(*keys)
 
     def press(self, key: str):
-        if self._pyautogui:
-            self._pyautogui.press(key)
+        self._require_pyautogui("press key")
+        self._pyautogui.press(key)
 
     def key_down(self, key: str):
-        if self._pyautogui:
-            self._pyautogui.keyDown(key)
+        self._require_pyautogui("key down")
+        self._pyautogui.keyDown(key)
 
     def key_up(self, key: str):
-        if self._pyautogui:
-            self._pyautogui.keyUp(key)
+        self._require_pyautogui("key up")
+        self._pyautogui.keyUp(key)
 
     # ─── Screenshot ───────────────────────────────────────────────────────
 
@@ -115,12 +191,46 @@ class ComputerController:
         Screen Recording permission not granted, which applies to the
         PyAutoGUI capture path here just as much as the direct
         `screencapture` fallback, since both ultimately hit the same OS
-        gate. (Left path/tempfile handling untouched — forcing an
-        explicit /tmp here, as the vision module does, would break the
-        Windows branch, since /tmp isn't a real directory there.)
+        gate.
+
+        Reform 1 (Hands reliability, Phase 3): when no path is given, this
+        used to fall through to bare `tempfile.mktemp(suffix=".png")` —
+        which does NOT save under /tmp. Python's tempfile module resolves
+        the OS default temp directory, and on macOS that's a random,
+        per-boot path under /var/folders/.../T/ (from $TMPDIR), not
+        /tmp — /tmp on macOS is only where you get if you pass
+        `dir="/tmp"` explicitly, which this call never did. That's the
+        exact, previously-unexplained root cause of screenshots that SAM
+        reported as taken but that filesystem searches in ~/.sam_data,
+        /tmp, and /private/tmp could never find: they were real files,
+        saved to a real path, just not any path a person would think to
+        check. (This was a deliberate prior decision, not an oversight —
+        see git history — reasoned that hardcoding /tmp, as the vision
+        module's own throwaway screenshots do, would break the Windows
+        branch, since /tmp isn't a real directory there. That reasoning
+        is correct about /tmp specifically; it doesn't apply to
+        SCREENSHOTS_DIR below, which is built from
+        os.path.expanduser("~") and is a real, writable location on
+        Windows too.)
+
+        Now defaults to SCREENSHOTS_DIR (~/.sam_data/screenshots/), a
+        fixed, discoverable location consistent with this project's own
+        "everything persists under ~/.sam_data" convention
+        (config/settings.py's SAM_DATA_DIR) — creating the directory if
+        it doesn't exist yet. An explicitly-passed `path` is used
+        unchanged, exactly as before.
         """
         if path is None:
-            path = tempfile.mktemp(suffix=".png")
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(SCREENSHOTS_DIR, f"screenshot_{timestamp}.png")
+            candidate = path
+            suffix = 1
+            while os.path.exists(candidate):
+                candidate = os.path.join(
+                    SCREENSHOTS_DIR, f"screenshot_{timestamp}_{suffix}.png")
+                suffix += 1
+            path = candidate
 
         try:
             if self._pyautogui:
@@ -180,12 +290,110 @@ class ComputerController:
     # ─── App Control ──────────────────────────────────────────────────────
 
     def open_app(self, app_name: str):
-        """Open an application — cross-platform."""
+        """
+        Open an application — cross-platform.
+
+        Reform 5 (Hands reliability, Phase 3): on macOS, `tell
+        application "{app_name}" to activate` only resolves if app_name
+        is close enough to how Launch Services actually names the app.
+        It previously used the raw name from the Brain's payload with no
+        fallback, so "VS Code" (a completely natural thing to call it)
+        failed outright even with Visual Studio Code installed and
+        running, because AppleScript has no app literally named "VS
+        Code" to find — same root cause, and the same shared-last-word
+        heuristic, as agent/react_loop.py's _same_app() (which only
+        verifies AFTER activation whether the right app came to the
+        front — it can't fix a resolution failure before activation ever
+        succeeds; this is that fix, one layer earlier).
+
+        Resolution order, stopping at the first success:
+          1. The name as given — most apps' real names, unchanged.
+          2. A small known-alias table (MAC_APP_NAME_ALIASES) for common
+             short names ("VS Code", "Chrome", ...) — not exclusive to
+             any one app.
+          3. A fuzzy match (substring, or shared last word) against the
+             names of applications actually installed in /Applications,
+             /System/Applications, and ~/Applications — the general
+             fallback that covers names not in the small table above.
+        Raises RuntimeError naming every name that was tried if all of
+        them fail, rather than reporting only the first, literal
+        failure.
+        """
         if IS_MAC:
-            self._applescript(f'tell application "{app_name}" to activate')
+            self._open_app_mac(app_name)
         elif IS_WIN:
             self._win_open_app(app_name)
         logger.info(f"Opened app: {app_name}")
+
+    def _open_app_mac(self, app_name: str):
+        tried = [app_name]
+        try:
+            self._applescript(f'tell application "{app_name}" to activate')
+            return
+        except RuntimeError:
+            pass
+
+        for candidate in self._app_name_candidates(app_name):
+            if candidate in tried:
+                continue
+            tried.append(candidate)
+            try:
+                self._applescript(f'tell application "{candidate}" to activate')
+                logger.info(f"Resolved app name '{app_name}' -> '{candidate}'")
+                return
+            except RuntimeError:
+                continue
+
+        raise RuntimeError(
+            f"Could not open '{app_name}' — tried {tried} and none "
+            f"resolved to an installed application. It may not be "
+            f"installed, or may be named differently than any of these."
+        )
+
+    @staticmethod
+    def _app_name_candidates(app_name: str) -> list:
+        """
+        Builds an ordered list of alternate names to try for open_app()
+        on macOS: the known-alias table first (instant, no filesystem
+        access), then a fuzzy match against whatever is actually
+        installed (substring or shared-last-word, same rule as
+        agent/react_loop.py's _same_app — kept as an independent
+        implementation here since hands/ doesn't import from agent/, per
+        this project's existing pattern of small local duplication over
+        cross-layer imports — see SCREENCAPTURE_BIN/SCREENSHOTS_DIR
+        above). Directory scan errors (e.g. no permission) are swallowed
+        — this is a best-effort fallback, not a required step.
+        """
+        candidates = []
+        alias = MAC_APP_NAME_ALIASES.get(app_name.strip().lower())
+        if alias:
+            candidates.append(alias)
+
+        requested = app_name.strip().lower()
+        requested_words = requested.split()
+        search_dirs = ["/Applications", "/System/Applications",
+                       os.path.expanduser("~/Applications")]
+        installed = []
+        for d in search_dirs:
+            try:
+                installed.extend(
+                    name[:-4] for name in os.listdir(d) if name.endswith(".app")
+                )
+            except OSError:
+                continue
+
+        for installed_name in installed:
+            low = installed_name.strip().lower()
+            if not low or low == requested:
+                continue
+            same_substring = requested in low or low in requested
+            low_words = low.split()
+            same_last_word = (requested_words and low_words
+                               and requested_words[-1] == low_words[-1])
+            if same_substring or same_last_word:
+                candidates.append(installed_name)
+
+        return candidates
 
     def close_app(self, app_name: str):
         """Close/quit an application — cross-platform."""

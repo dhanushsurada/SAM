@@ -50,9 +50,13 @@ Always respond with valid JSON in this exact structure:
 Action payload examples:
 - control: {"type": "click", "description": "the send button"} — describe the visual target only; the "type" field already says "click", so don't repeat the verb in the description
 - control: {"type": "type", "text": "hello world"}
+- control: {"type": "hotkey", "keys": ["command", "space"]}
+- control: {"type": "open_app", "app": "Visual Studio Code"} — launches and focuses a known application directly. Prefer this whenever the goal is just getting an app open and in front — it's verified against what's actually in the foreground afterward, and far more reliable than opening Spotlight and clicking a search result. Use Spotlight/hotkey+type+click instead only when the user specifically asks to use Spotlight or another on-screen search UI, or open_app reports it couldn't find the app.
+- control: {"type": "screenshot"} — saves a screenshot and reports exactly where it was saved
 - browser: {"url": "https://...", "task": "find the price of MacBook Air M3"}
 - terminal: {"command": "ls -la", "description": "list files in current directory"}
 - vision: {"task": "read what is on the screen", "click_after": false}
+These are the ONLY control subtypes that exist — click, type, hotkey, open_app, screenshot. Don't invent others (e.g. there is no "close_tab" or "restart"); compose these instead (e.g. close a browser tab with hotkey command+w).
 
 If no action needed, set action to null and action_payload to null.
 Keep spoken responses concise — this is voice, not text.
