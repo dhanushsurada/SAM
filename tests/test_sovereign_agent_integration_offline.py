@@ -74,12 +74,27 @@ def test_react_loop_dispatches_create_document():
 
 def test_react_loop_dispatches_read_document_and_search_knowledge():
     """Real end-to-end read -> search through the actual ReactLoop, not
-    mocks. chromadb genuinely isn't installed in this sandbox, so
-    search_knowledge is expected to report unavailable here — that's the
-    honest, real behavior of this environment, exercised for real rather
-    than assumed."""
+    mocked production methods. The knowledge index is explicitly made
+    unavailable so this test deterministically exercises the graceful
+    unavailable path regardless of whether ChromaDB is installed."""
     from reportlab.pdfgen import canvas
     loop = ReactLoop(Settings())
+    # Make the unavailable-index behavior deterministic. The real machine may
+    # have ChromaDB installed; this test specifically exercises the graceful
+    # unavailable path rather than depending on package installation state.
+    class UnavailableKnowledgeIndex:
+        @property
+        def available(self):
+            return False
+
+        def add_chunks(self, chunks):
+            return 0
+
+        def query(self, query_text, top_k=5):
+            return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    loop._knowledge_index = UnavailableKnowledgeIndex()
+
     pdf_path = Path(tempfile.mkdtemp()) / "agent_integration_report.pdf"
     c = canvas.Canvas(str(pdf_path))
     c.drawString(72, 720, "Deviation: pressure reading 152 PSI exceeds the 150 PSI limit.")
