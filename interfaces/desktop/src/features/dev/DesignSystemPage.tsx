@@ -1,4 +1,5 @@
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 import { StatusPill, type SamState } from "@/components/StatusPill";
 import { ModeBadge, type DataMode } from "@/components/ModeBadge";
 
@@ -23,7 +24,7 @@ const ALL_MODES: DataMode[] = ["planned", "demo", "live"];
 export function DesignSystemPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
-      <section className="space-y-3 rounded-lg border border-line bg-surface p-5 shadow-panel">
+      <Card as="section" padding="md" className="space-y-3">
         <h2 className="text-sm font-medium text-mute">Buttons</h2>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="primary">Run task</Button>
@@ -37,34 +38,49 @@ export function DesignSystemPage() {
             Unavailable
           </Button>
         </div>
-      </section>
+      </Card>
 
-      <section className="space-y-3 rounded-lg border border-line bg-surface p-5 shadow-panel">
+      <Card as="section" padding="md" className="space-y-3">
         <h2 className="text-sm font-medium text-mute">Status vocabulary</h2>
         <div className="flex flex-wrap gap-2">
           {ALL_STATES.map((state) => (
             <StatusPill key={state} state={state} />
           ))}
         </div>
-      </section>
+      </Card>
 
-      <section className="space-y-3 rounded-lg border border-line bg-surface p-5 shadow-panel">
+      <Card as="section" padding="md" className="space-y-3">
         <h2 className="text-sm font-medium text-mute">Data mode</h2>
         <div className="flex flex-wrap gap-2">
           {ALL_MODES.map((mode) => (
             <ModeBadge key={mode} mode={mode} />
           ))}
         </div>
-      </section>
+      </Card>
 
-      <section className="space-y-2 rounded-lg border border-line bg-surface p-5 shadow-panel">
+      <Card as="section" padding="md" className="space-y-3">
+        <h2 className="text-sm font-medium text-mute">Card padding (sm / md / lg)</h2>
+        <div className="flex flex-wrap items-start gap-3">
+          <Card padding="sm" className="w-32 text-xs text-mute">
+            sm — p-4, most panels
+          </Card>
+          <Card padding="md" className="w-32 text-xs text-mute">
+            md — p-5, this page
+          </Card>
+          <Card padding="lg" className="w-32 text-xs text-mute">
+            lg — p-6, onboarding
+          </Card>
+        </div>
+      </Card>
+
+      <Card as="section" padding="md" className="space-y-2">
         <h2 className="text-sm font-medium text-mute">Technical readout (mono, earned by content)</h2>
         <p className="font-mono-data text-sm text-ink">
           model qwen2.5:14b · fallback qwen2.5:7b · port 8420 · ollama{" "}
           <span className="text-success">PASS</span> · license{" "}
           <span className="text-unverified">UNVERIFIED</span>
         </p>
-      </section>
+      </Card>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { FiRefreshCw, FiXCircle } from "react-icons/fi";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 import { StatusPill } from "@/components/StatusPill";
 import type { TaskRecord, ExecutionEvent } from "@/api/types";
 import { TERMINAL_PHASES } from "@/api/types";
@@ -32,7 +33,7 @@ export function ActiveTask({ task, events, streamError, onCancel, onRetry, cance
   const isTerminal = TERMINAL_PHASES.has(task.status as never) || TERMINAL_PHASES.has(currentPhase as never);
 
   return (
-    <div className="space-y-4 rounded-lg border border-line bg-surface p-4 shadow-panel">
+    <Card className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm text-ink">{task.instruction}</p>
@@ -89,6 +90,6 @@ export function ActiveTask({ task, events, streamError, onCancel, onRetry, cance
           </Button>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

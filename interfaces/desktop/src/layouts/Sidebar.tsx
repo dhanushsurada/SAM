@@ -1,6 +1,26 @@
 import { Link } from "react-router-dom";
 import { GROUP_LABELS, ROUTES, type NavGroup } from "@/app/routes";
 import { NavItem } from "@/components/NavItem";
+import { useTaskSession } from "@/stores/taskSession";
+import type { HealthStatus } from "@/api/types";
+
+type PulseVisual = { dotClass: string; textClass: string; label: string };
+
+/** Derives the sidebar's gateway indicator from the same polled health data
+ * IqooPage/HealthPanel already use (via useTaskSession) — no second fetch.
+ * Only the dot is colored for the healthy case, not the text: status
+ * colors here are functional, meant to draw the eye toward a problem, not
+ * to celebrate the default "everything's fine" state everywhere at once. */
+function gatewayPulse(health: HealthStatus | null, loading: boolean, error: string | null): PulseVisual {
+  if (error) return { dotClass: "bg-danger", textClass: "text-danger", label: "Gateway unreachable" };
+  if (!health) {
+    return { dotClass: "bg-unverified", textClass: "text-mute", label: loading ? "Checking gateway…" : "Gateway status unknown" };
+  }
+  if (health.worker_alive && health.brain_reachable) {
+    return { dotClass: "bg-success", textClass: "text-mute", label: "Gateway online" };
+  }
+  return { dotClass: "bg-warn", textClass: "text-warn", label: "Gateway degraded" };
+}
 
 const MAIN_GROUPS: Exclude<NavGroup, "settings">[] = ["assistant", "iqoo", "understanding", "system"];
 
@@ -11,6 +31,8 @@ export interface SidebarProps {
 
 export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
   const settingsRoute = ROUTES.find((r) => r.group === "settings")!;
+  const { health, healthLoading, healthError } = useTaskSession();
+  const pulse = gatewayPulse(health, healthLoading, healthError);
 
   const content = (
     <div className="flex h-full flex-col">
@@ -20,10 +42,16 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         <span className="font-mono-data text-[10px] text-mute">local</span>
       </div>
 
-      {/* A live system-status pulse belongs here (per PHASE5_PLAN.md §E) —
-          deliberately not added yet. It needs the typed API client from §H
-          step 3; a placeholder number here would be exactly the kind of
-          fake-looking data the brief says never to show. */}
+      {/* Live system-status pulse (PHASE5_PLAN.md §E) — was deferred pending
+          the typed API client from §H step 3, which now exists; reusing its
+          shared poll here rather than fetching again. Steady, not animated:
+          only "actively in progress" states pulse elsewhere (StatusPill) —
+          an idle health readout animating forever would be exactly the
+          decorative motion the brief says to avoid. */}
+      <div className="flex items-center gap-2 px-4 pb-3 text-xs">
+        <span className={`h-1.5 w-1.5 rounded-full ${pulse.dotClass}`} aria-hidden="true" />
+        <span className={pulse.textClass}>{pulse.label}</span>
+      </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-2">
         <NavItem to="/" end label="Command Center" icon={ROUTES[0].icon} onNavigate={onCloseMobile} />

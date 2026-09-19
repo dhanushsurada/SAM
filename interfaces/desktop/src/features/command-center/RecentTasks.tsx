@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { StatusPill } from "@/components/StatusPill";
+import { Card } from "@/components/Card";
 import type { TaskRecord } from "@/api/types";
 import { phaseToSamState } from "@/features/iqoo/phase";
 
@@ -13,7 +14,7 @@ export function RecentTasks({
   const recent = [...tasks].reverse().slice(0, 3);
 
   return (
-    <div className="space-y-2 rounded-lg border border-line bg-surface p-4 shadow-panel">
+    <Card className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-mute">Recent tasks</h2>
         <Link to="/iqoo" className="text-xs text-ember-text hover:underline">
@@ -35,6 +36,6 @@ export function RecentTasks({
           </button>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }

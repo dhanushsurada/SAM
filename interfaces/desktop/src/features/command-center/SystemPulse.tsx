@@ -1,5 +1,6 @@
 import { StatusPill, type SamState } from "@/components/StatusPill";
 import { ModeBadge } from "@/components/ModeBadge";
+import { Card } from "@/components/Card";
 import type { HealthStatus } from "@/api/types";
 
 function overallState(health: HealthStatus | null, error: string | null): SamState {
@@ -20,7 +21,7 @@ export function SystemPulse({
   const state = overallState(health, error);
 
   return (
-    <div className="space-y-2 rounded-lg border border-line bg-surface p-4 shadow-panel">
+    <Card className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-mute">System status</h2>
         <ModeBadge mode="live" />
@@ -35,6 +36,6 @@ export function SystemPulse({
           queue {health.queue_depth} · gateway only — see Diagnostics for the rest, once it's real
         </p>
       )}
-    </div>
+    </Card>
   );
 }

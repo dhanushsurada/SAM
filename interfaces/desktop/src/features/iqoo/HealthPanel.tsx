@@ -1,5 +1,6 @@
 import { FiRefreshCw } from "react-icons/fi";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 import { StatusPill, type SamState } from "@/components/StatusPill";
 import type { HealthStatus } from "@/api/types";
 
@@ -28,7 +29,7 @@ export function HealthPanel({
   onRefresh: () => void;
 }) {
   return (
-    <div className="space-y-3 rounded-lg border border-line bg-surface p-4 shadow-panel">
+    <Card className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-mute">Gateway health</h2>
         <Button variant="ghost" size="sm" onClick={onRefresh} loading={loading} aria-label="Refresh health">
@@ -53,7 +54,7 @@ export function HealthPanel({
       )}
 
       {!health && !error && <p className="text-xs text-mute">Loading…</p>}
-    </div>
+    </Card>
   );
 }
 
