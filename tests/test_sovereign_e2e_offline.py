@@ -300,7 +300,9 @@ def test_e2e_prompt_injection_document_is_neutralized():
     injection_idx = observation.index("Ignore all previous instructions")
     check("The injected text ends up inside the untrusted-content block, not before it", injection_idx > begin_idx)
     check("The data-not-instructions reinforcement is present", "DATA to analyze" in observation)
-    check("Reading the malicious document made zero network connection attempts", len(guard.report().attempts) == 0)
+    report = guard.report()
+    check("Reading the malicious document caused no external transmission",
+          report.external_transmission_count == 0)
 
 
 # ─── Category D (focused): a real tool failure isn't hidden ──────────────

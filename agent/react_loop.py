@@ -69,6 +69,7 @@ class ReactLoop:
         self._browser = None
         self._terminal = None
         self._vision = None
+        self._knowledge_index = None
         self._reflection = ReflectionEngine(settings)
         self._verifier = Verifier(settings)
         # Optional — pass a FounderModeManager to let high-confidence
@@ -100,6 +101,20 @@ class ReactLoop:
             self._vision = ScreenReader(self.settings)
         return self._vision
 
+    def _get_knowledge_index(self):
+        # SIH26117 Milestone 3 (feat/agent-document-tools) wiring, restored
+        # (Phase 1 consolidation pass): shared by _execute_read_document
+        # (indexes what it reads, so a later search can find it) and
+        # _execute_search_knowledge (reads from it). Construction never
+        # raises even without chromadb installed -- VectorIndex.available
+        # is simply False, and every caller already checks that (see
+        # sovereign/tools/search_knowledge.py) or degrades to a no-op
+        # (VectorIndex.add_chunks() returns 0 immediately when unavailable).
+        if self._knowledge_index is None:
+            from sovereign.knowledge import VectorIndex
+            self._knowledge_index = VectorIndex(self.settings)
+        return self._knowledge_index
+
     def execute(self, action: str, payload: Dict[str, Any]) -> str:
         """
         Execute a single action and return the observation.
@@ -115,12 +130,56 @@ class ReactLoop:
                 return self._execute_terminal(payload)
             elif action == "vision":
                 return self._execute_vision(payload)
+            elif action == "read_document":
+                return self._execute_read_document(payload)
+            elif action == "search_knowledge":
+                return self._execute_search_knowledge(payload)
+            elif action == "calculate":
+                return self._execute_calculate(payload)
+            elif action == "create_document":
+                return self._execute_create_document(payload)
             else:
                 return f"Unknown action: {action}"
 
         except Exception as e:
             logger.error(f"Action execution error: {e}", exc_info=True)
             return f"Error executing {action}: {str(e)}"
+
+    # ─── SIH26117 Milestone 3 (feat/agent-document-tools) ──────────────────
+    # Restored (Phase 1 consolidation pass): sovereign/tools/__init__.py's
+    # own docstring already named these four methods by these exact names
+    # as how the agent invokes each tool -- the tools themselves
+    # (sovereign/tools/*.py) were already fully built and unit-tested
+    # (tests/test_sovereign_tools_offline.py); only this dispatch layer was
+    # missing. Each tool's own errors (CalculationError,
+    # DocumentCreationError, a missing-file error from read_document) are
+    # deliberately left to propagate up to execute()'s existing try/except
+    # above rather than caught here -- same "Error executing {action}: ..."
+    # wrapping every other action already gets, so agent/verifier.py needs
+    # no changes to recognize a failure from any of these.
+
+    def _execute_read_document(self, payload: Dict[str, Any]) -> str:
+        from sovereign.tools.read_document import read_document
+        path = payload.get("path", "")
+        return read_document(path, self.settings, index=self._get_knowledge_index())
+
+    def _execute_search_knowledge(self, payload: Dict[str, Any]) -> str:
+        from sovereign.tools.search_knowledge import search_knowledge
+        query = payload.get("query", "")
+        return search_knowledge(query, self.settings, self._get_knowledge_index())
+
+    def _execute_calculate(self, payload: Dict[str, Any]) -> str:
+        from sovereign.tools.calculate import calculate
+        return calculate(payload.get("expression", ""))
+
+    def _execute_create_document(self, payload: Dict[str, Any]) -> str:
+        from sovereign.tools.create_document import create_document
+        return create_document(
+            title=payload.get("title", ""),
+            sections=payload.get("sections", []),
+            output_dir=self.settings.sovereign_output_dir,
+            source_documents=payload.get("source_documents"),
+        )
 
     def _execute_verified(self, action: str, payload: Dict[str, Any], step_label: str) -> Dict:
         """
