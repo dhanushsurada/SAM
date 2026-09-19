@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "@/layouts/AppShell";
 import { FeatureStubPage } from "@/features/FeatureStubPage";

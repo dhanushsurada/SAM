@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { FiImage, FiMic, FiX, FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 import { fileToBase64Payload } from "@/lib/file";
 import type { TaskCreateRequest } from "@/api/types";
 
@@ -67,7 +68,7 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-line bg-surface p-4 shadow-panel">
+    <Card className="space-y-3">
       <textarea
         value={instruction}
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstruction(e.target.value)}
@@ -117,6 +118,6 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
           <FiSend size={14} /> Send
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }

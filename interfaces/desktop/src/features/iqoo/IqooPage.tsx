@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import { ModeBadge } from "@/components/ModeBadge";
 import { Button } from "@/components/Button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useTaskSession } from "@/stores/taskSession";
 import { TaskComposer } from "./TaskComposer";
 import { ActiveTask } from "./ActiveTask";
@@ -35,13 +37,11 @@ export function IqooPage() {
     refreshHealth,
   } = useTaskSession();
 
-  const handleDemoReset = async () => {
-    // window.confirm as a functional stand-in for a styled ConfirmDialog —
-    // that primitive is still on the component inventory (PHASE5_PLAN.md
-    // §E), not built yet. This clears real server-side state, so it gets a
-    // confirmation step either way rather than waiting for the nicer one.
-    if (!window.confirm("Clear all task state on the gateway? This can't be undone.")) return;
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const confirmDemoReset = async () => {
     await demoReset();
+    setConfirmingReset(false);
   };
 
   return (
@@ -51,7 +51,7 @@ export function IqooPage() {
           <h1 className="text-lg font-semibold text-ink">iQOO workspace</h1>
           <ModeBadge mode="live" />
         </div>
-        <Button variant="ghost" size="sm" onClick={handleDemoReset} loading={resetting}>
+        <Button variant="ghost" size="sm" onClick={() => setConfirmingReset(true)} loading={resetting}>
           <FiTrash2 size={14} /> Demo reset
         </Button>
       </div>
@@ -82,6 +82,16 @@ export function IqooPage() {
           <SessionTaskList tasks={sessionTasks} selectedId={selectedTaskId} onSelect={selectTask} />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmingReset}
+        title="Clear task state?"
+        description="This clears all task state on the gateway. This can't be undone."
+        confirmLabel="Clear"
+        confirming={resetting}
+        onConfirm={confirmDemoReset}
+        onCancel={() => setConfirmingReset(false)}
+      />
     </div>
   );
 }

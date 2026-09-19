@@ -3,6 +3,7 @@ import { FiKey } from "react-icons/fi";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 
 export function LicensingPage() {
   const [activated, setActivated] = useState(true);
@@ -15,7 +16,7 @@ export function LicensingPage() {
         description="LicenseManager.check()/install_license() exist internally, nothing exposes them over HTTP yet. Local-first: no cloud account, ever."
       />
 
-      <div className="space-y-3 rounded-lg border border-line bg-surface p-4 shadow-panel">
+      <Card className="space-y-3">
         <div className="flex items-center gap-2.5">
           <FiKey size={16} className="text-mute" />
           <span className="text-sm text-ink">Activation</span>
@@ -25,7 +26,7 @@ export function LicensingPage() {
         <Button variant="secondary" size="sm" onClick={() => setActivated((a) => !a)}>
           {activated ? "Deactivate (demo)" : "Activate (demo)"}
         </Button>
-      </div>
+      </Card>
     </div>
   );
 }

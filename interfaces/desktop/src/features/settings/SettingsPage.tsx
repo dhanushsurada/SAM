@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { Card } from "@/components/Card";
 import { Switch } from "@/components/Switch";
 import { SETTINGS_SCHEMA, type SettingField } from "./types";
 
@@ -110,11 +111,7 @@ export function SettingsPage() {
       </nav>
 
       {SETTINGS_SCHEMA.map((section) => (
-        <section
-          key={section.id}
-          id={section.id}
-          className="scroll-mt-4 space-y-1 rounded-lg border border-line bg-surface p-4 shadow-panel"
-        >
+        <Card as="section" key={section.id} id={section.id} className="scroll-mt-4 space-y-1">
           <h2 className="text-sm font-medium text-ink">{section.title}</h2>
           {section.note && (
             <p
@@ -132,7 +129,7 @@ export function SettingsPage() {
               <Field key={field.key} field={field} value={values[field.key]} onChange={(v) => setField(field.key, v)} />
             ))}
           </div>
-        </section>
+        </Card>
       ))}
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
 import { StatusPill } from "@/components/StatusPill";
 import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
@@ -30,7 +31,7 @@ export function OnboardingPage() {
           ))}
         </div>
 
-        <div className="min-h-[280px] rounded-lg border border-line bg-surface p-6 shadow-panel">
+        <Card padding="lg" className="min-h-[280px]">
           {step === 0 && (
             <div className="space-y-3 text-center">
               <div className="flex items-center justify-center gap-2">
@@ -143,7 +144,7 @@ export function OnboardingPage() {
               </Button>
             </div>
           )}
-        </div>
+        </Card>
 
         <div className="flex justify-between">
           <Button variant="ghost" size="sm" onClick={back} disabled={step === 0}>
