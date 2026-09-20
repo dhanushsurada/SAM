@@ -31,7 +31,7 @@ export function ChatComposer({
         value={value}
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Message SAM (demo)…"
+        placeholder="Ask SAM, or tell it what to do…"
         rows={1}
         className="max-h-32 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink placeholder:text-mute focus:outline-none"
       />

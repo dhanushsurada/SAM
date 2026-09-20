@@ -1,11 +1,10 @@
 /**
- * There is no real chat endpoint anywhere in this backend (confirmed —
- * see PHASE5_PLAN.md §A/§F: main.py calls Brain.process(session) in-process
- * inside the voice loop, never as a request/response cycle). So unlike
- * src/api/types.ts, which mirrors a real Pydantic model file, these types
- * are a proposal for what a future endpoint would need — kept in
- * features/chat/ rather than src/api/ specifically so that distinction
- * stays visible in the file layout, not just in a comment.
+ * A chat message is a view of a task, not a separate backend concept. SAM
+ * has no dedicated chat endpoint and no server-side conversation (Session.
+ * history is empty for every gateway task), so Chat sends each message as a
+ * task through the same gateway everything else uses and shows the task's
+ * outcome as SAM's reply. See ChatPage.tsx for what that does and doesn't
+ * give you.
  */
 
 export interface ChatMessage {
@@ -13,17 +12,6 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
-}
-
-export interface ChatRequest {
-  message: string;
-  /** Sent from the client because nothing establishes a server-side
-   * session/conversation concept today — a real implementation might move
-   * this server-side once one exists, at which point this shrinks to just
-   * `message` (+ a session id). */
-  history: ChatMessage[];
-}
-
-export interface ChatResponse {
-  message: ChatMessage;
+  /** Visual treatment for an assistant reply that isn't a plain answer. */
+  tone?: "default" | "danger" | "muted";
 }

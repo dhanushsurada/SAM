@@ -8,6 +8,7 @@ import {
   FiUser,
   FiZap,
   FiCpu,
+  FiMousePointer,
   FiActivity,
   FiSettings,
   FiKey,
@@ -15,7 +16,7 @@ import {
 
 export type SamIcon = FC<{ className?: string; size?: number | string }>;
 
-export type NavGroup = "assistant" | "iqoo" | "understanding" | "system" | "settings";
+export type NavGroup = "assistant" | "core" | "workspaces" | "understanding" | "system" | "settings";
 
 export interface RouteMeta {
   path: string;
@@ -29,9 +30,13 @@ export interface RouteMeta {
   description: string;
 }
 
+// SAM is the product; the Brain and Hands are what it's made of; a workspace
+// is one workflow built on top of them. Nothing here makes the browser or a
+// single competition workflow the frame around everything else.
 export const GROUP_LABELS: Record<Exclude<NavGroup, "settings">, string> = {
   assistant: "Assistant",
-  iqoo: "iQOO",
+  core: "Brain and Hands",
+  workspaces: "Workspaces",
   understanding: "Understanding",
   system: "System",
 };
@@ -55,7 +60,7 @@ export const ROUTES: RouteMeta[] = [
     group: "assistant",
     plannedStep: "Step 6",
     description:
-      "Conversational interface. The one screen waiting on a capability that doesn't exist yet anywhere in the backend, not just an unwired endpoint — see PHASE5_PLAN.md §A/§F.",
+      "Conversational view over SAM's task pipeline: each message runs as a task and SAM's reply is its outcome. Single-turn — no conversation history reaches the Brain.",
   },
   {
     path: "/tasks",
@@ -64,15 +69,31 @@ export const ROUTES: RouteMeta[] = [
     group: "assistant",
     plannedStep: "Step 4",
     description:
-      "Task Execution / Agent Console, as a general concept independent of source. Right now the only task source is iQOO — see the iQOO workspace for live tasks until there's more than one source to unify here.",
+      "General task console: request to outcome, with the lifecycle, live progress, cancel and retry.",
+  },
+  {
+    path: "/brain",
+    label: "Brain",
+    icon: FiCpu,
+    group: "core",
+    plannedStep: "Brain pass",
+    description: "The local model SAM thinks with: what's installed in Ollama, which one is active, and switching it.",
+  },
+  {
+    path: "/hands",
+    label: "Hands",
+    icon: FiMousePointer,
+    group: "core",
+    plannedStep: "Brain pass",
+    description: "How SAM acts on a computer: desktop control, vision, browser, terminal and verification.",
   },
   {
     path: "/iqoo",
-    label: "iQOO",
+    label: "iQOO Workspace",
     icon: FiSmartphone,
-    group: "iqoo",
+    group: "workspaces",
     plannedStep: "Step 4",
-    description: "Phone gateway workspace — the one section built on a real, live backend today.",
+    description: "Phone to PC workflow: the gateway a phone sends tasks to, its health, and the demo controls.",
   },
   {
     path: "/memory",
@@ -97,14 +118,6 @@ export const ROUTES: RouteMeta[] = [
     group: "understanding",
     plannedStep: "Step 7",
     description: "Compiled skills library and status.",
-  },
-  {
-    path: "/models",
-    label: "Models",
-    icon: FiCpu,
-    group: "system",
-    plannedStep: "Step 7",
-    description: "Active and fallback model, Ollama availability.",
   },
   {
     path: "/diagnostics",

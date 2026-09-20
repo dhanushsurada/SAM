@@ -17,8 +17,8 @@ export function RecentTasks({
     <Card className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-mute">Recent tasks</h2>
-        <Link to="/iqoo" className="text-xs text-ember-text hover:underline">
-          Open iQOO workspace →
+        <Link to="/tasks" className="text-xs text-ember-text hover:underline">
+          All tasks
         </Link>
       </div>
 

@@ -5,6 +5,15 @@ import { ApiError } from "@/api/client";
 import type { TaskRecord, TaskCreateRequest, HealthStatus, ExecutionEvent } from "@/api/types";
 import { useTaskEvents } from "@/features/iqoo/useTaskEvents";
 
+/** The gateway publishes a task's final result/error text AS its terminal
+ * event's message (gateway.py). Copy it onto the record so a task that has
+ * finished can be read back without re-subscribing to its stream. */
+function withOutcome(task: TaskRecord, latest: ExecutionEvent): TaskRecord {
+  if (latest.phase === "completed") return { ...task, status: latest.phase, result_text: latest.message };
+  if (latest.phase === "failed") return { ...task, status: latest.phase, error: latest.message };
+  return { ...task, status: latest.phase };
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof ApiError ? e.detail : "Couldn't reach the gateway. Is it running on port 8420?";
 }
@@ -65,7 +74,7 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
     if (!selectedTaskId || events.length === 0) return;
     const latest = events[events.length - 1];
     setSessionTasks((prev) =>
-      prev.map((t) => (t.task_id === selectedTaskId ? { ...t, status: latest.phase } : t))
+      prev.map((t) => (t.task_id === selectedTaskId ? withOutcome(t, latest) : t))
     );
   }, [events, selectedTaskId]);
 

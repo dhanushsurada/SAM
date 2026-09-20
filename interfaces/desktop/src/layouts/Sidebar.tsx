@@ -22,7 +22,7 @@ function gatewayPulse(health: HealthStatus | null, loading: boolean, error: stri
   return { dotClass: "bg-warn", textClass: "text-warn", label: "Gateway degraded" };
 }
 
-const MAIN_GROUPS: Exclude<NavGroup, "settings">[] = ["assistant", "iqoo", "understanding", "system"];
+const MAIN_GROUPS: Exclude<NavGroup, "settings">[] = ["assistant", "core", "workspaces", "understanding", "system"];
 
 export interface SidebarProps {
   mobileOpen: boolean;

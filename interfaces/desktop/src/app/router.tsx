@@ -9,7 +9,9 @@ import { ChatPage } from "@/features/chat/ChatPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { FounderModePage } from "@/features/founder-mode/FounderModePage";
 import { SkillsPage } from "@/features/skills/SkillsPage";
-import { ModelsPage } from "@/features/models/ModelsPage";
+import { BrainPage } from "@/features/brain/BrainPage";
+import { HandsPage } from "@/features/hands/HandsPage";
+import { TasksPage } from "@/features/tasks/TasksPage";
 import { DiagnosticsPage } from "@/features/diagnostics/DiagnosticsPage";
 import { LicensingPage } from "@/features/licensing/LicensingPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -26,10 +28,12 @@ const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/": CommandCenterPage,
   "/iqoo": IqooPage,
   "/chat": ChatPage,
+  "/tasks": TasksPage,
+  "/brain": BrainPage,
+  "/hands": HandsPage,
   "/memory": MemoryPage,
   "/founder-mode": FounderModePage,
   "/skills": SkillsPage,
-  "/models": ModelsPage,
   "/diagnostics": DiagnosticsPage,
   "/licensing": LicensingPage,
   "/settings": SettingsPage,

@@ -21,7 +21,13 @@ Serves:
 - POST   /api/iqoo/tasks/{id}/retry     resubmit as a fresh task
 - GET    /api/iqoo/health               liveness + queue/brain/model diagnostics (Phase 3A)
 - POST   /api/iqoo/demo/reset           clear all task state (Phase 3A, demo-scoped)
+- GET    /api/models                    Brain: provider status, selected/fallback/active model,
+                                        installed models + compatibility (core/model_manager.py)
+- POST   /api/models/select             make an installed model the Brain (409 while a task runs)
 - /                                     the phone client (interfaces/web/)
+
+(The /api/models routes are SAM Core, not phone-task API, so they sit beside
+/api/iqoo/* rather than under it -- the /api/iqoo/* contract is unchanged.)
 """
 
 import asyncio
@@ -34,9 +40,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from interfaces.api.gateway import TaskGateway, TaskAlreadyActiveError, DemoResetBusyError
+from core.model_manager import (
+    ModelIncompatibleError, ModelManagerError, ModelMetadataError,
+    ModelNotInstalledError, OllamaUnavailableError,
+)
+from interfaces.api.gateway import (
+    TaskGateway, TaskAlreadyActiveError, DemoResetBusyError, BrainBusyError,
+)
 from interfaces.api.task_store import TERMINAL_STATUSES
-from interfaces.api.schemas import TaskCreateRequest, TaskRecord, HealthStatus
+from interfaces.api.schemas import (
+    TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest,
+)
 
 logger = logging.getLogger("SAM.iQOO.Server")
 
@@ -210,6 +224,38 @@ def demo_reset():
     except DemoResetBusyError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"reset": True, "tasks_cleared": deleted}
+
+
+# ─── Brain / model selection ─────────────────────────────────────────────
+
+@app.get("/api/models", response_model=BrainStatus)
+def get_models():
+    """Never a 5xx for an expected state: Ollama down, or no usable model
+    installed, comes back as status="unavailable" with a detail (the same
+    convention api/app.py's GET /api/model uses)."""
+    return get_gateway().get_brain_status()
+
+
+@app.post("/api/models/select", response_model=BrainStatus)
+def select_model(req: ModelSelectRequest):
+    """Each refusal has its own status so the UI can say exactly what to do:
+    409 a task is running/queued, 404 not installed, 422 installed but not
+    usable as a Brain, 502 Ollama couldn't describe the model, 503 Ollama
+    unreachable, 500 the choice couldn't be saved (nothing was changed)."""
+    try:
+        return get_gateway().select_model(req.model)
+    except BrainBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ModelNotInstalledError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ModelIncompatibleError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ModelMetadataError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except OllamaUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ModelManagerError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─── Phone client (mounted last so it never shadows /api routes) ────────
