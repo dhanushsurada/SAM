@@ -354,6 +354,17 @@ class SAM:
             self.identity.update({"assistant_name": new_name, "setup_completed": True})
             return True
 
+        # Runtime model selection (M6.2): "model" shows the current Brain and
+        # what's installed, "model qwen3:8b" switches it. Runs here, inside
+        # _process(), so self._process_lock is already held -- no task can be
+        # mid-flight while the Brain changes.
+        # A model name never contains a space, so "model qwen3:8b" is the
+        # command but "model the data flow for a login page" is a request for
+        # the Brain and falls through to it.
+        if t == "model" or (t.startswith("model ") and " " not in t[len("model "):].strip()):
+            self._handle_model_command(text.strip()[len("model"):].strip())
+            return True
+
         # Sleep / Stop
         if any(p in t for p in ["sam sleep", "go to sleep"]):
             msg = "Going to sleep. Call me when you need me."
@@ -378,12 +389,13 @@ class SAM:
         runs and completes before STEP 2 (model) starts/prints -- several
         tests assert that ordering directly.
 
-        STEP 2 here deliberately stays a plain, non-blocking status line,
-        not a real installed-model check -- that's model-selection/
-        capability-router territory, explicitly out of scope for this
-        pass (see the auto-RAM-tier selection Settings._select_model()
-        already does at construction time, which this does not duplicate
-        or second-guess).
+        STEP 2 (the Brain/model choice, tests/test_model_selection_offline.py)
+        is _run_first_run_model_step(): it offers the models actually
+        installed in Ollama and stores the choice through
+        Settings.apply_model_choice. It never blocks -- Ollama down, nothing
+        installed, or a --name launch just prints the configured model. The
+        RAM-tier default from Settings._select_model() is still what you get
+        unless you choose otherwise.
         """
         print("\n=== SAM first-run setup ===")
         print("STEP 1: Name your assistant")
@@ -407,9 +419,127 @@ class SAM:
         print(f"Setup complete — I'll go by {chosen}.")
 
         print("\nSTEP 2: Model check")
-        print(f"Configured model: {self.settings.primary_model} "
-              f"(change anytime via settings or a model-select command)")
+        self._run_first_run_model_step()
         print("=== Setup finished ===\n")
+
+    def _run_first_run_model_step(self):
+        """
+        STEP 2 of first-run setup (M6.2): pick the Brain from what is
+        actually installed in Ollama. Fail-soft everywhere -- setup must
+        finish whether or not Ollama is up, and whatever happens here, the
+        choice is validated against the real installed list before it is
+        stored (an unlisted name is rejected and the shown default stays).
+
+        With --name on the command line (_name_overridden_via_cli) the launch
+        is treated as scripted: the installed models are reported but nothing
+        is prompted for, matching STEP 1's no-prompt behaviour.
+        """
+        from core.model_manager import auxiliary_role, resolve_installed_name
+
+        try:
+            installed = self.brain.list_installed_models()
+        except RuntimeError:
+            installed = None
+        if not installed:
+            reason = ("Ollama isn't reachable" if installed is None
+                      else "Ollama has no models installed yet")
+            print(f"Model check: {reason} -- keeping the configured model "
+                  f"{self.settings.primary_model} (install it with: ollama pull "
+                  f"{self.settings.primary_model}; change anytime with the \"model\" command).")
+            return
+
+        print(f"Model check: {len(installed)} model(s) installed in Ollama: {', '.join(installed)}")
+        if self._name_overridden_via_cli:
+            print(f"Configured model: {self.settings.primary_model} "
+                  f"(change anytime with the \"model\" command)")
+            return
+
+        # SAM's own embedding model is always installed next to the chat
+        # model and can never be a Brain.
+        candidates = [m for m in installed if auxiliary_role(self.settings, m) != "embedding"]
+
+        def ask(prompt: str, pool: list, default: str):
+            """The installed spelling the user chose, or None for no change
+            (skip / unlisted name / a default that isn't installed)."""
+            try:
+                answer = input(prompt).strip()
+            except EOFError:
+                return None
+            if answer.lower() == "skip":
+                return None
+            chosen = resolve_installed_name(answer or default, pool)
+            if chosen is None:
+                print(f"  '{answer or default}' isn't in the installed list -- keeping {default}.")
+            return chosen
+
+        chosen_primary = ask(
+            f"Primary model [{self.settings.primary_model}] (or \"skip\"): ",
+            candidates, self.settings.primary_model)
+        current_primary = chosen_primary or self.settings.primary_model
+
+        chosen_fallback = None
+        fallback_pool = [m for m in candidates if m != current_primary]
+        if fallback_pool:  # a fallback only means something if there is a second model
+            chosen_fallback = ask(
+                f"Fallback model [{self.settings.fallback_model}] (or \"skip\"): ",
+                fallback_pool, self.settings.fallback_model)
+
+        if chosen_primary or chosen_fallback:
+            try:
+                self.settings.apply_model_choice(primary=chosen_primary, fallback=chosen_fallback)
+            except Exception as e:
+                print(f"  Couldn't save the model choice ({e}) -- keeping the previous settings.")
+                return
+        print(f"Configured model: {self.settings.primary_model} "
+              f"(change anytime with the \"model\" command)")
+
+    def _handle_model_command(self, requested: str):
+        """
+        "model" / "model <name>" (M6.2). Verifies against Ollama's installed
+        list when it can be reached; when it can't, the change is accepted
+        unverified and says so -- the desktop selector is stricter (it
+        refuses), this is the offline-friendly voice/CLI path. SAM's embedding
+        model is rejected either way: it can't generate replies.
+        """
+        from core.model_manager import auxiliary_role, resolve_installed_name
+
+        def say(msg: str):
+            print(f"\nSAM: {msg}\n")
+            self.tts.speak(msg)
+
+        try:
+            installed = self.brain.list_installed_models()
+        except RuntimeError:
+            installed = None
+
+        if not requested:
+            listing = ("Ollama isn't reachable, so I can't list installed models."
+                       if installed is None else
+                       ("Installed models: " + ", ".join(installed) + ".") if installed
+                       else "No models are installed in Ollama yet.")
+            say(f"The Brain is {self.settings.primary_model}. {listing} "
+                f"Say \"model\" followed by a name to switch.")
+            return
+
+        name = requested
+        if installed is not None:
+            name = resolve_installed_name(requested, installed)
+            if name is None:
+                say(f"{requested} isn't installed in Ollama, so nothing changed. "
+                    f"Installed: {', '.join(installed) or 'none'}.")
+                return
+        if auxiliary_role(self.settings, name) == "embedding":
+            say(f"{name} is SAM's embedding model and can't generate replies, so nothing changed.")
+            return
+
+        try:
+            self.settings.apply_model_choice(primary=name)
+        except Exception as e:
+            say(f"I couldn't save that choice ({e}), so the model is unchanged.")
+            return
+        suffix = "" if installed is not None else (
+            " Ollama isn't reachable, so I couldn't check that it's installed.")
+        say(f"Brain model set to {name}.{suffix}")
 
     # ─── Mode Switching ───────────────────────────────────────────────────
 

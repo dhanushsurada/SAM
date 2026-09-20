@@ -66,7 +66,7 @@ from multimodal.errors import PerceptionError, PerceptionCancelled
 # leaving the task looking stuck rather than showing a clear failure.
 # outcome.status and the result text itself still carry the fuller
 # distinction for anything else (logs, reflection, main.py, Telegram).
-_OUTCOME_TO_GATEWAY_STATUS = {"success": "completed", "cancelled": "cancelled"}
+_OUTCOME_TO_GATEWAY_STATUS = {"success": "completed", "completed": "completed", "cancelled": "cancelled"}
 from multimodal.vision.adapter import VisionAdapter
 from multimodal.audio.adapter import AudioAdapter
 
@@ -103,6 +103,18 @@ class DemoResetBusyError(Exception):
     forcibly kills Hands calls — see the module docstring)."""
 
 
+BRAIN_BUSY_MESSAGE = ("Can't switch the Brain while a task is running or queued. "
+                      "Wait for it to finish, or cancel it first.")
+
+
+class BrainBusyError(Exception):
+    """Raised by select_model() when a task is running or queued. Switching
+    the Brain mid-task would leave one task's planner, ReAct steps and
+    reflection on different models, so it is refused outright rather than
+    deferred -- same policy (and same 409 mapping in interfaces/api/server.py)
+    as DemoResetBusyError."""
+
+
 class TaskGateway:
     def __init__(self, settings=None, task_timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS):
         if settings is None:
@@ -116,12 +128,18 @@ class TaskGateway:
         from memory.retrieve import MemoryRetriever
         from founder_mode.manager import FounderModeManager
         from core.brain import Brain
+        from core.model_manager import ModelManager
         from agent.react_loop import ReactLoop
 
         self.identity = Identity()
         self.memory = MemoryRetriever()
         self.founder_mode = FounderModeManager(settings=settings)
         self.brain = Brain(settings)
+        # Same Settings object Brain/ReactLoop/planner/reflection already
+        # share -- selecting a model changes settings.primary_model, which
+        # every one of them reads per call, so there is no second copy of
+        # "the active model" to keep in sync.
+        self.model_manager = ModelManager(settings, self.brain)
         self.react_loop = ReactLoop(settings, founder_mode=self.founder_mode)
 
         self.task_store = TaskStore()
@@ -203,6 +221,50 @@ class TaskGateway:
             "uptime_seconds": round(time.time() - self._started_at, 1),
             "version": GATEWAY_VERSION,
         }
+
+    # ─── Brain (local model) selection ──────────────────────────────────
+
+    def _is_busy(self) -> bool:
+        """True while a task is running or waiting. Callers hold
+        self._active_lock, which is what makes "not busy" stay true until
+        they release it (the worker takes the same lock before it starts
+        a task)."""
+        return self._active_task_id is not None or self._queue.qsize() > 0
+
+    def get_brain_status(self) -> dict:
+        """Brain/model state for GET /api/models: provider status, the
+        selected/fallback/active models, every installed model with its
+        compatibility, and whether switching is currently allowed."""
+        status = self.model_manager.status()
+        with self._active_lock:
+            status["busy"] = self._is_busy()
+        return status
+
+    def select_model(self, requested: str) -> dict:
+        """Validate `requested` against Ollama, then make it the Brain.
+
+        Raises BrainBusyError while a task is running/queued, and the
+        core.model_manager errors (OllamaUnavailableError,
+        ModelNotInstalledError, ModelMetadataError, ModelIncompatibleError,
+        ModelPersistError) for everything else -- interfaces/api/server.py
+        gives each its own HTTP status.
+
+        The slow half (Ollama round trips) runs OUTSIDE _active_lock so a
+        health poll or a starting task never waits on the network; only the
+        settings write runs under it. A task can therefore never start
+        between the busy check and the switch: it either started first
+        (refused) or starts after the switch and uses the new model
+        throughout.
+        """
+        with self._active_lock:
+            if self._is_busy():
+                raise BrainBusyError(BRAIN_BUSY_MESSAGE)
+        name = self.model_manager.validate_selection(requested)
+        with self._active_lock:
+            if self._is_busy():
+                raise BrainBusyError(BRAIN_BUSY_MESSAGE)
+            self.model_manager.apply_selection(name)
+        return self.get_brain_status()
 
     def reset_demo_state(self) -> int:
         """Phase 3A: clears every task row and all event history. Refuses
@@ -406,9 +468,11 @@ class TaskGateway:
                     cancel_event=cancel_event,
                     on_event=_on_event,
                 )
-                final_response = replace(response, text=outcome)
+                outcome_text = getattr(outcome, "result", outcome)
+                outcome_status = getattr(outcome, "status", "completed")
+                final_response = replace(response, text=outcome_text)
                 final_status = _OUTCOME_TO_GATEWAY_STATUS.get(
-                    getattr(outcome, "status", None), "failed")
+                    outcome_status, "failed")
 
             if cancel_event.is_set():
                 self.task_store.update_status(task_id, "cancelled", result_text=final_response.text)

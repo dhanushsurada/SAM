@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import { ModeBadge } from "@/components/ModeBadge";
@@ -48,13 +49,24 @@ export function IqooPage() {
     <div className="mx-auto max-w-3xl space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-ink">iQOO workspace</h1>
+          <h1 className="text-lg font-semibold text-ink">iQOO Workspace</h1>
           <ModeBadge mode="live" />
         </div>
         <Button variant="ghost" size="sm" onClick={() => setConfirmingReset(true)} loading={resetting}>
           <FiTrash2 size={14} /> Demo reset
         </Button>
       </div>
+
+      {/* Scoped to what this workspace is: one workflow built on SAM, not
+          SAM itself. Everything a task can do lives in Tasks and Hands. */}
+      <p className="text-sm text-mute">
+        Phone to PC: a phone sends a task to this computer's gateway, SAM runs it here and reports back. Tasks
+        follow the same pipeline as{" "}
+        <Link to="/tasks" className="text-ember-text hover:underline">
+          Tasks
+        </Link>
+        . SAM provides the HTTP surface the phone reaches; it does not integrate with Office Kit itself.
+      </p>
 
       <TaskComposer onSubmit={submitTask} submitting={submitting} />
       {submitError && <p className="text-xs text-danger">{submitError}</p>}

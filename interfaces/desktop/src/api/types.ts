@@ -84,3 +84,55 @@ export interface DemoResetResult {
   reset: boolean;
   tasks_cleared: number;
 }
+
+// ─── Brain / model selection ───────────────────────────────────────────────
+// Mirrors interfaces/api/schemas.py (ModelInfo / BrainStatus /
+// ModelSelectRequest), served at /api/models — SAM Core, deliberately not
+// under /api/iqoo. tests/test_brain_model_management_offline.py fails if the
+// field lists here and in schemas.py drift apart.
+
+export interface ModelInfo {
+  name: string;
+  size_bytes: number | null;
+  parameter_size: string | null;
+  quantization: string | null;
+  family: string | null;
+  /** Ollama's own list ("completion", "tools", "vision", "thinking",
+   * "embedding", ...); null when Ollama didn't report it. */
+  capabilities: string[] | null;
+  context_length: number | null;
+  /** Never "compatible": SAM has no way to verify a model against its JSON
+   * action format, so the honest states are "unknown" and "incompatible". */
+  compatibility: "unknown" | "incompatible";
+  compatibility_reason: string;
+  notes: string[];
+  is_selected: boolean;
+  is_fallback: boolean;
+  is_active: boolean;
+}
+
+export interface BrainStatus {
+  provider: string;
+  ollama_host: string;
+  status: "ready" | "unavailable";
+  detail: string | null;
+  selected_model: string;
+  fallback_model: string;
+  /** What Brain would use for the next request; null when neither the
+   * selected nor the fallback model is installed, or Ollama is down. */
+  active_model: string | null;
+  active_source: "selected" | "fallback" | null;
+  /** The model Brain last actually sent a request to. */
+  last_used_model: string | null;
+  /** False = SAM's RAM-based default; true = the user chose it. */
+  user_selected: boolean;
+  /** A task is running or queued — switching is refused (409). */
+  busy: boolean;
+  /** Subsystems pinned to their own model; they don't follow a switch. */
+  overrides: Record<string, string>;
+  models: ModelInfo[];
+}
+
+export interface ModelSelectRequest {
+  model: string;
+}

@@ -90,6 +90,7 @@ After first load: responds immediately until you say *"SAM sleep"* or shut down.
 | "Hey SAM, run ls in terminal" | Executes terminal command |
 | "Hey SAM, incognito mode" | Switches to incognito — nothing stored |
 | "Hey SAM, exit incognito" | Back to normal mode |
+| "model" / "model qwen3:8b" | Shows the Brain and installed models / switches the Brain (saved for next start) |
 | "SAM sleep" | Unloads model from RAM |
 | "SAM stop" | Shuts down completely |
 
@@ -163,7 +164,8 @@ SAM/
 │   ├── wake_word.py     ← openWakeWord (24/7, ~0% CPU)
 │   └── stt.py           ← Whisper STT (activates on wake)
 ├── core/
-│   ├── brain.py         ← Qwen 2.5 14B via Ollama
+│   ├── brain.py         ← The selected local model via Ollama (default Qwen 2.5 14B)
+│   ├── model_manager.py ← Discover installed models, compatibility, validated selection
 │   └── session.py       ← Session context management
 ├── mouth/
 │   └── tts.py           ← Kokoro TTS + Piper fallback

@@ -1,5 +1,7 @@
 """
-THE BRAIN — Qwen 2.5 14B via Ollama
+THE BRAIN — the selected local model, served by Ollama
+(default: Qwen 2.5 14B — see Settings.primary_model / fallback_model; the
+model is selectable at runtime, see core/model_manager.py)
 Receives full session context, returns structured response.
 Handles model loading status, fallback, and agent routing.
 """
@@ -83,6 +85,28 @@ class Brain:
             return r.status_code == 200
         except Exception:
             return False
+
+    def list_installed_models(self) -> list:
+        """
+        Names of every model Ollama reports as installed (GET /api/tags) --
+        read-only discovery (M6.2). Returns [] when Ollama is reachable but
+        has nothing installed, which is a normal state, not an error.
+        Raises RuntimeError when Ollama can't be reached or answers with
+        something unusable; callers decide whether that is fatal (the
+        desktop selector refuses, the CLI "model" command proceeds
+        unverified). Reads settings.ollama_host on every call, so it always
+        reflects the current configuration.
+        """
+        try:
+            r = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=5)
+        except Exception as e:
+            raise RuntimeError(f"Ollama is not reachable at {self.settings.ollama_host}: {e}") from e
+        if r.status_code != 200:
+            raise RuntimeError(f"Ollama returned HTTP {r.status_code} when listing models")
+        try:
+            return [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+        except Exception as e:
+            raise RuntimeError(f"Ollama returned an unreadable model list: {e}") from e
 
     def _ensure_model(self) -> str:
         """Ensure the right model is available. Returns model name to use."""

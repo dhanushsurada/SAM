@@ -267,6 +267,9 @@ signatures found in the repo, not invented shapes.
 - `POST /api/license/install` → `install_license()` · P2
 
 **Models / Brain**
+- **Done in the Brain pass** — `GET /api/models` and `POST /api/models/select`
+  (`interfaces/api/server.py`, `core/model_manager.py`); see
+  `docs/BRAIN_MODEL_SELECTION_AND_DESKTOP.md`. The original proposal follows.
 - `GET /api/model/status` → needs new code; `Brain._check_ollama()` /
   `_ensure_model()` are private and nothing currently surfaces Ollama
   availability or the active model outside the process itself. · P2

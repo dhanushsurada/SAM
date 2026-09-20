@@ -235,6 +235,68 @@ class Settings:
         with open(SAM_DATA_DIR / "settings.yaml", "w") as f:
             yaml.dump(data, f, default_flow_style=False)
 
+    def apply_model_choice(self, primary: Optional[str] = None,
+                           fallback: Optional[str] = None) -> None:
+        """
+        The one place a Brain model choice is applied and persisted -- shared
+        by the desktop/API selector (core/model_manager.py), the runtime
+        "model X" command and the first-run model step (main.py), so no
+        caller keeps its own copy of "set the field, mark it explicit,
+        persist".
+
+        Choosing a primary marks it explicit (model_explicitly_set), which is
+        what stops _select_model()'s RAM-tier default from overwriting it on
+        the next start. All-or-nothing: if the choice can't be written, the
+        in-memory values are put back and the error is re-raised, so the
+        runtime never runs on a model the next restart silently forgets.
+        Callers validate the names first; this does not.
+        """
+        changes = {}
+        if primary:
+            changes["primary_model"] = primary
+            changes["model_explicitly_set"] = True
+        if fallback:
+            changes["fallback_model"] = fallback
+        if not changes:
+            return
+        previous = {key: getattr(self, key) for key in changes}
+        for key, value in changes.items():
+            setattr(self, key, value)
+        try:
+            self._persist_model_choice(changes)
+        except Exception:
+            for key, value in previous.items():
+                setattr(self, key, value)
+            raise
+
+    @staticmethod
+    def _persist_model_choice(changes: dict) -> None:
+        """
+        Write `changes` into ~/.sam_data/settings.yaml WITHOUT going through
+        save(). save() dumps every live field, which would also freeze
+        runtime-only state into the file -- the voice loop's "incognito"
+        command flips settings.incognito in memory, and persisting that would
+        start every future session in incognito mode -- and would bake every
+        default and detected value into the user's file.
+
+        Instead: start from the file the loader would actually read (the
+        user's settings.yaml, else the repo's config/settings.yaml, else
+        nothing), apply only the model keys, and replace the user file
+        atomically. Everything else in it stays exactly as it was.
+        """
+        target = SAM_DATA_DIR / "settings.yaml"
+        source = target if target.exists() else CONFIG_PATH
+        data = {}
+        if source.exists():
+            with open(source) as f:
+                data = yaml.safe_load(f) or {}
+        data.update(changes)
+        SAM_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        with open(tmp, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+        os.replace(tmp, target)
+
     @staticmethod
     def data_dir() -> Path:
         return SAM_DATA_DIR

@@ -43,10 +43,15 @@ export const SETTINGS_SCHEMA: SettingSection[] = [
   {
     id: "model",
     title: "Model",
+    // primary_model / fallback_model are deliberately not listed: choosing
+    // the Brain is live on the Brain page, and a second, non-functional
+    // control for the same setting here would compete with it.
+    note: {
+      tone: "warn",
+      text: "The Brain (primary and fallback model) is chosen on the Brain page, where it takes effect. The rest of this section is a demo preview.",
+    },
     fields: [
       { key: "ollama_host", label: "Ollama host", type: "text", default: "http://localhost:11434" },
-      { key: "primary_model", label: "Primary model", type: "text", default: "qwen2.5:14b" },
-      { key: "fallback_model", label: "Fallback model", type: "text", default: "qwen2.5:7b" },
       { key: "model_context_length", label: "Context length", type: "number", default: 8192 },
       { key: "temperature", label: "Temperature", type: "number", default: 0.7 },
       { key: "max_tokens", label: "Max tokens", type: "number", default: 1024 },

@@ -17,7 +17,7 @@ required, since Phase 1 never actually inspected attachment content and
 Phase 2 must validate it before it reaches an AI model.
 """
 
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from multimodal.media_validation import validate_attachment, AttachmentValidationError
@@ -94,3 +94,57 @@ class HealthStatus(BaseModel):
     queue_depth: int
     uptime_seconds: float
     version: str = "iqoo-phase3a"
+
+
+# ─── Brain / model selection (core/model_manager.py) ──────────────────────
+# Served at /api/models, deliberately NOT under /api/iqoo/: choosing the
+# Brain is SAM Core functionality, not part of the phone-task contract.
+# interfaces/desktop/src/api/types.ts mirrors these field-for-field
+# (tests/test_brain_model_management_offline.py checks the two stay in step).
+
+class ModelInfo(BaseModel):
+    name: str
+    size_bytes: Optional[int] = None
+    parameter_size: Optional[str] = None
+    quantization: Optional[str] = None
+    family: Optional[str] = None
+    # Ollama's own /api/show capabilities ("completion", "tools", "vision",
+    # "thinking", "embedding", ...); None when Ollama didn't report them.
+    capabilities: Optional[List[str]] = None
+    context_length: Optional[int] = None
+    # Never "compatible": nothing in SAM can verify that -- see
+    # core/model_manager.py's module docstring.
+    compatibility: Literal["unknown", "incompatible"]
+    compatibility_reason: str
+    notes: List[str] = Field(default_factory=list)
+    is_selected: bool
+    is_fallback: bool
+    is_active: bool
+
+
+class BrainStatus(BaseModel):
+    provider: str
+    ollama_host: str
+    status: Literal["ready", "unavailable"]
+    detail: Optional[str] = None
+    selected_model: str
+    fallback_model: str
+    # What Brain would use for the next request; None when neither the
+    # selected nor the fallback model is installed (or Ollama is down).
+    active_model: Optional[str] = None
+    active_source: Optional[Literal["selected", "fallback"]] = None
+    # The model Brain last actually sent a request to (None until the first
+    # request after start-up).
+    last_used_model: Optional[str] = None
+    # True once the user chose the model; False means SAM's RAM-based default.
+    user_selected: bool
+    # True while a task is running/queued -- switching is refused then.
+    busy: bool
+    # Subsystems pinned to their own model (planner/reflection/
+    # founder_classifier); they do not follow a Brain switch.
+    overrides: Dict[str, str] = Field(default_factory=dict)
+    models: List[ModelInfo] = Field(default_factory=list)
+
+
+class ModelSelectRequest(BaseModel):
+    model: str = Field(..., min_length=1, max_length=200)

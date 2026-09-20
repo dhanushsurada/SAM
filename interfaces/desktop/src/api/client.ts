@@ -4,10 +4,15 @@ import type {
   HealthStatus,
   DemoResetResult,
   ExecutionEvent,
+  BrainStatus,
+  ModelSelectRequest,
 } from "./types";
 import { TERMINAL_PHASES } from "./types";
 
 const BASE = "/api/iqoo";
+// SAM Core routes (Brain/model selection) sit beside /api/iqoo, not under it:
+// choosing the Brain isn't part of the phone-task contract.
+const CORE_BASE = "/api";
 
 export class ApiError extends Error {
   constructor(
@@ -20,8 +25,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+async function request<T>(path: string, init?: RequestInit, base: string = BASE): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -63,6 +68,25 @@ export function getHealth(): Promise<HealthStatus> {
 
 export function demoReset(): Promise<DemoResetResult> {
   return request<DemoResetResult>("/demo/reset", { method: "POST" });
+}
+
+/** Provider status, selected/fallback/active model and every installed
+ * model. An unreachable Ollama comes back as status "unavailable", not an
+ * error — only an unreachable gateway rejects. */
+export function getBrainStatus(): Promise<BrainStatus> {
+  return request<BrainStatus>("/models", undefined, CORE_BASE);
+}
+
+/** Makes an installed model the Brain and returns the fresh status. Rejects
+ * with an ApiError carrying the server's reason: 409 a task is running,
+ * 404 not installed, 422 unusable as a Brain, 502/503 Ollama problems. */
+export function selectModel(model: string): Promise<BrainStatus> {
+  const body: ModelSelectRequest = { model };
+  return request<BrainStatus>(
+    "/models/select",
+    { method: "POST", body: JSON.stringify({ model: body.model }) },
+    CORE_BASE
+  );
 }
 
 /**
