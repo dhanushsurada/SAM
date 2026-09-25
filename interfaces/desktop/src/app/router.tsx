@@ -16,6 +16,7 @@ import { DiagnosticsPage } from "@/features/diagnostics/DiagnosticsPage";
 import { LicensingPage } from "@/features/licensing/LicensingPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
+import { PermissionsPage } from "@/features/permissions/PermissionsPage";
 import { ROUTES } from "./routes";
 
 // Routes that have a built page component, per PHASE5_PLAN.md §H — real
@@ -37,6 +38,7 @@ const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/diagnostics": DiagnosticsPage,
   "/licensing": LicensingPage,
   "/settings": SettingsPage,
+  "/permissions": PermissionsPage,
 };
 
 export const router = createBrowserRouter([

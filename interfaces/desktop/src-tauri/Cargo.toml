@@ -1,0 +1,29 @@
+[package]
+name = "sam-desktop"
+version = "0.1.0"
+description = "SAM — native desktop shell (Agent 1: agent/desktop-product)"
+authors = ["SAM"]
+edition = "2021"
+
+# NOTE (unverified): written by hand against documented Tauri v2 APIs. The
+# sandbox this was authored in has no `cargo`/`rustc` and no macOS, so
+# nothing in src-tauri/ has been compiled or run. Treat it the way this
+# app's own react-shim.d.ts treats the TS side: a careful first draft, not
+# a tested build. Run `cargo check` (from this directory) the moment this
+# is on a real machine with Rust installed, before anything else — see
+# NATIVE_SHELL_NOTES.md.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "sam-desktop"
+path = "src/main.rs"
