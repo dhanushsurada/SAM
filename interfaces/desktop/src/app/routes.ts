@@ -12,6 +12,7 @@ import {
   FiActivity,
   FiSettings,
   FiKey,
+  FiShield,
 } from "react-icons/fi";
 
 export type SamIcon = FC<{ className?: string; size?: number | string }>;
@@ -134,6 +135,15 @@ export const ROUTES: RouteMeta[] = [
     group: "system",
     plannedStep: "Step 7",
     description: "License and activation state.",
+  },
+  {
+    path: "/permissions",
+    label: "Permissions",
+    icon: FiShield,
+    group: "system",
+    plannedStep: "Agent 1 (native shell)",
+    description:
+      "What SAM and the desktop shell can access on this machine, and why — desktop-app permissions are real; SAM Core's are listed but not yet reported over the API.",
   },
   {
     path: "/settings",
