@@ -1,15 +1,14 @@
 """
-AGENT — Hierarchical Planner (Phase 1)
+AGENT — Planning interface (JEV adapter with legacy rollback)
 
 Decomposes a complex goal into an ordered list of concrete steps BEFORE the
 ReAct loop starts reasoning turn-by-turn. Decoupled from core/brain.py on
 purpose — makes its own direct Ollama call, same pattern as
 founder_mode/classifier.py.
 
-FAILS SAFE: returns None on any error or bad response. The caller
-(agent/react_loop.py) must fall back to the existing adaptive step-by-step
-loop (run_task) when this returns None — the old loop is not touched or
-removed, it's still exactly what runs if planning isn't available.
+The default implementation uses local-jev for bounded task route/model
+selection and SAM's generative model for the written plan. The original
+planner remains available through ``decompose_legacy`` and as a fallback.
 """
 
 import json
@@ -32,7 +31,7 @@ Respond with ONLY this JSON, nothing else:
 """
 
 
-def decompose(task: str, settings, founder_context: str = "") -> Optional[List[Dict]]:
+def decompose_legacy(task: str, settings, founder_context: str = "") -> Optional[List[Dict]]:
     """
     Returns a list of {"step": int, "description": str} dicts, or None if
     planning failed or is unavailable. None is a normal, expected outcome —
@@ -80,3 +79,23 @@ def decompose(task: str, settings, founder_context: str = "") -> Optional[List[D
     except Exception as e:
         logger.debug(f"Planner unavailable, caller should fall back: {e}")
         return None
+
+
+def decompose(task: str, settings, founder_context: str = "") -> Optional[List[Dict]]:
+    """Planning interface used by SAM.
+
+    The JEV adapter selects bounded task routing and a suitable configured
+    planning model; the generative SAM model writes the actual plan. Setting
+    ``planning_backend`` to ``legacy`` is the one-switch rollback path. If
+    local-jev is unavailable or uncertain, safely retain the proven planner.
+    """
+    if getattr(settings, "planning_backend", "jev") == "legacy":
+        return decompose_legacy(task, settings, founder_context)
+    try:
+        from agent.jev_planner import plan_with_jev
+        result = plan_with_jev(task, settings, founder_context)
+        if result is not None:
+            return result
+    except Exception as e:
+        logger.info("JEV planning adapter unavailable; using legacy planner: %s", e)
+    return decompose_legacy(task, settings, founder_context)

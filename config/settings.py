@@ -115,6 +115,14 @@ class Settings:
     planner_model: Optional[str] = None
     reflection_model: Optional[str] = None
 
+    # Planning replacement. JEV is the bounded decision service; the
+    # configured SAM model still generates free-form plan content. Set
+    # planning_backend: legacy to roll back without changing the UI.
+    planning_backend: str = "jev"
+    jev_base_url: str = "http://127.0.0.1:8765"
+    jev_model: str = "jev-latest"
+    jev_timeout_seconds: float = 2.0
+
     # main.py execution wiring — real autonomous actions. Default False:
     # commands like rm/mv/sudo/kill get refused with a clear message
     # instead of running silently. Opt in deliberately.
