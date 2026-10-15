@@ -43,6 +43,7 @@ There is intentionally no "compatible" value: nothing in this repository can
 verify one, and a false positive is worse than an honest "unknown".
 """
 
+import json
 import logging
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -58,6 +59,8 @@ COMPAT_INCOMPATIBLE = "incompatible"
 
 TAGS_TIMEOUT_S = 5
 SHOW_TIMEOUT_S = 5
+PULL_CONNECT_TIMEOUT_S = 10
+PULL_READ_TIMEOUT_S = 60
 
 # Settings fields that pin a subsystem to its own model. They default to
 # None ("use primary_model"); when set they do NOT follow a Brain switch, so
@@ -99,6 +102,11 @@ class ModelIncompatibleError(ModelManagerError):
 class ModelPersistError(ModelManagerError):
     """The choice couldn't be written to ~/.sam_data/settings.yaml. The
     in-memory setting has been rolled back (Settings.apply_model_choice)."""
+
+
+class ModelPullError(ModelManagerError):
+    """Ollama accepted a model pull request but reported an in-stream error
+    or sent malformed progress data."""
 
 
 # ─── Name handling ─────────────────────────────────────────────────────────
@@ -251,6 +259,64 @@ class ModelManager:
             raise OllamaUnavailableError(
                 f"Ollama at {host} returned a model list SAM couldn't read.") from e
         return [m for m in models if isinstance(m, dict) and (m.get("name") or m.get("model"))]
+
+    def pull(self, name: str):
+        """Yield Ollama's NDJSON pull progress events as dictionaries.
+
+        The request is lazy: network activity starts on the first iteration,
+        so API callers can construct a streaming response before connecting to
+        Ollama. Model downloads can have long quiet periods, so the read
+        timeout is generous but finite. Closing the generator closes the
+        upstream response.
+        """
+        model_name = (name or "").strip()
+        if not model_name or len(model_name) > 200:
+            raise ModelPullError("model name must contain 1 to 200 characters")
+
+        host = self._host()
+        try:
+            response = requests.post(
+                f"{host}/api/pull",
+                json={"model": model_name},
+                stream=True,
+                timeout=(PULL_CONNECT_TIMEOUT_S, PULL_READ_TIMEOUT_S),
+            )
+        except Exception as e:
+            raise OllamaUnavailableError(
+                f"Ollama isn't reachable at {host}. Start it with: ollama serve"
+            ) from e
+
+        try:
+            if response.status_code != 200:
+                raise OllamaUnavailableError(
+                    f"Ollama at {host} answered HTTP {response.status_code} when asked to pull {model_name!r}."
+                )
+
+            try:
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except (ValueError, TypeError) as e:
+                        raise ModelPullError(
+                            f"Ollama sent an unreadable progress line while pulling {model_name!r}."
+                        ) from e
+                    if not isinstance(event, dict):
+                        raise ModelPullError(
+                            f"Ollama sent an invalid progress event while pulling {model_name!r}."
+                        )
+                    if event.get("error"):
+                        raise ModelPullError(str(event["error"]))
+                    yield event
+                    if event.get("status") == "success":
+                        return
+            except requests.RequestException as e:
+                raise OllamaUnavailableError(
+                    f"Ollama connection was interrupted while pulling {model_name!r}."
+                ) from e
+        finally:
+            response.close()
 
     @staticmethod
     def _tag_name(entry: dict) -> str:

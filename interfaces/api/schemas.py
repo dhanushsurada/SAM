@@ -148,3 +148,8 @@ class BrainStatus(BaseModel):
 
 class ModelSelectRequest(BaseModel):
     model: str = Field(..., min_length=1, max_length=200)
+
+
+class ModelPullRequest(BaseModel):
+    """Model identifier for the streaming Ollama pull endpoint."""
+    model: str = Field(..., min_length=1, max_length=200)

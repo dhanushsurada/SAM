@@ -24,6 +24,7 @@ Serves:
 - GET    /api/models                    Brain: provider status, selected/fallback/active model,
                                         installed models + compatibility (core/model_manager.py)
 - POST   /api/models/select             make an installed model the Brain (409 while a task runs)
+- POST   /api/models/pull               stream model-download progress (loopback only)
 - /                                     the phone client (interfaces/web/)
 
 (The /api/models routes are SAM Core, not phone-task API, so they sit beside
@@ -36,20 +37,31 @@ import logging
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.model_manager import (
     ModelIncompatibleError, ModelManagerError, ModelMetadataError,
-    ModelNotInstalledError, OllamaUnavailableError,
+    ModelNotInstalledError, OllamaUnavailableError, ModelPullError,
 )
 from interfaces.api.gateway import (
     TaskGateway, TaskAlreadyActiveError, DemoResetBusyError, BrainBusyError,
 )
 from interfaces.api.task_store import TERMINAL_STATUSES
 from interfaces.api.schemas import (
-    TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest,
+    TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest, ModelPullRequest,
+)
+# agent/cross-device: /api/connect/* — device pairing, trust, capabilities
+# and cross-device task routing. Pure addition; every /api/iqoo/* route
+# above and below this import is unchanged. See
+# interfaces/api/connect_routes.py's own module docstring and
+# docs/architecture/CROSS_DEVICE_PROTOCOL.md for the full contract.
+from interfaces.api.connect_routes import (
+    router as connect_router,
+    start_background_tasks as _start_connect_background_tasks,
+    stop_background_tasks as _stop_connect_background_tasks,
+    require_local_caller,
 )
 
 logger = logging.getLogger("SAM.iQOO.Server")
@@ -61,6 +73,7 @@ BASE_DIR = Path(__file__).parent.parent.parent
 CLIENT_DIR = BASE_DIR / "interfaces" / "web"
 
 app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase3a")
+app.include_router(connect_router)  # agent/cross-device: /api/connect/*
 
 _gateway: TaskGateway = None  # constructed lazily on first request / at startup
 
@@ -76,6 +89,7 @@ def get_gateway() -> TaskGateway:
 def _startup():
     get_gateway()
     logger.info("iQOO phone gateway started")
+    _start_connect_background_tasks()  # agent/cross-device: offline/timeout sweep
 
 
 @app.on_event("shutdown")
@@ -92,6 +106,7 @@ def _shutdown():
     if _gateway is not None:
         _gateway.shutdown()
         logger.info("iQOO phone gateway shut down")
+    _stop_connect_background_tasks()  # agent/cross-device
 
 
 # ─── Task API ────────────────────────────────────────────────────────────
@@ -256,6 +271,55 @@ def select_model(req: ModelSelectRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except ModelManagerError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _next_from_sync_gen(gen):
+    """Advance a requests-backed model-pull iterator off the event loop."""
+    sentinel = object()
+    result = await asyncio.to_thread(next, gen, sentinel)
+    if result is sentinel:
+        raise StopAsyncIteration
+    return result
+
+
+async def model_pull_stream(gateway: TaskGateway, name: str,
+                            request: Request | None = None) -> AsyncGenerator[str, None]:
+    """Relay Ollama NDJSON progress as the server's existing SSE format."""
+    gen = gateway.model_manager.pull(name)
+    seq = 0
+    try:
+        while True:
+            if request is not None and await request.is_disconnected():
+                logger.info("Client disconnected from model pull stream")
+                return
+            try:
+                event = await _next_from_sync_gen(gen)
+            except StopAsyncIteration:
+                return
+            seq += 1
+            yield _format_sse({"seq": seq, "name": name, **event})
+            if event.get("status") == "success":
+                return
+    except (OllamaUnavailableError, ModelPullError) as e:
+        seq += 1
+        yield _format_sse({"seq": seq, "name": name, "status": "error", "error": str(e)})
+    finally:
+        await asyncio.to_thread(gen.close)
+
+
+@app.post("/api/models/pull", dependencies=[Depends(require_local_caller)])
+async def pull_model(req: ModelPullRequest, request: Request):
+    """Stream model-download progress. Restricted to loopback because the
+    API binds to 0.0.0.0 by default and existing model routes lack user auth;
+    pulling a model can consume substantial bandwidth and disk."""
+    gateway = get_gateway()
+    if gateway.get_brain_status().get("busy"):
+        raise HTTPException(status_code=409, detail="Cannot pull a model while a task is active or queued.")
+    return StreamingResponse(
+        model_pull_stream(gateway, req.model, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ─── Phone client (mounted last so it never shadows /api routes) ────────
