@@ -42,6 +42,7 @@ class RuntimeStatus(str, Enum):
     DEGRADED = "DEGRADED"
     FAILED = "FAILED"
     STOPPING = "STOPPING"
+    NOT_INSTALLED = "NOT_INSTALLED"
 
 
 def _poll_health_endpoint(url: str, timeout: float = 2.0) -> dict | None:

@@ -26,18 +26,72 @@ Commands:
 
 import sys
 import json
+import dataclasses
 import shutil
 import sqlite3
 import argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 SAM_DATA_DIR = Path.home() / ".sam_data"
 
 
+def _emit_json(payload: dict, exit_code: int = 0) -> int:
+    """Write exactly one machine-readable line to stdout."""
+    print(json.dumps(payload, separators=(",", ":")))
+    return exit_code
+
+
+def _processes_json(runtime) -> dict:
+    processes = {}
+    for name in runtime.process_names:
+        status = runtime.status(name)
+        health = runtime.health(name)
+        processes[name] = {
+            "state": status.value,
+            "pid": health.get("pid"),
+            "detail": health.get("last_failure") if status.value == "FAILED" else None,
+        }
+    return processes
+
+
 # ─── Status ───────────────────────────────────────────────────────────────
 
-def cmd_status():
+def cmd_status(json_output: bool = False):
+    if json_output:
+        try:
+            from config.settings import Settings
+            settings = Settings()
+        except Exception as e:
+            settings = None
+            settings_error = str(e)
+        else:
+            settings_error = None
+        try:
+            from runtime import OllamaManager, SAMRuntime
+            runtime = SAMRuntime()
+            processes = _processes_json(runtime)
+            ollama = OllamaManager(
+                getattr(settings, "ollama_host", "http://localhost:11434")
+            ).status()
+            runtime_error = None
+        except Exception as e:
+            processes = {}
+            ollama = {"state": "UNAVAILABLE", "detail": str(e), "models": []}
+            runtime_error = str(e)
+        success = (settings_error is None and runtime_error is None
+                   and ollama["state"] == "READY"
+                   and all(p["state"] not in ("FAILED", "DEGRADED") for p in processes.values()))
+        return _emit_json({
+            "success": success,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "settings_error": settings_error,
+            "runtime_error": runtime_error,
+            "ollama": ollama,
+            "processes": processes,
+            "profile_dir": {"path": str(SAM_DATA_DIR), "exists": SAM_DATA_DIR.exists()},
+        }, 0 if success else 1)
+
     import requests
     import subprocess
 
@@ -124,39 +178,59 @@ def _print_lifecycle_result(result):
         print(f"❌ {result.name}: {result.message}")
 
 
-def cmd_start(name=None):
-    from runtime import SAMRuntime
+def _emit_lifecycle_results(results: dict, json_output: bool):
+    if json_output:
+        payload = {"success": all(result.ok for result in results.values()),
+                   "results": {name: dataclasses.asdict(result) for name, result in results.items()}}
+        return _emit_json(payload, 0 if payload["success"] else 1)
+    for result in results.values():
+        _print_lifecycle_result(result)
+
+
+def cmd_start(name=None, json_output: bool = False):
+    try:
+        from runtime import SAMRuntime
+    except Exception as e:
+        if json_output:
+            return _emit_json({"success": False, "error": str(e), "results": {}}, 1)
+        raise
     rt = SAMRuntime()
-    if name:
-        _print_lifecycle_result(rt.start(name))
-    else:
-        for result in rt.start_all().values():
-            _print_lifecycle_result(result)
+    results = {name: rt.start(name)} if name else rt.start_all()
+    return _emit_lifecycle_results(results, json_output)
 
 
-def cmd_stop(name=None):
-    from runtime import SAMRuntime
+def cmd_stop(name=None, json_output: bool = False):
+    try:
+        from runtime import SAMRuntime
+    except Exception as e:
+        if json_output:
+            return _emit_json({"success": False, "error": str(e), "results": {}}, 1)
+        raise
     rt = SAMRuntime()
-    if name:
-        _print_lifecycle_result(rt.stop(name))
-    else:
-        for result in rt.stop_all().values():
-            _print_lifecycle_result(result)
+    results = {name: rt.stop(name)} if name else rt.stop_all()
+    return _emit_lifecycle_results(results, json_output)
 
 
-def cmd_restart(name=None):
-    from runtime import SAMRuntime
+def cmd_restart(name=None, json_output: bool = False):
+    try:
+        from runtime import SAMRuntime
+    except Exception as e:
+        if json_output:
+            return _emit_json({"success": False, "error": str(e), "results": {}}, 1)
+        raise
     rt = SAMRuntime()
     names = [name] if name else rt.process_names
-    for n in names:
-        result = rt.restart(n)
+    results = {n: rt.restart(n) for n in names}
+    if json_output:
+        return _emit_lifecycle_results(results, True)
+    for n, result in results.items():
         if result.start_result:
             _print_lifecycle_result(result.start_result)
         else:
             print(f"❌ {n}: {result.message}")
 
 
-def cmd_doctor():
+def cmd_doctor(json_output: bool = False):
     """Foundation for `sam doctor` (Phase 3B Section 13, Checkpoint 5).
     Each check reports PASS/WARN/FAIL/UNVERIFIED honestly — a module
     importing successfully is not treated as proof the capability behind
@@ -167,14 +241,17 @@ def cmd_doctor():
     checks = []
 
     def record(label, status, detail=""):
-        checks.append(status)
+        checks.append({"label": label, "status": status, "detail": detail})
+        if json_output:
+            return
         icon = {"PASS": "✅", "WARN": "⚠️ ", "FAIL": "❌", "UNVERIFIED": "❓"}[status]
         line = f"{icon} [{status:10s}] {label}"
         if detail:
             line += f" — {detail}"
         print(line)
 
-    print("\n── SAM DOCTOR ───────────────────────────────")
+    if not json_output:
+        print("\n── SAM DOCTOR ───────────────────────────────")
 
     record("Python version", "PASS" if sys.version_info >= (3, 9) else "WARN", sys.version.split()[0])
 
@@ -211,12 +288,24 @@ def cmd_doctor():
     # Ollama: installed/importable says nothing about running, and running
     # says nothing about whether the configured model is pulled — Section
     # 13 explicitly wants these told apart rather than collapsed together.
-    import requests
     ollama_host = getattr(settings, "ollama_host", "http://localhost:11434") if settings else "http://localhost:11434"
     try:
-        r = requests.get(f"{ollama_host}/api/tags", timeout=3)
-        models = [m["name"] for m in r.json().get("models", [])]
-        record("Ollama running", "PASS", f"{len(models)} model(s) pulled")
+        if json_output:
+            from runtime import OllamaManager, RuntimeStatus
+            ollama = OllamaManager(ollama_host).status()
+            models = ollama.get("models", [])
+            if ollama["state"] == RuntimeStatus.READY.value:
+                record("Ollama running", "PASS", f"{len(models)} model(s) pulled")
+            elif ollama["state"] == RuntimeStatus.NOT_INSTALLED.value:
+                record("Ollama running", "WARN", ollama.get("detail", "not installed"))
+            else:
+                record("Ollama running", "FAIL", ollama.get("detail", "not responding"))
+        else:
+            # Preserve the established human-readable check and wording.
+            import requests
+            response = requests.get(f"{ollama_host}/api/tags", timeout=3)
+            models = [m["name"] for m in response.json().get("models", [])]
+            record("Ollama running", "PASS", f"{len(models)} model(s) pulled")
 
         # Reuses the /api/tags response above rather than a second request —
         # confirms the *specific* configured model is actually pulled, not
@@ -231,7 +320,7 @@ def cmd_doctor():
                        f"not found among pulled models — run: ollama pull {configured_model}")
         else:
             record("Configured model pulled", "WARN", "no primary_model in settings to check")
-    except Exception:
+    except Exception as e:
         record("Ollama running", "FAIL", f"not reachable at {ollama_host} — start with: ollama serve")
         record("Configured model pulled", "UNVERIFIED", "Ollama unreachable — could not check")
 
@@ -262,6 +351,8 @@ def cmd_doctor():
                 record(label, "PASS", "STOPPED (not currently running)")
             elif status in (RuntimeStatus.STARTING, RuntimeStatus.STOPPING):
                 record(label, "WARN", status.value)
+            elif status == RuntimeStatus.NOT_INSTALLED:
+                record(label, "WARN", status.value)
             else:  # DEGRADED, FAILED
                 record(label, "FAIL", status.value)
 
@@ -275,11 +366,17 @@ def cmd_doctor():
     record("OS-level permission grants (mic, camera, accessibility)", "UNVERIFIED",
            "not checkable from the CLI")
 
-    passes = checks.count("PASS")
-    warns = checks.count("WARN")
-    fails = checks.count("FAIL")
-    unverified = checks.count("UNVERIFIED")
-    print(f"\n{passes} pass, {warns} warn, {fails} fail, {unverified} unverified ({len(checks)} checks)")
+    statuses = [check["status"] for check in checks]
+    summary = {
+        "pass": statuses.count("PASS"), "warn": statuses.count("WARN"),
+        "fail": statuses.count("FAIL"), "unverified": statuses.count("UNVERIFIED"),
+        "total": len(checks),
+    }
+    if json_output:
+        return _emit_json({"success": summary["fail"] == 0, "checks": checks, "summary": summary},
+                          0 if summary["fail"] == 0 else 1)
+    print(f"\n{summary['pass']} pass, {summary['warn']} warn, {summary['fail']} fail, "
+          f"{summary['unverified']} unverified ({summary['total']} checks)")
     print("────────────────────────────────────────────\n")
 
 
@@ -668,13 +765,16 @@ def main():
     parser = argparse.ArgumentParser(description="SAM CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("status")
+    status_p = subparsers.add_parser("status")
+    status_p.add_argument("--json", action="store_true", help="Machine-readable output")
 
     for cmd_name in ("start", "stop", "restart"):
         p = subparsers.add_parser(cmd_name)
         p.add_argument("name", nargs="?", choices=["voice", "api", "telegram"], default=None,
                        help="Which process (default: all three)")
-    subparsers.add_parser("doctor")
+        p.add_argument("--json", action="store_true", help="Machine-readable output")
+    doctor_p = subparsers.add_parser("doctor")
+    doctor_p.add_argument("--json", action="store_true", help="Machine-readable output")
 
     founder_p = subparsers.add_parser("founder")
     founder_p.add_argument("--all", action="store_true", dest="show_all",
@@ -729,10 +829,21 @@ def main():
         "license": cmd_license,
     }
 
-    if args.command in commands:
+    if args.command == "status":
+        code = cmd_status(json_output=args.json)
+        if args.json:
+            raise SystemExit(code)
+    elif args.command == "doctor":
+        code = cmd_doctor(json_output=args.json)
+        if args.json:
+            raise SystemExit(code)
+    elif args.command in commands:
         commands[args.command]()
     elif args.command in ("start", "stop", "restart"):
-        {"start": cmd_start, "stop": cmd_stop, "restart": cmd_restart}[args.command](args.name)
+        code = {"start": cmd_start, "stop": cmd_stop, "restart": cmd_restart}[args.command](
+            args.name, json_output=args.json)
+        if args.json:
+            raise SystemExit(code)
     elif args.command == "activate":
         cmd_activate(args.license_file)
     elif args.command == "revoke-device":
