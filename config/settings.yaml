@@ -34,6 +34,14 @@ founder_mode_enabled: true
 # founder_mode_classifier_model: "qwen2.5:7b"   # defaults to primary_model if unset
 # founder_mode_min_confidence_to_show: 0.3
 
+# Planning replacement. Run `local-jev serve` separately on localhost:8765.
+# Set planning_backend to `legacy` for an immediate rollback. When JEV is
+# unavailable or uncertain, SAM automatically falls back to the legacy planner.
+planning_backend: "jev"
+jev_base_url: "http://127.0.0.1:8765"
+jev_model: "jev-latest"
+jev_timeout_seconds: 2.0
+
 # Phase 2 — Telegram bridge (internet-relay, not local-WiFi — see docs)
 # telegram_bot_token: "123456:ABC-your-bot-token-from-BotFather"
 # telegram_bot_username: "your_sam_bot"

@@ -530,8 +530,12 @@ class ReactLoop:
         self._safe_event(on_event, "planning", f"Plan created with {len(plan)} step(s)")
         observations = []
         steps_run = 0
-
-        for i, planned_step in enumerate(plan):
+        plan_index = 0
+        recovery_replans = 0
+        while plan_index < len(plan):
+            i = plan_index
+            planned_step = plan[i]
+            plan_index += 1
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("Planned task cancelled by user request")
                 result = "Stopped."
@@ -578,6 +582,29 @@ class ReactLoop:
             })
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
 
+            if not success and recovery_replans < 2:
+                # Reassess only after a verified failure. A successful step
+                # never triggers a JEV call or another planning pass.
+                try:
+                    from agent.jev_planner import recover_after_failure
+                    revised = recover_after_failure(
+                        task, self.settings, observations, plan[plan_index:]
+                    ) if getattr(self.settings, "planning_backend", "jev") != "legacy" else None
+                except Exception:
+                    revised = None
+                if revised == []:
+                    result = (f"I stopped after step {planned_step['step']} failed verification "
+                              "because no safe useful recovery was selected.")
+                    self._safe_reflect(task, observations, result)
+                    return TaskOutcome(result, STATUS_STOPPED_AFTER_RETRIES)
+                if revised:
+                    recovery_replans += 1
+                    revised = [dict(step, step=steps_run + offset + 1)
+                               for offset, step in enumerate(revised)]
+                    plan = plan[:plan_index] + revised
+                    logger.info("JEV replanned %d unfinished step(s) after a verified failure",
+                                len(revised))
+
             if self._is_stagnant(observations) or self._is_repeating_failed_action(observations):
                 logger.warning(f"Stagnation detected — stuck repeating without progress "
                                 f"{STAGNATION_WINDOW}x in a row, aborting the plan early")
@@ -619,7 +646,12 @@ class ReactLoop:
             logger.debug(f"Reflection call skipped: {e}")
 
     def _build_planned_step_prompt(self, task: str, plan: list, current_step: Dict, observations: list) -> str:
-        plan_text = "\n".join(f"{s['step']}. {s['description']}" for s in plan)
+        plan_text = "\n".join(
+            f"{s['step']}. {s['description']}"
+            + (f" (depends on: {', '.join(map(str, s['depends_on']))})" if s.get("depends_on") else "")
+            + (f" — success means: {s['success_criteria']}" if s.get("success_criteria") else "")
+            for s in plan
+        )
         obs_text = "\n".join(
             f"Step {o['step']} ({o['description']}): {o['observation']}" for o in observations
         ) if observations else "None yet."
@@ -634,11 +666,23 @@ class ReactLoop:
                 "alternative exists."
             )
 
+        route_hint = (
+            f"JEV suggested tool family: {current_step['preferred_route']}. Treat this as a hint; "
+            "follow the task and existing tool safeguards.\n"
+            if current_step.get("preferred_route") else ""
+        )
+        success_criteria = (
+            f"Success criterion: {current_step['success_criteria']}\n"
+            if current_step.get("success_criteria") else ""
+        )
+
         return (
             f"Overall task: {task}\n\n"
             f"Full plan:\n{plan_text}\n\n"
             f"Steps completed so far:\n{obs_text}{failure_note}\n\n"
             f"Now execute step {current_step['step']}: {current_step['description']}\n"
+            f"{success_criteria}"
+            f"{route_hint}"
             f"If this step needs an action, specify it. If it's already satisfied by the "
             f"conversation so far, respond with action: null and a short status."
         )
