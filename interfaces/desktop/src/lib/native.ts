@@ -95,3 +95,158 @@ export async function currentWindowLabel(): Promise<string> {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   return getCurrentWindow().label;
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Phase C4/C5 — runtime bridge wrappers.
+ *
+ * Two transports under the hood (src-tauri/src/runtime.rs), one calling
+ * convention here: every one of these is a plain invoke() or listen(),
+ * so a caller never needs to know runtime_status is a CLI subprocess
+ * underneath while models_list is an HTTP call to the gateway — that
+ * distinction stays inside runtime.rs, exactly per
+ * docs/RUNTIME_BRIDGE_DESIGN.md §A/§B.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export type ProcessName = "voice" | "api" | "telegram";
+export type RuntimeState = "STOPPED" | "STARTING" | "READY" | "DEGRADED" | "FAILED" | "STOPPING";
+export type OllamaRuntimeState = "READY" | "STOPPED" | "NOT_INSTALLED";
+
+export interface ProcessState {
+  state: RuntimeState;
+  pid: number | null;
+  detail: string | null;
+}
+
+export interface OllamaState {
+  state: OllamaRuntimeState;
+  detail: string;
+  models: string[];
+}
+
+/** Matches sam_cli.py's `status --json` payload field-for-field — see
+ * PHASE_C1-C3_REPORT.md for how it was derived and tested. */
+export interface RuntimeSnapshot {
+  success: boolean;
+  generated_at: string;
+  ollama: OllamaState;
+  processes: Record<ProcessName, ProcessState>;
+  profile_dir: { path: string; exists: boolean };
+}
+
+export interface LifecycleResult {
+  name: string;
+  ok: boolean;
+  pid?: number | null;
+  already_running?: boolean;
+  already_stopped?: boolean;
+  forced?: boolean;
+  message: string;
+}
+
+export interface LifecycleResponse {
+  success: boolean;
+  results: Record<string, LifecycleResult>;
+}
+
+export interface OllamaActionResult {
+  ok: boolean;
+  already_running: boolean;
+  message: string;
+}
+
+/** Ollama's own NDJSON progress shape, passed through — not reshaped —
+ * all the way from ModelManager.pull() through the SSE endpoint through
+ * runtime.rs's relay. `total`/`completed` are absent until a layer
+ * actually starts downloading; callers should treat both as optional. */
+export interface ModelPullProgress {
+  seq?: number;
+  name: string;
+  status: string;
+  digest?: string;
+  total?: number;
+  completed?: number;
+  error?: string | null;
+}
+
+async function invokeNative<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isNative()) {
+    throw new Error(`"${cmd}" needs the native SAM app — not available in a plain browser tab.`);
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
+export function runtimeStatus(): Promise<RuntimeSnapshot> {
+  return invokeNative<RuntimeSnapshot>("runtime_status");
+}
+
+export function runtimeStart(process?: ProcessName): Promise<LifecycleResponse> {
+  return invokeNative<LifecycleResponse>("runtime_start", { process: process ?? null });
+}
+
+export function runtimeStop(process?: ProcessName): Promise<LifecycleResponse> {
+  return invokeNative<LifecycleResponse>("runtime_stop", { process: process ?? null });
+}
+
+export function runtimeRestart(process?: ProcessName): Promise<LifecycleResponse> {
+  return invokeNative<LifecycleResponse>("runtime_restart", { process: process ?? null });
+}
+
+export function ollamaStatus(): Promise<OllamaState> {
+  return invokeNative<OllamaState>("ollama_status");
+}
+
+export function ollamaStart(): Promise<OllamaActionResult> {
+  return invokeNative<OllamaActionResult>("ollama_start");
+}
+
+/** Return shape is ModelManager.status()'s existing dict, already
+ * consumed today by the real /brain page — deliberately left as
+ * `unknown` here rather than guessed at and re-typed; callers that need
+ * fields from it should narrow from the same place /brain does, not
+ * from a second, possibly-drifting type defined only in this file. */
+export function modelsList(): Promise<unknown> {
+  return invokeNative("models_list");
+}
+
+export function modelSelect(name: string): Promise<unknown> {
+  return invokeNative("model_select", { name });
+}
+
+/** Starts a pull; progress arrives via onModelPullProgress(), not via
+ * this promise's resolution. Resolves once the stream ends successfully,
+ * rejects with the failure message otherwise (mirrors
+ * runtime.rs::model_pull's Result<(), String>). */
+export function modelPull(name: string): Promise<void> {
+  return invokeNative<void>("model_pull", { name });
+}
+
+/** Subscribes to pull progress; returns an unsubscribe function. No-ops
+ * (returns a function that does nothing) in a plain browser tab, where
+ * there is no native event stream to listen to. */
+export async function onModelPullProgress(
+  handler: (progress: ModelPullProgress) => void,
+): Promise<() => void> {
+  if (!isNative()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<ModelPullProgress>("model-pull-progress", (event) => handler(event.payload));
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Phase C7 — setup state.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export type SetupJourneyState = "first_run" | "in_progress" | "complete";
+
+export interface SetupState {
+  state: SetupJourneyState;
+  selected_model: string | null;
+}
+
+export function getSetupState(): Promise<SetupState> {
+  return invokeNative<SetupState>("setup_state_get");
+}
+
+export function setSetupState(state: SetupJourneyState, model?: string): Promise<SetupState> {
+  return invokeNative<SetupState>("setup_state_set", { state, model: model ?? null });
+}

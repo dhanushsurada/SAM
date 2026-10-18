@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Verified against Android's own network security config docs before writing
+  this (developer.android.com/privacy-and-security/security-config): the
+  <domain> element only matches exact hostnames/IP literals, NOT CIDR ranges —
+  an earlier draft of this file tried "192.168.0.0/16" as a <domain>, which
+  would silently never match and leave cleartext blocked on a real device.
+  Corrected to a base-config instead.
+
+  Why base-config at all: SAM Core (desktop) is reached over plain HTTP on the
+  local network today, not HTTPS — see docs/iqoo/PROTOCOL.md / OFFICE_KIT.md
+  in the main repo ("same-WiFi HTTP"). The host is whatever IP the user enters
+  during pairing (not known at build time), so a per-domain allowlist isn't
+  possible here. This app makes no other network calls, so app-wide cleartext
+  is the honest scope, not a wider hole than it looks.
+
+  Revisit once Agent 3's real transport/pairing design lands — it may fix the
+  host to an mDNS .local name (which COULD move this to a scoped domain-config)
+  or add TLS outright.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

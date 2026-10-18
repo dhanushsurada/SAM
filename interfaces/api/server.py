@@ -283,7 +283,7 @@ async def _next_from_sync_gen(gen):
 
 
 async def model_pull_stream(gateway: TaskGateway, name: str,
-                            request: Request | None = None) -> AsyncGenerator[str, None]:
+                            request: "Request | None" = None) -> AsyncGenerator[str, None]:
     """Relay Ollama NDJSON progress as the server's existing SSE format."""
     gen = gateway.model_manager.pull(name)
     seq = 0

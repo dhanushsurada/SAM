@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sampled directly from SAM_LOGO.png (dominant fill + mark colors), not guessed. -->
+    <color name="sam_orange">#FD6902</color>
+    <color name="sam_mark_white">#FFFFFF</color>
+</resources>

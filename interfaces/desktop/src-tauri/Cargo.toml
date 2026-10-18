@@ -23,6 +23,20 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Phase C4: the models_list/model_select/model_pull bridge commands talk
+# to the SAM API gateway over plain HTTP, per the Phase B design (reusing
+# the gateway's existing REST/SSE surface rather than adding a second
+# transport for operations that are only ever meaningful once it's
+# already running).
+reqwest = { version = "0.12", features = ["json", "stream"] }
+# Parses the gateway's existing SSE framing (_format_sse in
+# interfaces/api/server.py: "id: N\ndata: {...}\n\n") without hand-rolling
+# a line-buffering parser for it.
+eventsource-stream = "0.2"
+# For .next() on the reqwest/eventsource stream in runtime.rs -- reqwest
+# already depends on this internally; declared explicitly since its trait
+# methods are called directly rather than only used transitively.
+futures-util = "0.3"
 
 [[bin]]
 name = "sam-desktop"

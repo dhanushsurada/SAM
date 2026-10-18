@@ -1,0 +1,122 @@
+SAM Android (Agent 2) — Phase 3 verification log (foreground service + TaskMonitor hardening)
+Produced in the build sandbox on 2026-10-17. Raw tool output, lightly trimmed.
+
+READ THIS FIRST — what this log is and is not
+  * It is evidence from (a) the real Kotlin compiler type-checking the sources against HAND-WRITTEN STUBS
+    and (b) a plain-main runner executing the real TaskMonitor class on a real coroutines runtime.
+  * It is NOT a Gradle build, NOT a JUnit run, NOT lint, and NOT any run on an Android device/emulator.
+    The 35 JUnit tests in app/src/test were type-checked here and have NEVER been executed.
+  * The foreground service itself (TaskWatchForegroundService, AndroidTaskKeepAlive, SamNotifications)
+    is not executed by anything in this log. Its OS behaviour is unverified.
+  * The runner uses kotlinx-coroutines 1.6.4 (bundled with the compiler); the app pins 1.9.0.
+
+ENVIRONMENT
+  Kotlin compiler : info: kotlinc-jvm 2.0.21 (JRE 21.0.12.1+1-1-24.04.4-Ubuntu)
+  JVM             : openjdk version "21.0.12.1" 2026-08-18
+  CPU cores       : 2
+  Stubs           : Java stubs compiled with javac (android.*, androidx.core.*, org.junit.*, R);
+                    Kotlin stubs (okhttp3, okhttp-sse, mockwebserver, datastore, kotlinx.serialization,
+                    kotlinx-coroutines-test). Real kotlin-stdlib + kotlinx-coroutines-core-jvm jars.
+  Not covered     : Compose UI layer + MainActivity (unchanged from the delivered zip; Compose stubs were not
+                    rebuilt), manifest merge, resource linking, AGP/R8, lint.
+
+1. TYPE-CHECK, UNMODIFIED SOURCES (non-UI main: 12 files + tests: 6 files = 18 files)
+   Expected: exactly the 3 kotlinx.serialization-plugin call sites, nothing else.
+   HttpSseSamTransport.kt:122:39  cannot infer type for this parameter. Please specify it explicitly.
+   HttpSseSamTransport.kt:122:39  not enough information to infer type argument for 'T'.
+   HttpSseSamTransport.kt:122:67  unresolved reference 'serializer'.
+   HttpSseSamTransport.kt:200:76  unresolved reference 'serializer'.
+   HttpSseSamTransport.kt:224:61  unresolved reference 'serializer'.
+   -> errors: 5, warnings: 0
+
+2. TYPE-CHECK, THROWAWAY COPY (only change: the 3 generated Foo.serializer() calls rewritten to
+   kotlinx.serialization.serializer<Foo>(); every other file byte-identical to the project)
+   -> kotlinc exit=0  errors=0  warnings=0
+
+3. MANIFEST (parsed as XML)
+   well-formed: yes
+   uses-permission: INTERNET, ACCESS_NETWORK_STATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC
+   service: .notifications.TaskWatchForegroundService exported=false foregroundServiceType=dataSync
+   compileSdk=35, targetSdk=35, minSdk=26, core-ktx 1.15.0, coroutines (app) 1.9.0  [read from the Gradle files]
+
+4. REAL-THREAD RUNNER — the real TaskMonitor + the project's own fakes (24 scenarios)
+   PASS  watch collects emitted events
+   PASS  stream completion triggers an authoritative status lookup
+   PASS  notifier fires when the authoritative status is terminal
+   PASS  notifier does NOT fire when the authoritative status is still running
+   PASS  notifier does not fire when the follow-up getTask call itself fails
+   PASS  watching a new task cancels the previous still-running watch
+   PASS  isWatching is false before any watch and no keep-alive requested
+   PASS  each watch requests the keep-alive once
+   PASS  isWatching is true while the stream is still open
+   PASS  isWatching goes false once the task is terminal
+   PASS  isWatching goes false when the stream drops on a task that is still running (zombie case)
+   PASS  isWatching goes false even when the follow-up lookup fails
+   PASS  replacing a watch keeps isWatching true
+   PASS  stopWatching clears isWatching and announces nothing
+   PASS  a keep-alive that throws does not stop the watch
+   PASS  isWatching toggles correctly across sequential watches
+   PASS  a stream that never ends is abandoned at the cap and a still-running task stays silent
+   PASS  at the cap a task that turned out to be finished is still announced
+   PASS  replacing a watch keeps isWatching true when the old watch's completion runs inline
+   PASS  a lookup that is slow but still current is applied and announced (control)
+   PASS  a lookup result that arrives after the watch was superseded is dropped
+   PASS  a lookup result that arrives after stopWatching is dropped
+   PASS  an event delivered to a superseded watch is not appended to the new watch's list
+   PASS  STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   
+   24 passed, 0 failed
+
+5. FLAKINESS
+   25 consecutive full runs of the 24-scenario runner: not-clean=0
+
+6. MUTATION CHECKS — each line re-introduces ONE bug into TaskMonitor, compiles only that class, runs the runner
+   (a scenario that never fails under any mutation would have no teeth; M0 is the unmodified control)
+   M0   control: no change
+        -> 24 passed, 0 failed
+   M1   lookup result applied/announced even when the watch is stale
+        -> 21 passed, 3 failed
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: a lookup result that arrives after stopWatching is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   M2   events appended even when the watch is stale
+        -> 23 passed, 1 failed
+           FAIL: an event delivered to a superseded watch is not appended to the new watch's list
+   M3   a finished watch always clears isWatching (no generation check)
+        -> 20 passed, 4 failed
+           FAIL: replacing a watch keeps isWatching true
+           FAIL: replacing a watch keeps isWatching true when the old watch's completion runs inline
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   M4   no cap on the watch
+        -> 22 passed, 2 failed
+           FAIL: a stream that never ends is abandoned at the cap and a still-running task stays silent
+           FAIL: at the cap a task that turned out to be finished is still announced
+   M5   keepAlive.start() exceptions propagate
+        -> 23 passed, 1 failed
+           FAIL: a keep-alive that throws does not stop the watch
+   M6   stopWatching() does not clear isWatching
+        -> 21 passed, 3 failed
+           FAIL: stopWatching clears isWatching and announces nothing
+           FAIL: a lookup result that arrives after stopWatching is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   M7   generation bumped AFTER the old job is cancelled (old ordering)
+        -> 23 passed, 1 failed
+           FAIL: replacing a watch keeps isWatching true when the old watch's completion runs inline
+   M9   stale watch still ANNOUNCES (but no longer writes the snapshot)
+        -> 22 passed, 2 failed
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: a lookup result that arrives after stopWatching is dropped
+   M10  announce regardless of terminal status
+        -> 21 passed, 3 failed
+           FAIL: notifier does NOT fire when the authoritative status is still running
+           FAIL: isWatching goes false when the stream drops on a task that is still running (zombie case)
+           FAIL: a stream that never ends is abandoned at the cap and a still-running task stays silent
+   M11  keep-alive never requested
+        -> 21 passed, 3 failed
+           FAIL: each watch requests the keep-alive once
+           FAIL: a keep-alive that throws does not stop the watch
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+
+   Not demonstrated by any of the above: the lock's atomicity, invokeOnCompletion-vs-finally, and everything
+   Android-side (service lifecycle, permissions, notifications, OEM behaviour, Android 15 timeout).

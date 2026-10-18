@@ -1,0 +1,1262 @@
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-09-30 23:35:53.000000000 +0000
++++ b/README.md	2026-10-17 07:09:41.513094233 +0000
+@@ -1,4 +1,4 @@
+-# SAM for Android — v0 (Agent 2, first slice + hardening pass)
++# SAM for Android — v0 (Agent 2, first slice + hardening pass + foreground-service pass)
+ 
+ Native Android client for SAM Core, per `SAM_Master_PDR_2026-09-23.docx` §13. See the
+ companion `SAM_Android_Agent2_Recon_Report.md` and `SAM_Android_Agent2_Build_Report.md`
+@@ -9,19 +9,27 @@
+ 
+ ## Status, in one line
+ 
+-**Type-checked against a hand-built harness; still not built, tested, or run
+-for real.** No Android SDK, emulator, or real device was available in the
++**Type-checked against a hand-built harness, and `TaskMonitor`'s logic has been
++executed on a real coroutines runtime — but the project has still never been
++built with Gradle, never run through JUnit, and never run on a device or
++emulator.** No Android SDK, emulator, or real device was available in the
+ environment this was written in, and a direct network test confirms this
+ environment cannot reach `dl.google.com`, `maven.google.com`,
+ `repo1.maven.org`, or `services.gradle.org` at all — so a real Gradle sync
+ isn't just "not attempted," it's confirmed not possible from here. As a
+ substitute, the real Kotlin 2.0.21 compiler (not a real Gradle/AGP build) was
+-run against every source and test file using ~40 hand-written stubs standing
+-in for Android/AndroidX/Compose/OkHttp/JUnit. Result: clean, except three
+-`DeviceInfo.serializer()`-style calls that need kotlinx.serialization's own
+-compiler plugin (unavailable here — Maven-only distribution). See the build
+-report's §A for exactly what that does and doesn't prove — it's real signal,
+-not a substitute for `./gradlew build`.
++run against every non-UI source file and every test file using hand-written
++stubs standing in for Android/AndroidX/OkHttp/JUnit. Result: clean, except
++three `DeviceInfo.serializer()`-style calls that need kotlinx.serialization's
++own compiler plugin (unavailable here — Maven-only distribution); against the
++unmodified files those are the *only* diagnostics (5 lines, 3 call sites). The
++Compose UI layer was not re-checked in the foreground-service pass (see the
++build report's Phase 3 addendum). Separately, `TaskMonitor` was run — real class,
++the project's own test fakes, real threads — through 24 scenarios (all pass,
++and each bug they target was re-introduced on purpose to confirm they fail).
++That is real signal about the logic; it says nothing about Android itself. The
++**foreground service has never run on any Android.** See the build report for
++exactly what each of these does and doesn't prove.
+ 
+ ## Opening this project
+ 
+@@ -41,21 +49,33 @@
+ - Project/module setup: Gradle Kotlin DSL, version catalog (`gradle/libs.versions.toml`), Compose enabled.
+ - Theme (`ui/theme/`): colors sampled directly from `SAM_LOGO.png` (`#FD6902` / white), dark-only per PDR §7 — light mode not implemented.
+ - `data/transport/SamTransport.kt`: the interface everything else is built against.
+-- `data/transport/HttpSseSamTransport.kt`: v0 implementation. Task/health/event endpoints shaped after the real `docs/iqoo/PROTOCOL.md` in the main repo; **the pairing endpoint (`POST /api/connect/pair`) is an invented placeholder** — no existing HTTP pairing endpoint was found during reconnaissance. See the class doc comment. Now uses an explicit, disabled read timeout for the SSE connection specifically (a default client timeout would have killed long-idle task streams — see the build report's "bugs found" list) and explicit sane timeouts for everything else.
++- `data/transport/HttpSseSamTransport.kt`: v0 implementation. Task/health/event endpoints shaped after the real `docs/iqoo/PROTOCOL.md` in the main repo; **the pairing endpoint (`POST /api/connect/pair`) is an invented placeholder** — no existing HTTP pairing endpoint was found during reconnaissance. See the class doc comment. Uses a separate client for the SSE connection with a **finite 60 s read timeout** (a default 10 s client timeout would have killed long-idle task streams; an infinite one — what the hardening pass used — would let a half-open connection hold the foreground service open until `TaskMonitor`'s cap). The 60 s figure is a **provisional assumption** derived from the repo server's ~1 s heartbeat (`interfaces/api/server.py`), not from a documented contract: Agent 3's contract has to state a heartbeat interval well under it. Explicit timeouts for everything else too.
+ - `data/local/PairedDeviceStore.kt` (interface) / `DevicePrefsStore.kt` (real DataStore-backed implementation): local persistence of the paired device. Split into an interface specifically so `HttpSseSamTransport` is unit-testable without a real Android `Context`.
+ - `notifications/TaskNotifier.kt` (interface) / `SamNotifications.kt` (real implementation): same reasoning, for `TaskMonitor`.
+ - Four screens + ViewModels: Onboarding, Pairing, Connection & device state, Task status (with live SSE event list).
+ - Navigation (`ui/navigation/SamNavGraph.kt`): loading → {onboarding | connection} → pairing → connection → task status.
+-- Task-completion notifications (`notifications/`): a notification channel, a runtime `POST_NOTIFICATIONS` request made at the point it's relevant (sending a task) rather than at launch, and an app-scoped `TaskMonitor` that keeps watching a task's events even if the user backs out of the task-status screen — so the notification can still fire. This does **not** survive the app process being killed in the background (no foreground service yet — see below); it survives navigating between screens within one app session. The terminal-status check (only notify when the task is actually done) lives in `TaskMonitor`, not guessed from SSE `phase` strings — see `TaskMonitorTest`.
+-- Manifest permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (now actually requested and used, not just declared).
++- Task-completion notifications (`notifications/`): a notification channel, a runtime `POST_NOTIFICATIONS` request made at the point it's relevant (sending a task) rather than at launch, and an app-scoped `TaskMonitor` that keeps watching a task's events even if the user backs out of the task-status screen — so the notification can still fire. It survives navigating between screens within one app session; whether it survives the app being backgrounded is what the foreground service (next item) is for — **unverified on any device**. The terminal-status check (only notify when the task is actually done) lives in `TaskMonitor`, not guessed from SSE `phase` strings — see `TaskMonitorTest`.
++- **Foreground service for in-flight tasks** (`notifications/TaskKeepAlive.kt`, `TaskWatchForegroundService.kt`, `TaskMonitor.isWatching`): when `TaskMonitor` starts watching a task it asks for a `dataSync`-type foreground service, which shows a low-importance ongoing notification (generic text — no task instruction on the lock screen) and **stops itself** as soon as the watch ends, however it ended. Goal: lower the odds that Android freezes or kills the process while the user is in another app or the screen is off. Design points that matter if you change it: the service is start-only from outside (no `stop()` — stopping from outside can race its start-up); it calls `startForeground()` first thing; it ends with `stopSelf(startId)`; `START_NOT_STICKY`; it handles Android 15's `onTimeout`. Scope note: the earlier hardening brief said *not* to implement a foreground service; this was added after "go for the next phase", and is isolated so it can be dropped (see the build report's Phase 3 addendum).
++- `TaskMonitor` hardening that came with it: every write a watch makes to shared state (snapshot, events, announcement) is made under a lock and only if that watch is still the current one, so a watch that was just replaced or stopped cannot overwrite the new watch's state; each watch is also bounded (default 30 min, **provisional**) so a stream that stays open but never finishes can't pin the service forever.
++- Manifest permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (now actually requested and used, not just declared), `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC` (the latter is required from Android 14 for a `dataSync` service; targetSdk is 35).
+ - A network security config permitting cleartext HTTP app-wide, scoped to this app's single-purpose use case and documented why (see the file itself) — the initial CIDR-based draft was wrong and was corrected after checking Android's own docs.
+ - `android:allowBackup="false"` in the manifest (paired-device info shouldn't ride along in a phone backup/restore to a different device) — this was already in place, confirmed still here during this pass. No logging anywhere in the app, so nothing to check for leaking the pairing code or address into logs.
+-- **Unit tests** (`app/src/test/`) for the three areas that don't need a real device: `HttpSseSamTransport` (pairing, connection state, task CRUD, unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (event collection, the terminal-only notification gate, watch cancellation). Written, manually traced through line by line, **never executed** — see the build report for exactly why and what that means for how much to trust them.
++- **Unit tests** (`app/src/test/`, 35 `@Test` methods): `HttpSseSamTransport` (14 — pairing, connection state, task CRUD, SSE framing incl. heartbeat lines, the finite SSE timeout, unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (21 — event collection, the terminal-only notification gate, watch cancellation, keep-alive request, `isWatching` in every way a watch can end, the cap in virtual time, stale work from a replaced/stopped watch). Type-checked against the harness; **never executed by JUnit** — see the build report. (The earlier reports' "11 / 17 tests" was a miscount; the delivered files had 12 + 6 = 18.) The `TaskMonitor` behaviours were additionally executed as 24 plain-`main` scenarios on a real coroutines runtime — see the build report, Phase 3 addendum, for what that does and doesn't establish.
++
++## Known gaps in the foreground-service work (also in the build report)
++
++- **Not run on any device or emulator.** All OS behaviour here comes from Android's documentation, not observation.
++- **Does not survive the process being killed.** `START_NOT_STICKY`, nothing persisted: a foreground service lowers the odds of being killed, it does not recover from it. vivo/iQOO's own battery managers may still kill the app; that is unmeasured.
++- **No reconnect.** If the stream drops while the task is still running, `TaskMonitor` does one status lookup, announces only if the task is already finished, and ends — the user is not told when it finishes later. The repo server supports `Last-Event-ID` replay (`interfaces/api/server.py`); a bounded reconnect loop is the natural next item.
++- **Silent when Android refuses to start the service** (e.g. Android 12+ background-start limits): the watch proceeds without keep-alive and there is no UI signal.
++- Neither the ongoing nor the completion notification has a tap action (no `contentIntent`).
++- The 60 s SSE timeout and 30 min watch cap are provisional (see above). If a future server sends no heartbeat, idle streams would be cut at 60 s and — because there is no reconnect — the watch would end without a notification.
++- Battery cost of holding a ~1 Hz-heartbeat connection open is unmeasured.
++- `TaskMonitor.stopWatching()` has no production caller yet (tests only); one task at a time.
+ 
+ ## What's deliberately not in this slice
+ 
+-- A real foreground/background service — `TaskMonitor` is application-scoped, which survives screen navigation but not the OS killing the process. Still the next queued item.
+-- Voice entry, wake-word — PDR §13 asks for both; still queued behind the service.
++- Voice entry, wake-word — PDR §13 asks for both; still queued.
+ - Light theme.
+ - Edge-to-edge inset handling per-screen (`enableEdgeToEdge()` is called in `MainActivity`, but individual screens don't yet apply `WindowInsets` padding — content may sit under system bars on some devices).
+ - A real launcher icon (also reused as the notification's small icon) — the adaptive icon uses the real sampled SAM orange with a simple placeholder mark, not a traced version of the actual logo. Swap via Android Studio's Image Asset Studio.
+@@ -71,7 +91,9 @@
+ through this environment's package manager is version 4.4.1 (2017-era, incompatible
+ with AGP 8.x regardless). So: zero Gradle syncs, zero compiles, zero lint passes, zero
+ of the new unit tests actually executed, zero installs, zero taps on a real screen —
+-all confirmed impossible from here, not just "not gotten to." If this sandbox's
++all confirmed impossible from here, not just "not gotten to." (The foreground-service
++pass added one real execution path — `TaskMonitor` run on a plain JVM against the
++project's own fakes — but that is a stand-in for the JUnit run, not the JUnit run.) If this sandbox's
+ network allowlist can be extended, adding those four hosts is what would unblock a
+ real build; otherwise this needs Android Studio, Claude Code with real network access,
+ or a real machine.
+diff -ruN a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+--- a/app/src/main/AndroidManifest.xml	2026-09-24 06:30:44.000000000 +0000
++++ b/app/src/main/AndroidManifest.xml	2026-10-15 17:23:54.802187820 +0000
+@@ -8,6 +8,16 @@
+     <!-- Requested at runtime, point-of-use (task-status notifications), not at launch. -->
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+ 
++    <!--
++      Keep-alive while a task is being watched (notifications/TaskWatchForegroundService).
++      Both are "normal" permissions — granted at install time, no runtime prompt.
++      FOREGROUND_SERVICE is required from API 28; the type-specific
++      FOREGROUND_SERVICE_DATA_SYNC is required from Android 14 (API 34) onward,
++      and we target 35.
++    -->
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
++
+     <application
+         android:name=".SamApplication"
+         android:allowBackup="false"
+@@ -27,6 +37,24 @@
+             </intent-filter>
+         </activity>
+ 
++        <!--
++          Foreground type = dataSync, chosen deliberately (Android's own
++          foreground-service-types page): dataSync is documented for fetching /
++          transferring data between the device and another endpoint over a
++          network, and has no extra runtime prerequisite. connectedDevice was
++          the other candidate — it needs one of a list of unrelated
++          permissions (Bluetooth/NFC/IR/USB/network-state-change) that this
++          app has no other reason to hold, so it would have meant requesting a
++          permission purely to satisfy the type.
++          Cost of dataSync: on Android 15+ the system caps it at 6 hours in 24
++          while backgrounded and calls Service.onTimeout() — implemented in the
++          service. Not exported: only this app can start it.
++        -->
++        <service
++            android:name=".notifications.TaskWatchForegroundService"
++            android:exported="false"
++            android:foregroundServiceType="dataSync" />
++
+     </application>
+ 
+ </manifest>
+diff -ruN a/app/src/main/java/com/samcore/android/AppContainer.kt b/app/src/main/java/com/samcore/android/AppContainer.kt
+--- a/app/src/main/java/com/samcore/android/AppContainer.kt	2026-09-26 13:11:09.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/AppContainer.kt	2026-10-16 05:18:05.080570105 +0000
+@@ -4,6 +4,7 @@
+ import com.samcore.android.data.local.DevicePrefsStore
+ import com.samcore.android.data.transport.HttpSseSamTransport
+ import com.samcore.android.data.transport.SamTransport
++import com.samcore.android.notifications.AndroidTaskKeepAlive
+ import com.samcore.android.notifications.AndroidTaskNotifier
+ import com.samcore.android.notifications.TaskMonitor
+ 
+@@ -20,7 +21,13 @@
+ 
+     // Application-scoped (not tied to any ViewModel) so a watched task keeps
+     // being observed — and can still trigger a completion notification —
+-    // across screen navigation. See TaskMonitor's own doc comment for what
+-    // this does and doesn't survive.
+-    val taskMonitor = TaskMonitor(samTransport, AndroidTaskNotifier(context))
++    // across screen navigation. AndroidTaskKeepAlive additionally asks for a
++    // foreground service while a watch is live (TaskWatchForegroundService
++    // reads taskMonitor.isWatching from this container to know when to stop).
++    // See TaskMonitor's own doc comment for what this does and doesn't survive.
++    val taskMonitor = TaskMonitor(
++        samTransport,
++        AndroidTaskNotifier(context),
++        AndroidTaskKeepAlive(context),
++    )
+ }
+diff -ruN a/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt b/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt
+--- a/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt	2026-09-26 13:10:07.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt	2026-10-16 05:18:19.376570954 +0000
+@@ -44,17 +44,35 @@
+         .writeTimeout(10, TimeUnit.SECONDS)
+         .readTimeout(15, TimeUnit.SECONDS) // regular calls only — see sseClient below
+         .build(),
++    sseReadTimeoutSeconds: Long = SSE_READ_TIMEOUT_SECONDS,
+ ) : SamTransport {
+ 
+-    // A normal read timeout is wrong for a long-lived SSE stream: PROTOCOL.md
+-    // sends heartbeat comments "during idle gaps," but nothing guarantees
+-    // they're more frequent than client's readTimeout, and a real task can
+-    // sit in one phase far longer than 15s with no new event at all. Caught
+-    // during review, not by a test — this sandbox can't run a real SSE
+-    // connection either. Regular request/response calls below keep the
+-    // timeout in [client]; only the event stream uses this one.
+-    private val sseClient = client.newBuilder()
+-        .readTimeout(0, TimeUnit.MILLISECONDS)
++    // The event stream needs its own, longer read timeout than regular calls:
++    // a real task can sit in one phase for minutes with no new *event*, so the
++    // 15s used for request/response calls would kill healthy streams. History:
++    // the first version of this fix disabled the timeout entirely (0 =
++    // infinite); that was reasonable while nothing consumed the stream except
++    // a screen, but it is wrong now that a foreground service keeps the app
++    // alive while the stream is open — a half-open connection (SAM Core's
++    // laptop closes its lid, Wi-Fi roams) would otherwise look like "SAM is
++    // working" until TaskMonitor's overall cap.
++    //
++    // The bound is justified by what the repo's server actually does, not by
++    // PROTOCOL.md (which only says heartbeats are sent "during idle gaps"
++    // with no interval): interfaces/api/server.py's event_stream() waits at
++    // most 1.0s for a new event and otherwise yields ": heartbeat" — so while
++    // the connection is healthy, bytes arrive roughly every second. 60s is
++    // ~60x that. PROVISIONAL: this is an assumption about the pre-existing
++    // (hackathon-track) server; Agent 3's contract must state a heartbeat
++    // interval, and this value must stay comfortably above it. If a future
++    // server sends no heartbeats, idle streams will be cut at this timeout
++    // and the watch will end without a completion notification.
++    //
++    // Regular request/response calls keep the timeout in [client]; only the
++    // event stream uses this one. internal (not private) only so a test can
++    // pin the setting — see HttpSseSamTransportTest.
++    internal val sseClient: OkHttpClient = client.newBuilder()
++        .readTimeout(sseReadTimeoutSeconds, TimeUnit.SECONDS)
+         .build()
+ 
+     private val json = Json { ignoreUnknownKeys = true }
+@@ -223,4 +241,9 @@
+         val eventSource = EventSources.createFactory(sseClient).newEventSource(request, listener)
+         awaitClose { eventSource.cancel() }
+     }
++
++    companion object {
++        /** See the comment on [sseClient] — provisional, derived from the repo's server, not from PROTOCOL.md. */
++        const val SSE_READ_TIMEOUT_SECONDS = 60L
++    }
+ }
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/SamNotifications.kt b/app/src/main/java/com/samcore/android/notifications/SamNotifications.kt
+--- a/app/src/main/java/com/samcore/android/notifications/SamNotifications.kt	2026-09-25 06:08:45.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/SamNotifications.kt	2026-10-15 17:24:12.160150871 +0000
+@@ -1,6 +1,7 @@
+ package com.samcore.android.notifications
+ 
+ import android.Manifest
++import android.app.Notification
+ import android.app.NotificationChannel
+ import android.app.NotificationManager
+ import android.content.Context
+@@ -21,29 +22,74 @@
+  * declaration or an earlier request means it's actually granted right now
+  * (the user can revoke it in system Settings at any time).
+  *
+- * Scope note (see the build report / README "second slice"): this fires
+- * whenever TaskMonitor is watching a task and it reaches a terminal state.
+- * TaskMonitor runs on an application-scoped coroutine, so this survives
+- * navigating between screens — it does NOT survive Android killing the app
+- * process in the background, which needs a real foreground service. Not
+- * implemented here.
++ * Scope note (see the build report / README): the completion notification
++ * fires whenever TaskMonitor is watching a task and it reaches a terminal
++ * state. TaskMonitor runs on an application-scoped coroutine, so this
++ * survives navigating between screens. While a watch is active the app also
++ * asks for a foreground service (TaskWatchForegroundService) to make it much
++ * less likely that Android freezes or kills the process mid-task — that is a
++ * best-effort priority boost, NOT a guarantee: nothing is persisted, so if the
++ * process is killed anyway (OEM battery managers can do this even to
++ * foreground services) the watch is simply lost and no completion
++ * notification is posted. Not verified on a real device yet.
++ *
++ * Two channels, deliberately separate so the user can silence one without the
++ * other: "Task updates" (completion, default importance) and "Task in
++ * progress" (the foreground service's ongoing notification, low importance —
++ * no sound, no heads-up).
+  */
+ object SamNotifications {
+     const val CHANNEL_ID = "sam_task_updates"
++    const val CHANNEL_ID_FOREGROUND = "sam_task_in_progress"
+     private const val NOTIFICATION_ID_BASE = 1000
+ 
++    /** Fixed id for the foreground service's one ongoing notification. */
++    const val ONGOING_NOTIFICATION_ID = 2000
++
++    /** Idempotent — creating a channel that already exists is a no-op. */
+     fun ensureChannel(context: Context) {
+-        val channel = NotificationChannel(
++        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
++
++        val updates = NotificationChannel(
+             CHANNEL_ID,
+             "Task updates",
+             NotificationManager.IMPORTANCE_DEFAULT,
+         ).apply {
+             description = "Lets you know when a task you sent SAM finishes."
+         }
+-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+-        manager.createNotificationChannel(channel)
++        manager.createNotificationChannel(updates)
++
++        val inProgress = NotificationChannel(
++            CHANNEL_ID_FOREGROUND,
++            "Task in progress",
++            NotificationManager.IMPORTANCE_LOW,
++        ).apply {
++            description = "Shown while the app keeps its connection to SAM Core open for a task you sent."
++        }
++        manager.createNotificationChannel(inProgress)
+     }
+ 
++    /**
++     * The foreground service's ongoing notification. Deliberately generic — it
++     * does NOT include the task's instruction text: a task can be private, and
++     * this notification can sit on the lock screen for as long as the task
++     * runs. (The completion notification below does show the result/instruction
++     * text; that is pre-existing behavior, left unchanged here.)
++     *
++     * No contentIntent yet, so tapping it does nothing — same gap as the
++     * completion notification; listed in the README's not-yet list.
++     */
++    fun buildOngoingNotification(context: Context): Notification =
++        NotificationCompat.Builder(context, CHANNEL_ID_FOREGROUND)
++            .setSmallIcon(R.drawable.ic_launcher_foreground)
++            .setContentTitle("SAM is working on your task")
++            .setContentText("Keeping the connection to SAM Core open until it finishes.")
++            .setCategory(NotificationCompat.CATEGORY_SERVICE)
++            .setPriority(NotificationCompat.PRIORITY_LOW) // pre-O only; on O+ the channel's importance rules
++            .setOngoing(true)
++            .setOnlyAlertOnce(true)
++            .build()
++
+     fun notifyTaskFinished(context: Context, snapshot: TaskSnapshot) {
+         val hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+             ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/TaskKeepAlive.kt b/app/src/main/java/com/samcore/android/notifications/TaskKeepAlive.kt
+--- a/app/src/main/java/com/samcore/android/notifications/TaskKeepAlive.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/TaskKeepAlive.kt	2026-10-17 07:18:48.033126720 +0000
+@@ -0,0 +1,62 @@
++package com.samcore.android.notifications
++
++import android.content.Context
++import androidx.core.content.ContextCompat
++
++/**
++ * Asks the OS to keep this app's process at foreground-service priority while
++ * TaskMonitor is watching a task. Extracted as an interface for the same reason
++ * as TaskNotifier: TaskMonitor stays free of Android framework classes and is
++ * unit-testable (TaskMonitorTest) with a fake that just records calls.
++ *
++ * START-ONLY ON PURPOSE — there is no stop(). Whoever stops a foreground
++ * service from the outside can race its startup. Android requires a service
++ * started with startForegroundService() to call startForeground() within "a
++ * few seconds", or the system throws ForegroundServiceDidNotStartInTimeException
++ * (Android's foreground-service troubleshooting page). Community write-ups
++ * (ProAndroidDev, "Pitfalls of a foreground Service lifecycle") report that
++ * stopping the service before it has gone foreground crashes the app the same
++ * way — reported there, not stated on the official page, so treat it as a known
++ * pitfall rather than documented behavior. Either way the safe shape is the
++ * same: the service stops *itself*, from inside, after it has gone foreground,
++ * the moment TaskMonitor.isWatching turns false (TaskWatchForegroundService).
++ * TaskMonitor's only job here is "ask for it" when a watch begins.
++ */
++interface TaskKeepAlive {
++    /**
++     * Best-effort. Must never throw: if the OS refuses (e.g. Android 12+
++     * forbids starting a foreground service while the app is in the
++     * background), the watch simply proceeds without keep-alive — task
++     * submission and live status must not depend on this succeeding.
++     */
++    fun start()
++}
++
++class AndroidTaskKeepAlive(context: Context) : TaskKeepAlive {
++    private val appContext = context.applicationContext
++
++    override fun start() {
++        try {
++            ContextCompat.startForegroundService(
++                appContext,
++                TaskWatchForegroundService.startIntent(appContext),
++            )
++        } catch (e: RuntimeException) {
++            // Deliberately broad. Every failure mode here has the same correct
++            // response — carry on without keep-alive — and the exact exception
++            // class varies by API level: ForegroundServiceStartNotAllowedException
++            // (Android 12+, app in background and not exempt; Android's
++            // "restrictions on starting foreground services from the
++            // background" page, which does not state its superclass) and
++            // SecurityException (missing foreground-service permission), plus
++            // whatever older versions use for a refused start — not enumerated
++            // here. Catching RuntimeException avoids depending on which one the
++            // running OS throws, and avoids referencing an API-31-only class
++            // from code that runs down to minSdk 26.
++            //
++            // Not logged: this app has no logging by design (see README).
++            // Consequence: if this fails there is currently no UI signal — the
++            // README lists that as a known gap.
++        }
++    }
++}
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt b/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt
+--- a/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt	2026-09-26 13:10:58.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt	2026-10-17 07:22:06.621138524 +0000
+@@ -13,31 +13,83 @@
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.catch
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.withTimeoutOrNull
+ 
+ /**
+  * Watches one task's event stream on an application-scoped coroutine — not
+  * viewModelScope — specifically so it keeps running (and can still post a
+  * completion notification) if the user navigates off the task-status screen
+  * while a task is in flight. TaskStatusViewModel reads its state instead of
+- * calling SamTransport.taskEvents() directly now.
++ * calling SamTransport.taskEvents() directly.
+  *
+- * Explicitly does NOT survive the app process being killed in the background
+- * (Doze, swipe-away, low memory) — that needs a real foreground service,
+- * which is still queued after this. One live task at a time in this slice;
+- * watching a new one cancels whatever was being watched before.
++ * KEEP-ALIVE. Each watch() asks [keepAlive] for a foreground service so Android
++ * is much less likely to freeze/kill the process while the user is in another
++ * app. [isWatching] is the single source of truth the service obeys: it stays
++ * true for exactly as long as a watch is live and goes false however the watch
++ * ends (terminal task, stream failure, cap expiry, cancellation), at which
++ * point the service stops itself. See TaskKeepAlive for why there is no
++ * stop() call from here.
+  *
+- * Takes TaskNotifier (an interface) rather than a raw Context — see that
+- * file's doc comment — so this class has no Android framework dependency at
+- * all and is fully unit-testable (TaskMonitorTest) with fakes for both
+- * SamTransport and TaskNotifier. scope is an optional constructor param for
++ * WHAT THIS DOES NOT DO — stated plainly, per PDR §18:
++ *  - It does not survive the process being killed. A foreground service lowers
++ *    the odds; nothing is persisted, and a killed process loses the watch with
++ *    no recovery on relaunch.
++ *  - It does not reconnect. If the stream ends while the task is still running
++ *    (network blip, server restart, read timeout), the watch makes one
++ *    authoritative status lookup, notifies only if that shows a terminal
++ *    status, and then ends — the user is not told the task finished later. The
++ *    server supports replay-from-seq via Last-Event-ID (interfaces/api/
++ *    server.py), so a bounded reconnect loop is the natural next step; it is
++ *    deliberately not part of this change.
++ *  - One live task at a time: watching a new one supersedes the previous.
++ *
++ * STALE WORK. Cancellation is cooperative: a watch that has just been
++ * superseded (or stopped) can still be a few instructions away from writing a
++ * lookup result or an event into the shared state, or from announcing. Every
++ * such write is therefore made under [lock] and only if the watch's generation
++ * is still the current one, so once watch()/stopWatching() has returned the old
++ * watch can no longer change [snapshot] or [events]. One deliberate exception:
++ * an announcement that was already decided at the instant a newer watch or a
++ * stop arrived is still delivered — it is true information about a task that
++ * really finished, delivered at most once, and the call into the notifier is
++ * kept outside the lock so a slow system call can never block the caller of
++ * watch() (usually the main thread).
++ *
++ * BOUNDS. A watch can never outlive [maxWatchMillis]. That is the backstop
++ * for a stream that stays open but never delivers a terminal event; the
++ * transport's own SSE read timeout is the (faster) detector for a dead
++ * connection. The default is provisional: the repo's server hard-fails a task
++ * after 600 s of execution (interfaces/api/gateway.py,
++ * DEFAULT_TASK_TIMEOUT_SECONDS) but that clock excludes time spent queued, so
++ * the cap is set well above it. Revisit once Agent 3's contract defines task
++ * timeouts and queueing.
++ *
++ * Takes TaskNotifier and TaskKeepAlive (interfaces) rather than a raw Context
++ * so this class has no Android framework dependency at all and is fully
++ * unit-testable (TaskMonitorTest). scope is an optional constructor param for
+  * the same reason: tests inject a test dispatcher instead of Dispatchers.Default.
+  */
+ class TaskMonitor(
+     private val transport: SamTransport,
+     private val notifier: TaskNotifier,
++    private val keepAlive: TaskKeepAlive,
+     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
++    private val maxWatchMillis: Long = DEFAULT_MAX_WATCH_MILLIS,
+ ) {
++    init {
++        require(maxWatchMillis > 0) { "maxWatchMillis must be positive" }
++    }
++
++    // Guards watchJob, watchGeneration, and — crucially — every "is this watch
++    // still current? / then write shared state" pair: clearing isWatching,
++    // appending an event, applying a lookup result and deciding to announce.
++    // Without it, a superseded watch finishing on a background thread could
++    // clear the flag between a newer watch() setting it and the service reading
++    // it (the service would stop while the new watch was still running), or
++    // overwrite the new watch's snapshot/events with the old task's.
++    private val lock = Any()
+     private var watchJob: Job? = null
++    private var watchGeneration = 0L
+ 
+     private val _events = MutableStateFlow<List<TaskEvent>>(emptyList())
+     val events: StateFlow<List<TaskEvent>> = _events
+@@ -45,52 +97,134 @@
+     private val _snapshot = MutableStateFlow<TaskSnapshot?>(null)
+     val snapshot: StateFlow<TaskSnapshot?> = _snapshot
+ 
+-    fun watch(initialSnapshot: TaskSnapshot) {
+-        _snapshot.value = initialSnapshot
+-        _events.value = emptyList()
+-        watchJob?.cancel()
+-        watchJob = scope.launch {
+-            transport.taskEvents(initialSnapshot.taskId)
+-                .catch { /* handled uniformly below, same as normal stream completion */ }
+-                .collect { event -> _events.value = _events.value + event }
++    private val _isWatching = MutableStateFlow(false)
++
++    /** True from watch() until that watch ends for any reason. Superseding a watch with a new one keeps it true. */
++    val isWatching: StateFlow<Boolean> = _isWatching
+ 
+-            // Reached once the stream ends — either the server closed it
+-            // after a terminal event (PROTOCOL.md's documented behavior) or
+-            // .catch above absorbed a failure. Either way, ask for the
+-            // authoritative current status rather than guessing which
+-            // "phase" string in the events meant done — notifyFinished
+-            // itself is a no-op for a non-terminal status (see
+-            // SamNotifications), so a dropped connection on a still-running
+-            // task correctly stays silent instead of falsely announcing
+-            // completion. TaskMonitorTest asserts this directly.
+-            refreshAndMaybeNotify(initialSnapshot.taskId)
++    fun watch(initialSnapshot: TaskSnapshot) {
++        val taskId = initialSnapshot.taskId
++        synchronized(lock) {
++            // Bump the generation BEFORE cancelling the old job: a cancelled
++            // job's completion handler can run synchronously inside cancel(),
++            // and it must already see that it has been superseded.
++            val generation = ++watchGeneration
++            _snapshot.value = initialSnapshot
++            _events.value = emptyList()
++            _isWatching.value = true
++            requestKeepAlive()
++            watchJob?.cancel()
++            val job = scope.launch { watchUntilDone(taskId, generation) }
++            // invokeOnCompletion rather than try/finally inside the coroutine:
++            // a job cancelled before it ever starts never enters its body, so a
++            // finally there would not run — this handler runs in every case.
++            job.invokeOnCompletion { onWatchEnded(generation) }
++            watchJob = job
+         }
+     }
+ 
+     fun stopWatching() {
+-        watchJob?.cancel()
++        synchronized(lock) {
++            // Invalidate the running watch's completion handler, clear the
++            // flag now (don't wait for a cancelled blocking call to unwind),
++            // then cancel.
++            watchGeneration++
++            _isWatching.value = false
++            watchJob?.cancel()
++        }
++    }
++
++    private fun requestKeepAlive() {
++        try {
++            keepAlive.start()
++        } catch (e: Exception) {
++            // The contract says it must not throw; this is defense in depth.
++            // Keep-alive is an optimization — watching and notifying must work
++            // without it.
++        }
++    }
++
++    private fun onWatchEnded(generation: Long) {
++        synchronized(lock) {
++            if (generation == watchGeneration) {
++                _isWatching.value = false
++            }
++        }
++    }
++
++    private suspend fun watchUntilDone(taskId: String, generation: Long) {
++        // withTimeoutOrNull swallows only its OWN timeout (returns null). If
++        // the surrounding job is cancelled — superseded or stopWatching() —
++        // the CancellationException still propagates and the lookup below is
++        // skipped, so a cancelled watch normally announces nothing; the
++        // generation checks below cover the cases where cancellation arrives
++        // too late for that to be enough.
++        withTimeoutOrNull(maxWatchMillis) {
++            transport.taskEvents(taskId)
++                .catch { /* handled uniformly below, same as normal stream completion */ }
++                .collect { event -> appendEventIfCurrent(generation, event) }
++        }
++
++        // Reached once the stream ends — the server closed it after a terminal
++        // event (PROTOCOL.md's documented behavior), .catch above absorbed a
++        // failure, or the cap expired. Either way, ask for the authoritative
++        // current status rather than guessing which "phase" string in the
++        // events meant done — a dropped connection or a cap expiry on a
++        // still-running task correctly stays silent instead of falsely
++        // announcing completion. TaskMonitorTest asserts this directly.
++        refreshAndMaybeNotify(taskId, generation)
+     }
+ 
+-    private suspend fun refreshAndMaybeNotify(taskId: String) {
++    /**
++     * The event list is read-modify-write, so it must be atomic with respect
++     * to watch(), which resets it: otherwise an event from a watch that was
++     * superseded a moment ago could be appended to the NEW watch's list.
++     */
++    private fun appendEventIfCurrent(generation: Long, event: TaskEvent) {
++        synchronized(lock) {
++            if (generation == watchGeneration) {
++                _events.value = _events.value + event
++            }
++        }
++    }
++
++    private suspend fun refreshAndMaybeNotify(taskId: String, generation: Long) {
+         val result = transport.getTask(taskId)
+-        if (result is TransportResult.Success) {
+-            _snapshot.value = result.value
+-            // The terminal check lives here — not inside the notifier — so
+-            // it's directly testable with a fake that just records whether
+-            // it was called, per TaskMonitorTest. SamNotifications keeps its
+-            // own defensive check too (defense in depth for any other
+-            // caller), but this is the gate that actually matters for
+-            // TaskMonitor's contract: a dropped connection on a still-running
+-            // task must not falsely announce completion.
+-            if (result.value.status in TERMINAL_STATUSES) {
+-                notifier.notifyFinished(result.value)
++        if (result !is TransportResult.Success) {
++            // Failure case deliberately left alone here: the UI still shows the
++            // last-known snapshot/events either way, same as before this change.
++            return
++        }
++        val latest = result.value
++
++        // Decide under the lock; call out after releasing it. A lookup result
++        // that arrives after this watch was superseded or stopped is dropped
++        // entirely — it must neither overwrite the newer watch's snapshot nor
++        // announce.
++        val announce = synchronized(lock) {
++            if (generation != watchGeneration) {
++                false
++            } else {
++                _snapshot.value = latest
++                // The terminal check lives here — not inside the notifier — so
++                // it's directly testable with a fake that just records whether
++                // it was called, per TaskMonitorTest. SamNotifications keeps its
++                // own defensive check too (defense in depth for any other
++                // caller), but this is the gate that actually matters for
++                // TaskMonitor's contract: a dropped connection on a still-running
++                // task must not falsely announce completion.
++                latest.status in TERMINAL_STATUSES
+             }
+         }
+-        // Failure case deliberately left alone here: the UI still shows the
+-        // last-known snapshot/events either way, same as before this change.
++        if (announce) {
++            notifier.notifyFinished(latest)
++        }
+     }
+ 
+-    private companion object {
+-        val TERMINAL_STATUSES = setOf(TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
++    companion object {
++        /** Provisional — see the class doc's BOUNDS section. */
++        const val DEFAULT_MAX_WATCH_MILLIS = 30 * 60 * 1000L
++
++        private val TERMINAL_STATUSES = setOf(TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+     }
+ }
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt b/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt
+--- a/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt	2026-10-16 05:17:00.864566287 +0000
+@@ -0,0 +1,104 @@
++package com.samcore.android.notifications
++
++import android.app.Service
++import android.content.Context
++import android.content.Intent
++import android.content.pm.ServiceInfo
++import android.os.IBinder
++import androidx.core.app.ServiceCompat
++import com.samcore.android.SamApplication
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withTimeoutOrNull
++
++/**
++ * A "dumb" keep-alive. It does no networking and holds no task state — the
++ * actual watching stays in the application-scoped TaskMonitor. This service
++ * exists only so that, while TaskMonitor reports isWatching == true, Android
++ * sees a foreground service in this process and is much less likely to freeze
++ * or kill it when the user switches apps or locks the screen mid-task.
++ *
++ * LIFECYCLE — three rules, each there to prevent a specific failure:
++ *
++ * 1. startForeground() is the FIRST thing onStartCommand does. A service
++ *    started with startForegroundService() must go foreground promptly or the
++ *    system crashes the app; nothing else here may delay it.
++ *
++ * 2. The service stops ITSELF (never stopped from outside — see TaskKeepAlive)
++ *    when TaskMonitor.isWatching becomes false, however the watch ended:
++ *    terminal task, stream failure, cap expiry, cancellation. It uses
++ *    stopSelf(startId), so if a newer start command arrived in the meantime
++ *    (a second task began as the first one ended) the stop request for the old
++ *    one is ignored by the system instead of killing the new watch.
++ *
++ * 3. A hard lifetime cap backs rule 2 up. If isWatching were ever stuck true
++ *    through a bug, the service still ends — at TaskMonitor's own cap plus a
++ *    minute of slack — instead of showing "working" forever. On Android 15+
++ *    the OS also caps dataSync services (6 hours in 24 while backgrounded) and
++ *    calls onTimeout(); the service must stop within a few seconds of that or
++ *    the system throws (Android's foreground-service-timeouts page).
++ *
++ * START_NOT_STICKY: if the process is killed, the system must NOT recreate
++ * this service — the in-memory TaskMonitor state is gone, so there would be
++ * nothing to watch. This is the honest boundary of the feature: it lowers the
++ * odds of being killed; it does not recover from being killed.
++ *
++ * Provisional/unverified: compiled against a stub harness only, never run on a
++ * device. See the build report's phase-3 addendum for the device test list.
++ */
++class TaskWatchForegroundService : Service() {
++
++    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
++    private var lifetimeJob: Job? = null
++
++    override fun onBind(intent: Intent?): IBinder? = null
++
++    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        // Rule 1. ensureChannel is a cheap, idempotent guard (not "extra"):
++        // SamApplication creates the channels once at process start, but the
++        // user can delete a notification channel in system Settings at any
++        // time after that — and startForeground() with a notification on a
++        // missing channel crashes the app on API 26+.
++        SamNotifications.ensureChannel(this)
++        ServiceCompat.startForeground(
++            this,
++            SamNotifications.ONGOING_NOTIFICATION_ID,
++            SamNotifications.buildOngoingNotification(this),
++            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
++        )
++
++        // Rules 2 and 3. A repeated start command (second watch while this
++        // service is still up) replaces the previous waiter.
++        val monitor = (application as SamApplication).container.taskMonitor
++        lifetimeJob?.cancel()
++        lifetimeJob = serviceScope.launch {
++            withTimeoutOrNull(MAX_SERVICE_LIFETIME_MILLIS) {
++                monitor.isWatching.first { watching -> !watching }
++            }
++            stopSelf(startId)
++        }
++        return START_NOT_STICKY
++    }
++
++    /** Android 15+ (API 35) only; never called on older versions. */
++    override fun onTimeout(startId: Int, fgsType: Int) {
++        stopSelf()
++    }
++
++    override fun onDestroy() {
++        serviceScope.cancel()
++        super.onDestroy()
++    }
++
++    companion object {
++        /** TaskMonitor's own cap plus slack, so the monitor's cap is the normal path and this is the backstop. */
++        const val MAX_SERVICE_LIFETIME_MILLIS = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS + 60_000L
++
++        fun startIntent(context: Context): Intent = Intent(context, TaskWatchForegroundService::class.java)
++    }
++}
+diff -ruN a/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt b/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt
+--- a/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt	2026-09-26 13:12:41.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt	2026-10-16 05:20:15.016577828 +0000
+@@ -2,6 +2,7 @@
+ 
+ import com.samcore.android.fakes.FakePairedDeviceStore
+ import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.flow.toList
+ import kotlinx.coroutines.test.runTest
+ import okhttp3.mockwebserver.MockResponse
+ import okhttp3.mockwebserver.MockWebServer
+@@ -178,6 +179,42 @@
+         assertTrue(transport.cancelTask("t-1") is TransportResult.Failure)
+     }
+ 
++    // --- taskEvents() (SSE) ---------------------------------------------------
++
++    @Test
++    fun `taskEvents emits parsed events and completes when the server ends the stream`() = runTest {
++        pairSuccessfully()
++        // Framing per interfaces/api/server.py's _format_sse(): "id: <seq>" then
++        // "data: <json>", with ": heartbeat" comment lines during idle gaps —
++        // those must be ignored, not surfaced as events. "seq" is an extra field
++        // the app's TaskEvent model doesn't declare (ignoreUnknownKeys covers it).
++        val body = "id: 1\n" +
++            """data: {"type":"execution.step","task_id":"t-1","seq":1,"phase":"planning","message":"Planning","timestamp":"2026-01-01T00:00:00"}""" + "\n\n" +
++            ": heartbeat\n\n" +
++            "id: 2\n" +
++            """data: {"type":"execution.step","task_id":"t-1","seq":2,"phase":"completed","message":"Done","timestamp":"2026-01-01T00:00:01"}""" + "\n\n"
++        server.enqueue(
++            MockResponse().setResponseCode(200)
++                .setHeader("Content-Type", "text/event-stream")
++                .setBody(body),
++        )
++
++        val events = transport.taskEvents("t-1").toList()
++
++        assertEquals(listOf("planning", "completed"), events.map { it.phase })
++        assertEquals("Done", events.last().message)
++    }
++
++    @Test
++    fun `the SSE client has a finite read timeout`() {
++        // An infinite (0) read timeout would let a half-open connection hold the
++        // foreground service open until TaskMonitor's cap. This pins the setting;
++        // it does not (cannot, here) exercise a real stalled connection.
++        val millis = transport.sseClient.readTimeoutMillis
++        assertTrue("SSE read timeout must be finite", millis > 0)
++        assertEquals(HttpSseSamTransport.SSE_READ_TIMEOUT_SECONDS * 1_000, millis.toLong())
++    }
++
+     // --- unpair() -----------------------------------------------------------
+ 
+     @Test
+diff -ruN a/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt b/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt
+--- a/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt	2026-09-27 17:44:59.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt	2026-10-16 23:59:57.763030659 +0000
+@@ -7,10 +7,13 @@
+ import com.samcore.android.data.transport.TaskRequest
+ import com.samcore.android.data.transport.TaskSnapshot
+ import com.samcore.android.data.transport.TransportResult
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.NonCancellable
+ import kotlinx.coroutines.awaitCancellation
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.flow
++import kotlinx.coroutines.withContext
+ 
+ /**
+  * Controllable SamTransport for tests. Every method is scriptable via a
+@@ -36,6 +39,25 @@
+     var taskEventsToEmit: List<TaskEvent> = emptyList()
+     var taskEventsError: Throwable? = null
+     var taskEventsNeverCompletesForId: String? = null
++
++    /** Same as [taskEventsNeverCompletesForId] but for any number of task ids at once
++     *  (needed to test a second watch superseding a first while BOTH streams stay open). */
++    val taskEventsNeverCompleteForIds = mutableSetOf<String>()
++
++    /** When set, replaces taskEvents() entirely — lets a test hand TaskMonitor a
++     *  stream it controls (e.g. a SharedFlow it can emit into at an exact moment). */
++    var taskEventsOverride: ((taskId: String) -> Flow<TaskEvent>)? = null
++
++    /** When set, getTask() stops here until the gate is completed — and waits
++     *  NON-cancellably, so the answer still comes back even if the watch that
++     *  asked was cancelled meanwhile. That models the narrow real-world window
++     *  in which a lookup has already returned by the time its coroutine would
++     *  have noticed the cancellation. [getTaskReachedGate] completes as soon as
++     *  a call is waiting, so a test can tell "the lookup is in flight" from
++     *  "it never got there". */
++    var getTaskGate: CompletableDeferred<Unit>? = null
++    val getTaskReachedGate = CompletableDeferred<Unit>()
++
+     var lastRequestedTaskEventsId: String? = null
+     var lastGetTaskId: String? = null
+ 
+@@ -58,17 +80,24 @@
+ 
+     override suspend fun getTask(taskId: String): TransportResult<TaskSnapshot> {
+         lastGetTaskId = taskId
++        getTaskGate?.let { gate ->
++            getTaskReachedGate.complete(Unit)
++            withContext(NonCancellable) { gate.await() }
++        }
+         return if (getTaskResults.isNotEmpty()) getTaskResults.removeFirst() else TransportResult.Failure("no more results queued")
+     }
+ 
+-    override fun taskEvents(taskId: String): Flow<TaskEvent> = flow {
++    override fun taskEvents(taskId: String): Flow<TaskEvent> {
+         lastRequestedTaskEventsId = taskId
+-        for (event in taskEventsToEmit) {
+-            emit(event)
+-        }
+-        taskEventsError?.let { throw it }
+-        if (taskId == taskEventsNeverCompletesForId) {
+-            awaitCancellation()
++        taskEventsOverride?.let { return it(taskId) }
++        return flow {
++            for (event in taskEventsToEmit) {
++                emit(event)
++            }
++            taskEventsError?.let { throw it }
++            if (taskId == taskEventsNeverCompletesForId || taskId in taskEventsNeverCompleteForIds) {
++                awaitCancellation()
++            }
+         }
+     }
+ 
+diff -ruN a/app/src/test/java/com/samcore/android/fakes/FakeTaskKeepAlive.kt b/app/src/test/java/com/samcore/android/fakes/FakeTaskKeepAlive.kt
+--- a/app/src/test/java/com/samcore/android/fakes/FakeTaskKeepAlive.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/fakes/FakeTaskKeepAlive.kt	2026-10-16 23:59:49.831030187 +0000
+@@ -0,0 +1,27 @@
++package com.samcore.android.fakes
++
++import com.samcore.android.notifications.TaskKeepAlive
++
++/**
++ * Records start() calls instead of touching a Service. [failWith] makes start()
++ * throw, to prove TaskMonitor tolerates a keep-alive that violates its
++ * "must never throw" contract (the real one catches, but TaskMonitor does not
++ * rely on that).
++ *
++ * [onStart] runs inside start(), with the call number, BEFORE any failure is
++ * thrown. TaskMonitor calls start() from inside watch() while the previous watch
++ * is still live, so a test can use it to make something happen in exactly that
++ * window (see TaskMonitorTest: "an event delivered to a superseded watch ...").
++ */
++class FakeTaskKeepAlive(private val failWith: RuntimeException? = null) : TaskKeepAlive {
++    var startCount = 0
++        private set
++
++    var onStart: ((callNumber: Int) -> Unit)? = null
++
++    override fun start() {
++        startCount++
++        onStart?.invoke(startCount)
++        failWith?.let { throw it }
++    }
++}
+diff -ruN a/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt b/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt
+--- a/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt	2026-09-27 17:45:07.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt	2026-10-17 00:02:12.995038697 +0000
+@@ -5,11 +5,20 @@
+ import com.samcore.android.data.transport.TaskStatus
+ import com.samcore.android.data.transport.TransportResult
+ import com.samcore.android.fakes.FakeSamTransport
++import com.samcore.android.fakes.FakeTaskKeepAlive
+ import com.samcore.android.fakes.FakeTaskNotifier
++import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.awaitCancellation
++import kotlinx.coroutines.flow.MutableSharedFlow
++import kotlinx.coroutines.flow.flow
++import kotlinx.coroutines.test.TestCoroutineScheduler
+ import kotlinx.coroutines.test.UnconfinedTestDispatcher
+ import kotlinx.coroutines.test.runTest
+ import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ 
+@@ -28,11 +37,27 @@
+  * TaskStatusViewModel holds a job that clearing it would cancel — an
+  * architectural fact to verify by reading AppContainer.kt and
+  * TaskStatusViewModel.kt together, not a thing this file asserts.
++ *
++ * The keep-alive / isWatching / cap tests below were added with the foreground
++ * service. The two cap tests use a TestCoroutineScheduler passed explicitly to
++ * the monitor's dispatcher so time is virtual — they advance that scheduler by
++ * hand rather than waiting. The "stale work" tests came out of running the real
++ * TaskMonitor on real threads, which showed a lookup result from a just-replaced
++ * watch could still overwrite the new watch's snapshot; they force that window
++ * deterministically (gates / a hook in the keep-alive call) instead of relying on
++ * timing. Like everything in this file they have been type-checked but NEVER
++ * executed by JUnit (see the build report).
+  */
++@OptIn(ExperimentalCoroutinesApi::class)
+ class TaskMonitorTest {
+ 
+-    private fun taskMonitor(transport: FakeSamTransport, notifier: FakeTaskNotifier): TaskMonitor =
+-        TaskMonitor(transport, notifier, CoroutineScope(UnconfinedTestDispatcher()))
++    private fun taskMonitor(
++        transport: FakeSamTransport,
++        notifier: FakeTaskNotifier,
++        keepAlive: TaskKeepAlive = FakeTaskKeepAlive(),
++        scope: CoroutineScope = CoroutineScope(UnconfinedTestDispatcher()),
++        maxWatchMillis: Long = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS,
++    ): TaskMonitor = TaskMonitor(transport, notifier, keepAlive, scope, maxWatchMillis)
+ 
+     private fun snapshot(status: TaskStatus, taskId: String = "t-1") = TaskSnapshot(
+         taskId = taskId,
+@@ -134,4 +159,285 @@
+         assertEquals("t-2", transport.lastGetTaskId)
+         assertEquals("t-2", monitor.snapshot.value?.taskId)
+     }
++
++    // --- keep-alive request + isWatching (the flag the foreground service obeys) ---
++
++    @Test
++    fun `isWatching is false before any watch and no keep-alive has been requested`() {
++        val keepAlive = FakeTaskKeepAlive()
++        val monitor = taskMonitor(FakeSamTransport(), FakeTaskNotifier(), keepAlive)
++
++        assertFalse(monitor.isWatching.value)
++        assertEquals(0, keepAlive.startCount)
++    }
++
++    @Test
++    fun `each watch requests the keep-alive once`() = runTest {
++        val keepAlive = FakeTaskKeepAlive()
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED, taskId = "t-1")))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED, taskId = "t-2")))
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier(), keepAlive)
++
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-1"))
++        assertEquals(1, keepAlive.startCount)
++
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2"))
++        assertEquals(2, keepAlive.startCount)
++    }
++
++    @Test
++    fun `isWatching is true while the stream is still open`() = runTest {
++        val transport = FakeSamTransport().apply { taskEventsNeverCompletesForId = "t-1" }
++        val monitor = taskMonitor(transport, FakeTaskNotifier())
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        assertTrue(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `isWatching goes false once the task is terminal`() = runTest {
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier())
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `isWatching goes false when the stream drops on a task that is still running`() = runTest {
++        // The zombie-service case: the watch ends but the task is NOT terminal,
++        // so nothing would ever flip a "terminal reached" flag. The service
++        // must still be released.
++        val transport = FakeSamTransport().apply {
++            taskEventsError = java.io.IOException("connection dropped")
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier)
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        assertFalse(monitor.isWatching.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++    }
++
++    @Test
++    fun `isWatching goes false even when the follow-up lookup fails`() = runTest {
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Failure("unreachable"))
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier())
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `replacing a watch keeps isWatching true`() = runTest {
++        // Both streams stay open, so only the supersede logic can end the
++        // first. Its cancellation completes straight away (Unconfined) — if
++        // that completion cleared the flag, the service would stop while the
++        // second task was still being watched.
++        val transport = FakeSamTransport().apply {
++            taskEventsNeverCompleteForIds += setOf("t-1", "t-2")
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier())
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING, taskId = "t-1"))
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2"))
++
++        assertTrue(monitor.isWatching.value)
++        assertEquals("t-2", monitor.snapshot.value?.taskId)
++        assertNull(transport.lastGetTaskId) // the superseded watch must not run a lookup
++    }
++
++    @Test
++    fun `stopWatching clears isWatching and announces nothing`() = runTest {
++        val transport = FakeSamTransport().apply { taskEventsNeverCompletesForId = "t-1" }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier)
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        monitor.stopWatching()
++
++        assertFalse(monitor.isWatching.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++        assertNull(transport.lastGetTaskId)
++    }
++
++    @Test
++    fun `a keep-alive that throws does not stop the watch`() = runTest {
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val keepAlive = FakeTaskKeepAlive(failWith = IllegalStateException("background start not allowed"))
++        val monitor = taskMonitor(transport, notifier, keepAlive)
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++
++        assertEquals(1, keepAlive.startCount)
++        assertEquals(1, notifier.notifiedSnapshots.size) // watching and notifying still worked
++        assertFalse(monitor.isWatching.value)
++    }
++
++    // --- stale work from a watch that has been superseded or stopped ----------------
++    //
++    // Cancellation is cooperative, so a watch can still deliver a lookup result or
++    // an event a moment after it was replaced. These tests force exactly that and
++    // check it cannot touch the newer watch's state. The gate-based ones hold the
++    // old watch inside its lookup (FakeSamTransport.getTaskGate, which answers
++    // even if the caller was cancelled meanwhile). getTaskResults being empty at the
++    // end proves the stale answer really was fetched, i.e. the test is not
++    // passing only because the lookup never ran.
++
++    @Test
++    fun `a lookup that is slow but still current is applied and announced`() = runTest {
++        // Control for the next two tests: same gate, no supersede.
++        val gate = CompletableDeferred<Unit>()
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++            getTaskGate = gate
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier)
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++        assertTrue(monitor.isWatching.value)
++        gate.complete(Unit)
++
++        assertEquals(TaskStatus.COMPLETED, monitor.snapshot.value?.status)
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `a lookup result that arrives after the watch was superseded is dropped`() = runTest {
++        val gate = CompletableDeferred<Unit>()
++        val transport = FakeSamTransport().apply {
++            taskEventsNeverCompleteForIds += "t-2"
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED, taskId = "t-1")))
++            getTaskGate = gate
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier)
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING, taskId = "t-1")) // its stream ends at once, then it waits inside the lookup
++        assertTrue(transport.getTaskReachedGate.isCompleted)
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2")) // supersedes it mid-lookup
++        gate.complete(Unit) // the stale answer arrives anyway
++
++        assertTrue(transport.getTaskResults.isEmpty())
++        assertEquals("t-2", monitor.snapshot.value?.taskId) // not overwritten by t-1's COMPLETED snapshot
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++        assertTrue(monitor.isWatching.value) // t-2 is still being watched
++    }
++
++    @Test
++    fun `a lookup result that arrives after stopWatching is dropped`() = runTest {
++        val gate = CompletableDeferred<Unit>()
++        val transport = FakeSamTransport().apply {
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++            getTaskGate = gate
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier)
++        val initial = snapshot(TaskStatus.EXECUTING)
++
++        monitor.watch(initial)
++        assertTrue(transport.getTaskReachedGate.isCompleted)
++        monitor.stopWatching()
++        gate.complete(Unit)
++
++        assertTrue(transport.getTaskResults.isEmpty())
++        assertEquals(initial, monitor.snapshot.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `an event delivered to a superseded watch is not appended to the new watch's list`() = runTest {
++        // watch() has already reset the event list when it calls keepAlive.start(),
++        // yet the old watch is not cancelled until a few lines later. Make the old
++        // stream deliver an event right in that gap.
++        val oldStream = MutableSharedFlow<TaskEvent>(extraBufferCapacity = 1)
++        val transport = FakeSamTransport().apply {
++            taskEventsOverride = { id -> if (id == "t-1") oldStream else flow<TaskEvent> { awaitCancellation() } }
++        }
++        val keepAlive = FakeTaskKeepAlive()
++        val monitor = taskMonitor(transport, FakeTaskNotifier(), keepAlive)
++        keepAlive.onStart = { call ->
++            if (call == 2) {
++                oldStream.tryEmit(TaskEvent(type = "progress", taskId = "t-1", phase = "executing", message = "late"))
++            }
++        }
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING, taskId = "t-1"))
++        assertEquals(1, oldStream.subscriptionCount.value) // the old watch really is collecting
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2"))
++
++        assertTrue(monitor.events.value.isEmpty())
++    }
++
++    // --- the cap (virtual time) ---------------------------------------------------
++
++    @Test
++    fun `a stream that never ends is abandoned at the cap and a still-running task stays silent`() {
++        val scheduler = TestCoroutineScheduler()
++        val transport = FakeSamTransport().apply {
++            taskEventsNeverCompletesForId = "t-1"
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(
++            transport,
++            notifier,
++            scope = CoroutineScope(UnconfinedTestDispatcher(scheduler)),
++            maxWatchMillis = 1_000,
++        )
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++        assertTrue(monitor.isWatching.value)
++
++        scheduler.advanceTimeBy(999)
++        scheduler.runCurrent()
++        assertTrue(monitor.isWatching.value) // one millisecond short of the cap
++
++        scheduler.advanceTimeBy(2)
++        scheduler.runCurrent()
++        assertFalse(monitor.isWatching.value)
++        assertEquals("t-1", transport.lastGetTaskId) // the authoritative lookup still ran
++        assertTrue(notifier.notifiedSnapshots.isEmpty()) // task is still EXECUTING: silent
++    }
++
++    @Test
++    fun `at the cap a task that turned out to be finished is still announced`() {
++        val scheduler = TestCoroutineScheduler()
++        val transport = FakeSamTransport().apply {
++            taskEventsNeverCompletesForId = "t-1" // e.g. the terminal event was lost on a flaky link
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(
++            transport,
++            notifier,
++            scope = CoroutineScope(UnconfinedTestDispatcher(scheduler)),
++            maxWatchMillis = 1_000,
++        )
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING))
++        scheduler.advanceTimeBy(1_001)
++        scheduler.runCurrent()
++
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.first().status)
++        assertFalse(monitor.isWatching.value)
++    }
+ }

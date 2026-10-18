@@ -18,6 +18,16 @@ declare module "@tauri-apps/api/window" {
   export function getCurrentWindow(): TauriWindow;
 }
 
+declare module "@tauri-apps/api/event" {
+  export interface TauriEvent<T> {
+    payload: T;
+  }
+  export function listen<T>(
+    event: string,
+    handler: (event: TauriEvent<T>) => void,
+  ): Promise<() => void>;
+}
+
 // Shape confirmed against the plugin's published guest-js source
 // (tauri-apps/plugins-workspace, v2 branch) — isPermissionGranted checks
 // window.Notification.permission directly when it's not "default",

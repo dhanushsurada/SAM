@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Talking to SAM Core (desktop) over the local network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Requested at runtime, point-of-use (task-status notifications), not at launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Keep-alive while a task is being watched (notifications/TaskWatchForegroundService).
+      Both are "normal" permissions — granted at install time, no runtime prompt.
+      FOREGROUND_SERVICE is required from API 28; the type-specific
+      FOREGROUND_SERVICE_DATA_SYNC is required from Android 14 (API 34) onward,
+      and we target 35.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <application
+        android:name=".SamApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Sam"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Sam">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Foreground type = dataSync, chosen deliberately (Android's own
+          foreground-service-types page): dataSync is documented for fetching /
+          transferring data between the device and another endpoint over a
+          network, and has no extra runtime prerequisite. connectedDevice was
+          the other candidate — it needs one of a list of unrelated
+          permissions (Bluetooth/NFC/IR/USB/network-state-change) that this
+          app has no other reason to hold, so it would have meant requesting a
+          permission purely to satisfy the type.
+          Cost of dataSync: on Android 15+ the system caps it at 6 hours in 24
+          while backgrounded and calls Service.onTimeout() — implemented in the
+          service. Not exported: only this app can start it.
+        -->
+        <service
+            android:name=".notifications.TaskWatchForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+    </application>
+
+</manifest>

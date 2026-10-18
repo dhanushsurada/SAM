@@ -31,14 +31,14 @@ class PullGateway:
 
 class ModelPullRouteTests(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(server.app)
+        self.client = TestClient(server.app, client=("127.0.0.1", 12345))
 
     def test_streams_progress_and_terminal_success(self):
         with patch.object(server, "get_gateway", return_value=PullGateway()):
             response = self.client.post("/api/models/pull", json={"model": "qwen3:4b"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn('"status":"pulling manifest"', response.text)
-        self.assertIn('"status":"success"', response.text)
+        self.assertIn('"status": "pulling manifest"', response.text.replace('": "', '":"').replace('":"', '": "'))
+        self.assertIn('"status": "success"', response.text.replace('": "', '":"').replace('":"', '": "'))
         self.assertEqual(response.headers["content-type"].split(";")[0], "text/event-stream")
 
     def test_rejects_pull_while_gateway_is_busy(self):
