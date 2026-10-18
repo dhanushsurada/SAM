@@ -33,13 +33,31 @@ Expect a handful of normal first-run issues after that — a hand-authored
 scaffold that's never seen a real `npm install` typically needs a small
 amount of settling, same as any fresh project would.
 
+(`src/types/tauri-shim.d.ts` is the same idea, scoped to `@tauri-apps/api`
+instead of React — see `src-tauri/NATIVE_SHELL_NOTES.md`. Delete it the
+same way, at the same point.)
+
 ## What this app is
 
-A web UI served by Vite in a browser tab — there is no native desktop shell
-(Electron/Tauri) yet, and this pass didn't add one. What changed is the
-product structure: SAM is the product, the Brain and Hands are what it's
-made of, and the iQOO workspace is one workflow built on them. The browser
-is a single card on the Hands page, not the frame around the app.
+A web UI served by Vite in a browser tab, now also loadable inside a native
+macOS shell — see `src-tauri/` and `src-tauri/NATIVE_SHELL_NOTES.md`. The
+shell wraps this same app; it doesn't fork it. What changed with Phase 5
+was the product structure: SAM is the product, the Brain and Hands are what
+it's made of, and the iQOO workspace is one workflow built on them. The
+browser is a single card on the Hands page, not the frame around the app —
+and now, running natively, there is no browser frame around it at all.
+
+## Native shell (Agent 1 — `agent/desktop-product`)
+
+A Tauri v2 scaffold in `src-tauri/` wraps this app for macOS: native
+window, Dock/menu-bar-resident lifecycle, a tray icon, a global-shortcut
+Quick Assistant window (`src/features/quick-assistant/`), and a real
+notification bridge (`src/lib/native.ts`). Written with no `cargo`/`rustc`
+or macOS available to compile or run it — needs a real `cargo check`
+before anything else. Full status, the framework decision and why, the
+permissions matrix, and what's still open are all in
+`src-tauri/NATIVE_SHELL_NOTES.md` — read that before extending this layer
+further.
 
 ## What's real vs. demo right now
 
@@ -97,4 +115,6 @@ solid first pass.
 **Not done, and not pretended to be:** every backend endpoint this UI
 would need to stop being a demo is listed with request/response shape and
 priority in `PHASE5_PLAN.md` §F. Nothing in this app claims a capability
-the repository doesn't actually have.
+the repository doesn't actually have — the same rule now applies to
+`src-tauri/`: see its own notes for exactly what's implemented, what's
+unverified, and what's simply not started.

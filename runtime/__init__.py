@@ -23,6 +23,10 @@ runtime.lifecycle.specs.default_specs().
 from runtime.health.status import RuntimeStatus
 from runtime.lifecycle.manager import SAMRuntime
 from runtime.lifecycle.specs import ProcessSpec, default_specs
-from runtime.ollama import OllamaManager
+from runtime.ollama.manager import OllamaManager
+from runtime.setup_state import read_setup_state, write_setup_state, VALID_STATES as SETUP_STATES
 
-__all__ = ["SAMRuntime", "ProcessSpec", "default_specs", "RuntimeStatus", "OllamaManager"]
+__all__ = [
+    "SAMRuntime", "ProcessSpec", "default_specs", "RuntimeStatus", "OllamaManager",
+    "read_setup_state", "write_setup_state", "SETUP_STATES",
+]

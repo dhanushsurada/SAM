@@ -723,6 +723,74 @@ def cmd_sync_status():
     print("────────────────────────────────────────────\n")
 
 
+# ─── Ollama (Phase C4) ──────────────────────────────────────────────────────
+#
+# Added while wiring the Tauri bridge: ollama_status/ollama_start need a
+# subprocess-invokable entry point the same way status/start/stop/restart
+# already have one, and nothing exposed OllamaManager as a subcommand yet
+# -- Phase C2 only reached it via direct Python import (see
+# tests/test_runtime_bridge_offline.py). Both actions, not a separate
+# subcommand per action, mirroring start/stop/restart's own "one
+# subcommand, an argument picks the action" shape rather than inventing a
+# different one for just this.
+
+def cmd_ollama(action: str, json_output: bool = False):
+    from runtime import OllamaManager
+    from config.settings import Settings
+    try:
+        settings = Settings()
+        host = settings.ollama_host
+    except Exception:
+        host = "http://localhost:11434"
+
+    mgr = OllamaManager(host)
+    result = mgr.status() if action == "status" else mgr.start()
+
+    if json_output:
+        ok = result.get("state") == "READY" if action == "status" else result.get("ok", False)
+        return _emit_json(result, 0 if ok else 1)
+
+    if action == "status":
+        icon = {"READY": "✅", "STOPPED": "⚠️ ", "NOT_INSTALLED": "❌"}.get(result["state"], "❓")
+        print(f"{icon} Ollama: {result['state']} — {result['detail']}")
+    else:
+        icon = "✅" if result["ok"] else "❌"
+        print(f"{icon} {result['message']}")
+    ok = result.get("state") == "READY" if action == "status" else result.get("ok", False)
+    return 0 if ok else 1
+
+
+# ─── Setup state (Phase C7) ─────────────────────────────────────────────────
+#
+# A thin CLI face on runtime.setup_state, the same way `ollama` above is a
+# thin face on OllamaManager -- Python stays the one place that knows what
+# a valid state is and how the file is laid out; Rust (runtime.rs) only
+# ever shells out here rather than reading/writing the JSON file itself,
+# so that knowledge has exactly one home even though the file itself is
+# "just JSON" and Rust could technically touch it directly.
+
+def cmd_setup_state(action: str, state: str = None, model: str = None, json_output: bool = False):
+    from runtime import read_setup_state, write_setup_state
+
+    if action == "get":
+        result = read_setup_state()
+    else:
+        try:
+            result = write_setup_state(state, selected_model=model)
+        except ValueError as e:
+            if json_output:
+                return _emit_json({"error": str(e)}, 1)
+            print(f"❌ {e}")
+            return 1
+
+    if json_output:
+        return _emit_json(result, 0)
+
+    print(f"Setup state: {result['state']}"
+          + (f" (model: {result['selected_model']})" if result["selected_model"] else ""))
+    return 0
+
+
 # ─── Reset ────────────────────────────────────────────────────────────────
 
 def cmd_reset_memory():
@@ -775,6 +843,16 @@ def main():
         p.add_argument("--json", action="store_true", help="Machine-readable output")
     doctor_p = subparsers.add_parser("doctor")
     doctor_p.add_argument("--json", action="store_true", help="Machine-readable output")
+
+    ollama_p = subparsers.add_parser("ollama")
+    ollama_p.add_argument("action", choices=["status", "start"])
+    ollama_p.add_argument("--json", action="store_true", help="Machine-readable output (Phase C4)")
+
+    setup_p = subparsers.add_parser("setup-state")
+    setup_p.add_argument("action", choices=["get", "set"])
+    setup_p.add_argument("--state", choices=["first_run", "in_progress", "complete"], default=None)
+    setup_p.add_argument("--model", default=None, help="Model selected during onboarding, if any")
+    setup_p.add_argument("--json", action="store_true", help="Machine-readable output (Phase C7)")
 
     founder_p = subparsers.add_parser("founder")
     founder_p.add_argument("--all", action="store_true", dest="show_all",
@@ -835,6 +913,16 @@ def main():
             raise SystemExit(code)
     elif args.command == "doctor":
         code = cmd_doctor(json_output=args.json)
+        if args.json:
+            raise SystemExit(code)
+    elif args.command == "ollama":
+        code = cmd_ollama(args.action, json_output=args.json)
+        if args.json:
+            raise SystemExit(code)
+    elif args.command == "setup-state":
+        if args.action == "set" and not args.state:
+            parser.error("setup-state set requires --state")
+        code = cmd_setup_state(args.action, state=args.state, model=args.model, json_output=args.json)
         if args.json:
             raise SystemExit(code)
     elif args.command in commands:

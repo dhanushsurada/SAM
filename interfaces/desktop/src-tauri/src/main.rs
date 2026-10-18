@@ -32,6 +32,8 @@
 //   - Re-shows the main window on Dock-icon reopen, the standard macOS
 //     convention for apps that hide-rather-than-quit on window close.
 
+mod runtime;
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -90,7 +92,20 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_quick_assistant])
+        .invoke_handler(tauri::generate_handler![
+            hide_quick_assistant,
+            runtime::runtime_status,
+            runtime::runtime_start,
+            runtime::runtime_stop,
+            runtime::runtime_restart,
+            runtime::ollama_status,
+            runtime::ollama_start,
+            runtime::setup_state_get,
+            runtime::setup_state_set,
+            runtime::models_list,
+            runtime::model_select,
+            runtime::model_pull,
+        ])
         .setup(|app| {
             // Registered at runtime rather than only declared, so a
             // failure (shortcut already bound to another app) is visible
