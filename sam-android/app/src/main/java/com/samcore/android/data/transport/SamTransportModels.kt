@@ -2,6 +2,7 @@ package com.samcore.android.data.transport
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Shapes in this file are a v0 working assumption, not a frozen contract.
@@ -70,6 +71,23 @@ data class TaskEvent(
     val phase: String,
     val message: String,
     val timestamp: String? = null,
+    /**
+     * Position of this event in its task's history: the cursor for resuming a
+     * dropped stream (SamTransport.taskEvents' afterSeq). The repo's server
+     * numbers a task's events 1, 2, 3 … with no gaps (interfaces/api/events.py)
+     * and sends the number as the SSE "id:" line of every event.
+     *
+     * @Transient on purpose: it is filled in by the transport from that "id:"
+     * line, never read from the JSON body, so a server whose JSON carries a
+     * differently-typed "seq" cannot make an otherwise-good event fail to
+     * decode. null means "the transport could not tell" — TaskMonitor then
+     * treats the stream as not resumable (see its RECONNECT section).
+     *
+     * docs/iqoo/PROTOCOL.md documents neither the "id:" line nor this field
+     * (its example event has no seq); interfaces/api/server.py and its offline
+     * tests are the source here. Provisional until Agent 3's contract says.
+     */
+    @Transient val seq: Long? = null,
 )
 
 /** Thin wrapper so callers don't need to know this is HTTP+SSE underneath. */

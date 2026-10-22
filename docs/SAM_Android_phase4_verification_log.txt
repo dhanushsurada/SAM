@@ -1,0 +1,455 @@
+SAM Android (Agent 2) — Phase 4 verification log (bounded reconnect using Last-Event-ID)
+Raw tool output from the build sandbox, lightly trimmed (the sandbox's JAVA_TOOL_OPTIONS banner line is dropped).
+Runs happened between 2026-10-18 and 2026-10-20 on the sandbox clock; each section says which.
+
+READ THIS FIRST — what this log is and is not
+  * It is evidence from (a) the real Kotlin compiler type-checking the sources against HAND-WRITTEN STUBS,
+    (b) a plain-main runner executing the real TaskMonitor class on a real coroutines runtime, and
+    (c) the repo's own server-side reconnect test plus a raw capture of its SSE bytes, both executed on an
+    isolated copy of the repo.
+  * It is NOT a Gradle build, NOT a JUnit run, NOT lint, NOT a run of the real OkHttp/okhttp-sse client against
+    that server, and NOT any run on an Android device or emulator. The 53 JUnit tests in app/src/test were
+    type-checked here and have NEVER been executed.
+  * HttpSseSamTransport's new Last-Event-ID / "id:" handling and its new decode-failure handling are
+    type-checked only (MockWebServer and okhttp-sse are Maven-only and were never available to run).
+  * The foreground service, notifications and permissions are not exercised by anything in this log.
+  * The runner uses kotlinx-coroutines 1.6.4 (bundled with the compiler); the app pins 1.9.0.
+  * The harness that produced sections 2-6 lives in the build sandbox only; it is not part of the deliverables.
+
+ENVIRONMENT
+  kotlinc: info: kotlinc-jvm 2.0.21 (JRE 21.0.12.1+1-1-24.04.4-Ubuntu)
+  java: openjdk version "21.0.12.1" 2026-08-18
+  cores: 2
+  Stubs           : Java stubs compiled with javac (android.*, androidx.core.*, org.junit.* incl. Assert.assertThrows,
+                    R); Kotlin stubs (okhttp3 incl. Request.Builder.header, okhttp-sse, mockwebserver incl.
+                    RecordedRequest/takeRequest, datastore, kotlinx.serialization incl. Transient and
+                    SerializationException, kotlinx-coroutines-test). Real kotlin-stdlib + kotlinx-coroutines-core-jvm jars.
+  Not covered     : Compose UI layer + MainActivity (13 files, unchanged from the Phase 3 zip), manifest merge,
+                    resource linking, AGP/R8, lint, and the kotlinx.serialization compiler plugin.
+
+0. THE TREE THESE RESULTS BELONG TO (sha256 of every Kotlin file and the README)
+   Newest Kotlin source modification time in the project: 2026-10-18 07:44:35 (HttpSseSamTransportTest.kt). Every run
+   below started after that; no Kotlin file was edited after any of them started. (README.md was edited later;
+   it is not compiled.)
+   3270cf3b85a995b610fefd64770ce9f2e385b0be5bf34408eba35c92045c0db1  ./README.md
+   ac40f598063fa0b7ef151511ff023efe300a378cdd8443678f12c96950e24610  ./app/src/main/java/com/samcore/android/AppContainer.kt
+   759a2386eafa295f0b3b72813ab28961a5eb74b5ea29198a65a11621888b4e7f  ./app/src/main/java/com/samcore/android/MainActivity.kt
+   fbb1238c0b0c3531a29b8cd540ff8736a89768199c572693cbbc29b7123bd6b6  ./app/src/main/java/com/samcore/android/SamApplication.kt
+   d3c8a278f17966f0455880136a1f12e1b9134bcd353f1dc76c666616f3d862a4  ./app/src/main/java/com/samcore/android/data/local/DevicePrefsStore.kt
+   624c1787cad0cc984125f24ef3cf49f5589ee479e6cf35566ca188ca6e8b706c  ./app/src/main/java/com/samcore/android/data/local/PairedDeviceStore.kt
+   6443c853ac19316f1f914a8d73cd9db4194a6dc384f593876d8c8cb7d5a1cbe2  ./app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt
+   9ec417c5c3a7e0f9913590043c610a135a05ccf77534d3f466b3bce27741e66c  ./app/src/main/java/com/samcore/android/data/transport/SamTransport.kt
+   7bc3ced506abac5f40837e59cba923c1ef134e19a0903eccccded70e16dc23b8  ./app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt
+   074b68b518666f57c70c080ff3e16dc490a6db700479f5a4a6650cdac09d7cfe  ./app/src/main/java/com/samcore/android/notifications/SamNotifications.kt
+   656bfb20068a73a28e11d5a3999346101b0fa9f55666c5231a90818b9fa24100  ./app/src/main/java/com/samcore/android/notifications/TaskKeepAlive.kt
+   2ff7109a14bb93cc00ab01e1dd46c2918f6778257d0c8d1530d5549d439e3e0b  ./app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt
+   42d0bdc4fe366e6679294fdc529403cc1bd9f6612e08755c4db126a579ced8a4  ./app/src/main/java/com/samcore/android/notifications/TaskNotifier.kt
+   f2dfc46bae689e9d1ede7825730ee2ec8fe7513e69924c29e6ffc336348e8120  ./app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt
+   a7680299c9441aaa4dccb79f02896a2207b3ba938a7733096049bb8440a63cb4  ./app/src/main/java/com/samcore/android/ui/ViewModelFactory.kt
+   5d7ac9a2d7ad8081da9b32f19f5697f420f4d56b1e435ce748325b03bf9243b6  ./app/src/main/java/com/samcore/android/ui/connection/ConnectionStateScreen.kt
+   e6368f9b9e972040656872dc196fa5f9f485f52c8cfd5c2a2893c4836fffbc46  ./app/src/main/java/com/samcore/android/ui/connection/ConnectionViewModel.kt
+   a13f4dc949fe02cdd44f6e68cfec76b8869bbe9ae9d475fc0bb08eea2ffc3eb7  ./app/src/main/java/com/samcore/android/ui/navigation/SamNavGraph.kt
+   caf07c29c95907b7c39e537378d980cb1d5e3c8a74f7c7f557870582b95367db  ./app/src/main/java/com/samcore/android/ui/onboarding/OnboardingScreen.kt
+   2f319823e702f06c85f492a3f2cb3e757605f8e6ca03fe35b994e516ccc8eb7e  ./app/src/main/java/com/samcore/android/ui/pairing/PairingScreen.kt
+   d45a70d5f69d0ab35218ceb9523213bd8a832cb78ea062ec46227d30680d0707  ./app/src/main/java/com/samcore/android/ui/pairing/PairingViewModel.kt
+   14590ba521186479163e82d1f82ad85ce1b8d2197a4b7f503e9564b1fa6b587e  ./app/src/main/java/com/samcore/android/ui/taskstatus/TaskStatusScreen.kt
+   48df900a4a77b4cb984b740430bb6dd4afe514301df0e3c3052d3e1e003dba6e  ./app/src/main/java/com/samcore/android/ui/taskstatus/TaskStatusViewModel.kt
+   d0eafd4430702a2e60c1681d0a14213cbfee4acc619fba6a7e606d0a8b7b4bea  ./app/src/main/java/com/samcore/android/ui/theme/Color.kt
+   d0f397a75c2af5346d57b6e9e423862c8a1dc1a66e5fb9e77ee87be2111b7c66  ./app/src/main/java/com/samcore/android/ui/theme/Theme.kt
+   de13bdeb7896a4a02ba7638ca657b530343dc310ab9b0055d8780f3ded24c7a7  ./app/src/main/java/com/samcore/android/ui/theme/Type.kt
+   c454ddf2d596e0eba3e3f7a3dff2e0131269d0cb85b3491acd0fe8b9fda3a705  ./app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt
+   53c08fcef369e872c7d598a6153e53c30083018b0ba0d539ce9a4576ce1f4147  ./app/src/test/java/com/samcore/android/fakes/FakePairedDeviceStore.kt
+   5c69b341a6095461ae6fe431acdee16c139dcaec029548dbcb16ba58a93a4f9b  ./app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt
+   f834eaca2b09c3e04217749dd65bce701228db478f951b7d1ff74c1f2597713b  ./app/src/test/java/com/samcore/android/fakes/FakeTaskKeepAlive.kt
+   1975d739932755cfa92aabed791aae956a787c05b6f2fe5621dca1a80ad82c80  ./app/src/test/java/com/samcore/android/fakes/FakeTaskNotifier.kt
+   2ecaae47a80ed4b7bff6e06667e227792033992ec78a90106696ffd5d78e5b50  ./app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt
+
+1. SERVER-SIDE EVIDENCE — the repo's own code, executed on an isolated copy of the repository (re-run 2026-10-19)
+   1a. tests/test_iqoo_phase3a_offline.py::test_sse_event_stream_reconnect_no_duplicates
+      [PASS] Cold SSE reconnect (after_seq=0) replays the terminal event
+      [PASS] Each SSE chunk carries an `id:` line for Last-Event-ID reconnect support
+      [PASS] Reconnecting already caught-up (Last-Event-ID == latest) yields zero duplicate chunks
+      [PASS] Partial reconnect (after_seq=1) never re-sends event #1
+      checks: 4  passed: 4
+
+   1b. Raw SSE bytes from the real FastAPI route (interfaces/api/server.py) via starlette's in-process TestClient
+       with the repo's mocked gateway. No socket, no OkHttp. The captured task had already finished, so the
+       heartbeat line (": heartbeat\n\n", ~1 s while a task runs) was NOT captured — it is read from source.
+       Captured twice (2026-10-18 and 2026-10-19); identical apart from task id and timestamps. Second capture:
+      ### no Last-Event-ID header (cold start)
+      status=200 content-type=text/event-stream; charset=utf-8
+      'id: 1\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 1, "phase": "received", "message": "Task received by SAM", "timestamp": "2026-10-19T08:11:34.843499"}\n\nid: 2\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 2, "phase": "understanding", "message": "Reading your request", "timestamp": "2026-10-19T08:11:34.845879"}\n\nid: 3\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 3, "phase": "completed", "message": "all good", "timestamp": "2026-10-19T08:11:34.863009"}\n\n'
+
+      latest_seq=3
+
+      ### Last-Event-ID: 2
+      status=200 content-type=text/event-stream; charset=utf-8
+      'id: 3\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 3, "phase": "completed", "message": "all good", "timestamp": "2026-10-19T08:11:34.863009"}\n\n'
+
+      ### Last-Event-ID: 3 (already caught up to the terminal event)
+      status=200 content-type=text/event-stream; charset=utf-8
+      ''
+
+      ### Last-Event-ID: abc (non-numeric)
+      status=200 content-type=text/event-stream; charset=utf-8
+      'id: 1\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 1, "phase": "received", "message": "Task received by SAM", "timestamp": "2026-10-19T08:11:34.843499"}\n\nid: 2\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 2, "phase": "understanding", "message": "Reading your request", "timestamp": "2026-10-19T08:11:34.845879"}\n\nid: 3\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 3, "phase": "completed", "message": "all good", "timestamp": "2026-10-19T08:11:34.863009"}\n\n'
+
+      ### Last-Event-ID: 0
+      status=200 content-type=text/event-stream; charset=utf-8
+      'id: 1\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 1, "phase": "received", "message": "Task received by SAM", "timestamp": "2026-10-19T08:11:34.843499"}\n\nid: 2\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 2, "phase": "understanding", "message": "Reading your request", "timestamp": "2026-10-19T08:11:34.845879"}\n\nid: 3\ndata: {"type": "execution.step", "task_id": "023eae44-7c2f-4d7f-a7d7-1866541f7ba2", "seq": 3, "phase": "completed", "message": "all good", "timestamp": "2026-10-19T08:11:34.863009"}\n\n'
+
+      ### unknown task id
+      status=404 content-type=application/json
+      '{"detail":"Task not found"}'
+
+2. TYPE-CHECK, UNMODIFIED SOURCES (non-UI main: 12 files + tests: 6 files = 18 files) — 2026-10-19
+   Expected: only the generated Foo.serializer() call sites (they need the kotlinx.serialization compiler plugin).
+   Result: 8 diagnostics — 3x unresolved 'serializer' (lines 125, 203, 247), 4x type-inference follow-ons at two of
+   them (125, 247), 1x unresolved 'copy' on the line after the TaskEvent call (248; 'parsed' has no type once its
+   initialiser fails). Phase 3 had 5 for its tree: its TaskEvent call was an argument, so it had no follow-on line.
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:125:39: error: cannot infer type for this parameter. Please specify it explicitly.
+                       val device = json.decodeFromString(DeviceInfo.serializer(), text)
+                                         ^^^^^^^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:125:39: error: not enough information to infer type argument for 'T'.
+                       val device = json.decodeFromString(DeviceInfo.serializer(), text)
+                                         ^^^^^^^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:125:67: error: unresolved reference 'serializer'.
+                       val device = json.decodeFromString(DeviceInfo.serializer(), text)
+                                                                     ^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:203:76: error: unresolved reference 'serializer'.
+                   TransportResult.Success(json.decodeFromString(TaskSnapshot.serializer(), text))
+                                                                              ^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:247:39: error: cannot infer type for this parameter. Please specify it explicitly.
+                       val parsed = json.decodeFromString(TaskEvent.serializer(), data)
+                                         ^^^^^^^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:247:39: error: not enough information to infer type argument for 'T'.
+                       val parsed = json.decodeFromString(TaskEvent.serializer(), data)
+                                         ^^^^^^^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:247:66: error: unresolved reference 'serializer'.
+                       val parsed = json.decodeFromString(TaskEvent.serializer(), data)
+                                                                    ^^^^^^^^^^
+   out/real-src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt:248:36: error: unresolved reference 'copy'.
+                       trySend(parsed.copy(seq = id?.toLongOrNull()))
+                                      ^^^^
+   -> kotlinc exit=1  errors=8  warnings=0   (files: main=12 test=6)
+
+3. TYPE-CHECK, THROWAWAY COPY — 2026-10-19
+   The only change: the 3 generated Foo.serializer() calls rewritten to kotlinx.serialization.serializer<Foo>().
+   Every other file was compared byte-for-byte (cmp) with the project's file: no differences. The difference
+   between the two copies (diff -r real-src patched-src):
+      125c125  val device = json.decodeFromString(DeviceInfo.serializer(), text)
+            -> val device = json.decodeFromString(kotlinx.serialization.serializer<DeviceInfo>(), text)
+      203c203  TransportResult.Success(json.decodeFromString(TaskSnapshot.serializer(), text))
+            -> TransportResult.Success(json.decodeFromString(kotlinx.serialization.serializer<TaskSnapshot>(), text))
+      247c247  val parsed = json.decodeFromString(TaskEvent.serializer(), data)
+            -> val parsed = json.decodeFromString(kotlinx.serialization.serializer<TaskEvent>(), data)
+   -> kotlinc exit=0  errors=0  warnings=0
+
+4. REAL-THREAD RUNNER — the real TaskMonitor + the project's own fakes (38 scenarios) — 2026-10-20
+   (24 are the Phase 3 scenarios, unchanged and with reconnecting switched off — including the 300-iteration stress
+   scenario; 14 are new — including a 200-iteration stress scenario.)
+   PASS  watch collects emitted events
+   PASS  stream completion triggers an authoritative status lookup
+   PASS  notifier fires when the authoritative status is terminal
+   PASS  notifier does NOT fire when the authoritative status is still running
+   PASS  notifier does not fire when the follow-up getTask call itself fails
+   PASS  watching a new task cancels the previous still-running watch
+   PASS  isWatching is false before any watch and no keep-alive requested
+   PASS  each watch requests the keep-alive once
+   PASS  isWatching is true while the stream is still open
+   PASS  isWatching goes false once the task is terminal
+   PASS  isWatching goes false when the stream drops on a task that is still running (zombie case)
+   PASS  isWatching goes false even when the follow-up lookup fails
+   PASS  replacing a watch keeps isWatching true
+   PASS  stopWatching clears isWatching and announces nothing
+   PASS  a keep-alive that throws does not stop the watch
+   PASS  isWatching toggles correctly across sequential watches
+   PASS  a stream that never ends is abandoned at the cap and a still-running task stays silent
+   PASS  at the cap a task that turned out to be finished is still announced
+   PASS  replacing a watch keeps isWatching true when the old watch's completion runs inline
+   PASS  a lookup that is slow but still current is applied and announced (control)
+   PASS  a lookup result that arrives after the watch was superseded is dropped
+   PASS  a lookup result that arrives after stopWatching is dropped
+   PASS  an event delivered to a superseded watch is not appended to the new watch's list
+   PASS  STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   PASS  RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+   PASS  RECONNECT: events the server replays on reconnect are not shown twice
+   PASS  RECONNECT: a failed lookup also reconnects, from the beginning when nothing had been shown
+   PASS  RECONNECT: events that arrived without a seq are never replayed: the watch ends instead of reconnecting
+   PASS  RECONNECT: a task that finished while the stream was down is announced at once, without reconnecting
+   PASS  RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+   PASS  RECONNECT: a reconnect that delivers something new restores the whole budget
+   PASS  RECONNECT: the cap still bounds reconnecting, and the final lookup still runs
+   PASS  RECONNECT: watching a new task while the old one waits to reconnect cancels that reconnect
+   PASS  RECONNECT: stopWatching while waiting to reconnect cancels the reconnect
+   PASS  RECONNECT: with no backoff delays the monitor never reconnects
+   PASS  RECONNECT: negative reconnect delays are rejected
+   PASS  RECONNECT: the production default reconnects, starting with a one second wait
+   PASS  RECONNECT STRESS: superseding a watch that is reconnecting in a tight loop never corrupts the new watch (x200)
+
+   38 passed, 0 failed
+
+5. FLAKINESS — 2026-10-19
+   25 consecutive full runs of the 38-scenario runner (each run ~9 s on 2 cores):
+   run 1 clean: 38 passed, 0 failed
+   run 2 clean: 38 passed, 0 failed
+   run 3 clean: 38 passed, 0 failed
+   run 4 clean: 38 passed, 0 failed
+   run 5 clean: 38 passed, 0 failed
+   run 6 clean: 38 passed, 0 failed
+   run 7 clean: 38 passed, 0 failed
+   run 8 clean: 38 passed, 0 failed
+   run 9 clean: 38 passed, 0 failed
+   run 10 clean: 38 passed, 0 failed
+   run 11 clean: 38 passed, 0 failed
+   run 12 clean: 38 passed, 0 failed
+   run 13 clean: 38 passed, 0 failed
+   run 14 clean: 38 passed, 0 failed
+   run 15 clean: 38 passed, 0 failed
+   run 16 clean: 38 passed, 0 failed
+   run 17 clean: 38 passed, 0 failed
+   run 18 clean: 38 passed, 0 failed
+   run 19 clean: 38 passed, 0 failed
+   run 20 clean: 38 passed, 0 failed
+   run 21 clean: 38 passed, 0 failed
+   run 22 clean: 38 passed, 0 failed
+   run 23 clean: 38 passed, 0 failed
+   run 24 clean: 38 passed, 0 failed
+   run 25 clean: 38 passed, 0 failed
+   25 consecutive full runs of the 38-scenario runner: not-clean=0
+
+6. MUTATION CHECKS — 2026-10-20 (final run, on the frozen sources)
+   Each entry re-introduces ONE bug into TaskMonitor, compiles only that class, and runs the full runner.
+   A scenario that never fails under any mutation would have no teeth; M0 is the unmodified control.
+   IDs are not contiguous (no M8, R11-R13, R16-R18): the script defines exactly the 24 runs below.
+   The whole set was run twice on identical sources (2026-10-18 and 2026-10-20); the only difference in the
+   summary table was M1 (2 failing, then 3): the STRESS scenario trips only some of the time.
+   M0   control: no change
+        -> 38 passed, 0 failed
+   M1   lookup result applied/announced even when the watch is stale
+        -> 35 passed, 3 failed
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: a lookup result that arrives after stopWatching is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   M2   events appended even when the watch is stale
+        -> 36 passed, 2 failed
+           FAIL: an event delivered to a superseded watch is not appended to the new watch's list
+           FAIL: RECONNECT STRESS: superseding a watch that is reconnecting in a tight loop never corrupts the new watch (x200)
+   M3   a finished watch always clears isWatching (no generation check)
+        -> 32 passed, 6 failed
+           FAIL: replacing a watch keeps isWatching true
+           FAIL: replacing a watch keeps isWatching true when the old watch's completion runs inline
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+           FAIL: RECONNECT: watching a new task while the old one waits to reconnect cancels that reconnect
+           FAIL: RECONNECT STRESS: superseding a watch that is reconnecting in a tight loop never corrupts the new watch (x200)
+   M4   no cap on the watch
+        -> 35 passed, 3 failed
+           FAIL: a stream that never ends is abandoned at the cap and a still-running task stays silent
+           FAIL: at the cap a task that turned out to be finished is still announced
+           FAIL: RECONNECT: the cap still bounds reconnecting, and the final lookup still runs
+   M5   keepAlive.start() exceptions propagate
+        -> 37 passed, 1 failed
+           FAIL: a keep-alive that throws does not stop the watch
+   M6   stopWatching() does not clear isWatching
+        -> 33 passed, 5 failed
+           FAIL: stopWatching clears isWatching and announces nothing
+           FAIL: a lookup result that arrives after stopWatching is dropped
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+           FAIL: RECONNECT: stopWatching while waiting to reconnect cancels the reconnect
+           FAIL: RECONNECT STRESS: superseding a watch that is reconnecting in a tight loop never corrupts the new watch (x200)
+   M7   generation bumped AFTER the old job is cancelled (old ordering)
+        -> 37 passed, 1 failed
+           FAIL: replacing a watch keeps isWatching true when the old watch's completion runs inline
+   M9   stale watch still ANNOUNCES (but no longer writes the snapshot)
+        -> 36 passed, 2 failed
+           FAIL: a lookup result that arrives after the watch was superseded is dropped
+           FAIL: a lookup result that arrives after stopWatching is dropped
+   M10  announce regardless of terminal status
+        -> 26 passed, 12 failed
+           FAIL: notifier does NOT fire when the authoritative status is still running
+           FAIL: isWatching goes false when the stream drops on a task that is still running (zombie case)
+           FAIL: a stream that never ends is abandoned at the cap and a still-running task stays silent
+           FAIL: RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+           FAIL: RECONNECT: events the server replays on reconnect are not shown twice
+           FAIL: RECONNECT: events that arrived without a seq are never replayed: the watch ends instead of reconnecting
+           FAIL: RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+           FAIL: RECONNECT: a reconnect that delivers something new restores the whole budget
+           FAIL: RECONNECT: the cap still bounds reconnecting, and the final lookup still runs
+           FAIL: RECONNECT: watching a new task while the old one waits to reconnect cancels that reconnect
+           FAIL: RECONNECT: stopWatching while waiting to reconnect cancels the reconnect
+           FAIL: RECONNECT: the production default reconnects, starting with a one second wait
+   M11  keep-alive never requested
+        -> 35 passed, 3 failed
+           FAIL: each watch requests the keep-alive once
+           FAIL: a keep-alive that throws does not stop the watch
+           FAIL: STRESS: superseding a watch at varying moments never corrupts the new watch (x300)
+   R1   resume point never sent (every connection starts from the beginning)
+        -> 35 passed, 3 failed
+           FAIL: RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+           FAIL: RECONNECT: events the server replays on reconnect are not shown twice
+           FAIL: RECONNECT: a reconnect that delivers something new restores the whole budget
+   R2   replayed events are not de-duplicated
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: events the server replays on reconnect are not shown twice
+   R3   progress never restores the reconnect budget
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: a reconnect that delivers something new restores the whole budget
+   R4   no budget: reconnect until the cap
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+   R5   no wait between attempts
+        -> 32 passed, 6 failed
+           FAIL: RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+           FAIL: RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+           FAIL: RECONNECT: the cap still bounds reconnecting, and the final lookup still runs
+           FAIL: RECONNECT: watching a new task while the old one waits to reconnect cancels that reconnect
+           FAIL: RECONNECT: stopWatching while waiting to reconnect cancels the reconnect
+           FAIL: RECONNECT: the production default reconnects, starting with a one second wait
+   R6   reconnects even though events arrived without a seq
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: events that arrived without a seq are never replayed: the watch ends instead of reconnecting
+   R7   final lookup skipped when the cap expires
+        -> 35 passed, 3 failed
+           FAIL: a stream that never ends is abandoned at the cap and a still-running task stays silent
+           FAIL: at the cap a task that turned out to be finished is still announced
+           FAIL: RECONNECT: the cap still bounds reconnecting, and the final lookup still runs
+   R8   a terminal lookup does not end the loop
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: a task that finished while the stream was down is announced at once, without reconnecting
+   R9   a failed lookup ends the watch instead of reconnecting
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: a failed lookup also reconnects, from the beginning when nothing had been shown
+   R10  final lookup always runs, even after the loop finished by itself
+        -> 36 passed, 2 failed
+           FAIL: RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+           FAIL: RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+   R14  the resume cursor never advances
+        -> 34 passed, 4 failed
+           FAIL: RECONNECT: a dropped stream on a running task is reconnected after the delay, resuming from the last event shown
+           FAIL: RECONNECT: events the server replays on reconnect are not shown twice
+           FAIL: RECONNECT: a reconnect that delivers something new restores the whole budget
+           FAIL: RECONNECT: the production default reconnects, starting with a one second wait
+   R15  de-duplication off by one (the boundary event is shown twice)
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: events the server replays on reconnect are not shown twice
+   R19  any connection (not just progress) restores the budget
+        -> 37 passed, 1 failed
+           FAIL: RECONNECT: reconnecting gives up after the configured attempts and the watch ends silently
+
+   ==== summary ====
+   M0   control   0 failing  control: no change
+   M1   CAUGHT    3 failing  lookup result applied/announced even when the watch is stale
+   M2   CAUGHT    2 failing  events appended even when the watch is stale
+   M3   CAUGHT    6 failing  a finished watch always clears isWatching (no generation check)
+   M4   CAUGHT    3 failing  no cap on the watch
+   M5   CAUGHT    1 failing  keepAlive.start() exceptions propagate
+   M6   CAUGHT    5 failing  stopWatching() does not clear isWatching
+   M7   CAUGHT    1 failing  generation bumped AFTER the old job is cancelled (old ordering)
+   M9   CAUGHT    2 failing  stale watch still ANNOUNCES (but no longer writes the snapshot)
+   M10  CAUGHT   12 failing  announce regardless of terminal status
+   M11  CAUGHT    3 failing  keep-alive never requested
+   R1   CAUGHT    3 failing  resume point never sent (every connection starts from the beginning)
+   R2   CAUGHT    1 failing  replayed events are not de-duplicated
+   R3   CAUGHT    1 failing  progress never restores the reconnect budget
+   R4   CAUGHT    1 failing  no budget: reconnect until the cap
+   R5   CAUGHT    6 failing  no wait between attempts
+   R6   CAUGHT    1 failing  reconnects even though events arrived without a seq
+   R7   CAUGHT    3 failing  final lookup skipped when the cap expires
+   R8   CAUGHT    1 failing  a terminal lookup does not end the loop
+   R9   CAUGHT    1 failing  a failed lookup ends the watch instead of reconnecting
+   R10  CAUGHT    2 failing  final lookup always runs, even after the loop finished by itself
+   R14  CAUGHT    4 failing  the resume cursor never advances
+   R15  CAUGHT    1 failing  de-duplication off by one (the boundary event is shown twice)
+   R19  CAUGHT    1 failing  any connection (not just progress) restores the budget
+
+   Summary of the first run (2026-10-18), for comparison:
+      M0   control   0 failing  control: no change
+      M1   CAUGHT    2 failing  lookup result applied/announced even when the watch is stale
+      M2   CAUGHT    2 failing  events appended even when the watch is stale
+      M3   CAUGHT    6 failing  a finished watch always clears isWatching (no generation check)
+      M4   CAUGHT    3 failing  no cap on the watch
+      M5   CAUGHT    1 failing  keepAlive.start() exceptions propagate
+      M6   CAUGHT    5 failing  stopWatching() does not clear isWatching
+      M7   CAUGHT    1 failing  generation bumped AFTER the old job is cancelled (old ordering)
+      M9   CAUGHT    2 failing  stale watch still ANNOUNCES (but no longer writes the snapshot)
+      M10  CAUGHT   12 failing  announce regardless of terminal status
+      M11  CAUGHT    3 failing  keep-alive never requested
+      R1   CAUGHT    3 failing  resume point never sent (every connection starts from the beginning)
+      R2   CAUGHT    1 failing  replayed events are not de-duplicated
+      R3   CAUGHT    1 failing  progress never restores the reconnect budget
+      R4   CAUGHT    1 failing  no budget: reconnect until the cap
+      R5   CAUGHT    6 failing  no wait between attempts
+      R6   CAUGHT    1 failing  reconnects even though events arrived without a seq
+      R7   CAUGHT    3 failing  final lookup skipped when the cap expires
+      R8   CAUGHT    1 failing  a terminal lookup does not end the loop
+      R9   CAUGHT    1 failing  a failed lookup ends the watch instead of reconnecting
+      R10  CAUGHT    2 failing  final lookup always runs, even after the loop finished by itself
+      R14  CAUGHT    4 failing  the resume cursor never advances
+      R15  CAUGHT    1 failing  de-duplication off by one (the boundary event is shown twice)
+      R19  CAUGHT    1 failing  any connection (not just progress) restores the budget
+
+   Not demonstrated by any of the above: the lock's atomicity; invokeOnCompletion-vs-finally; the isCurrent() re-check
+   after each back-off wait (no scenario can observe it — cancelling the superseded job already stops the loop there);
+   and everything Android-side.
+
+7. PATCH AND ZIP CONSISTENCY — run against the files delivered with the report (2026-10-20)
+   ### delivered files
+     total 988
+     drwxr-xr-x 1 claude ubuntu      0 Oct 20 07:37 .
+     drwxr-xr-x 3 root   root     4096 Oct 15 06:00 ..
+     -rw-r--r-- 1 claude ubuntu  80418 Oct 20 07:36 SAM_Android_Agent2_Build_Report.md
+     -rw-r--r-- 1 claude ubuntu  10143 Oct 15 06:00 SAM_Android_Agent2_Recon_Report.md
+     -rw-r--r-- 1 claude ubuntu  71834 Oct 17 07:22 SAM_Android_phase3_fgs.patch
+     -rw-r--r-- 1 claude ubuntu   8023 Oct 17 07:25 SAM_Android_phase3_verification_log.txt
+     -rw-r--r-- 1 claude ubuntu  70432 Oct 20 07:37 SAM_Android_phase4_reconnect.patch
+     -rw-r--r-- 1 claude ubuntu 240937 Oct 15 06:00 SAM_Android_v0_Agent2.zip
+     -rw-r--r-- 1 claude ubuntu 251149 Oct 17 07:22 SAM_Android_v0_Agent2_fgs.zip
+     -rw-r--r-- 1 claude ubuntu 260255 Oct 20 07:37 SAM_Android_v0_Agent2_reconnect.zip
+
+   ### forward: patch -p1 on a pristine extraction of the DELIVERED Phase 3 zip (/mnt/user-data/outputs/SAM_Android_v0_Agent2_fgs.zip)
+   patching file README.md
+   patching file app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt
+   patching file app/src/main/java/com/samcore/android/data/transport/SamTransport.kt
+   patching file app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt
+   patching file app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt
+   patching file app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt
+   patching file app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt
+   patching file app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt
+   patching file app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt
+   patch exit=0
+     .orig/.rej files left behind: 0
+     RESULT: byte-identical to the project tree
+
+   ### git apply --check -p1 (outside any repository), git version 2.43.0
+     git apply --check: OK
+
+   ### reverse: patch -R -p1 on an extraction of the NEW zip
+   patching file app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt
+   patching file app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt
+   patching file app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt
+   patch -R exit=0
+     RESULT: byte-identical to the delivered Phase 3 tree
+
+   ### new zip
+     No errors detected in compressed data of /mnt/user-data/outputs/SAM_Android_v0_Agent2_reconnect.zip.
+     entries: 87 (50 files)
+     RESULT: extracted zip byte-identical to the project tree
+
+   ### patch statistics
+     files: 9   lines: 1109   +642 -64
+
+   ### @Test counts (phase 3 baseline -> now)
+     data/transport/HttpSseSamTransportTest.kt: 14 -> 19
+     notifications/TaskMonitorTest.kt: 21 -> 34
+
+   sha256 of the two new deliverables:
+      8750f378265de573c49cf149f06a714b8de1d77001d18c9c1e4926643912023f  SAM_Android_v0_Agent2_reconnect.zip
+      1553868d76d5a7da5914708899815a65e550eab3776eb702ebc85bdebd36d54f  SAM_Android_phase4_reconnect.patch
+
+8. NOT DEMONSTRATED BY ANYTHING IN THIS LOG
+   Gradle build; JUnit execution of any of the 53 tests; lint; the real OkHttp / okhttp-sse client (including how it
+   reports "id" for an event without an "id:" line and how it surfaces non-2xx responses); kotlinx.serialization
+   behaviour for the @Transient 'seq' property and for an unknown enum value; the heartbeat framing of a running
+   task; any behaviour on a device or emulator (foreground service, notifications, Doze, OEM battery managers,
+   process death, real network loss).

@@ -215,6 +215,82 @@ class HttpSseSamTransportTest {
         assertEquals(HttpSseSamTransport.SSE_READ_TIMEOUT_SECONDS * 1_000, millis.toLong())
     }
 
+    // --- taskEvents(): resuming a dropped stream ------------------------------
+    //
+    // The wire shapes below follow what the repo's own route returned when run
+    // offline on 2026-10-18 (FastAPI TestClient against interfaces/api/server.py):
+    // "id: <seq>\ndata: {json}\n\n"; Last-Event-ID: 2 on a three-event task replied
+    // with event 3 only. Ids and timestamps are shortened. This file's tests still
+    // have not been executed by JUnit here; the server side of that exchange was.
+
+    @Test
+    fun `taskEvents sends no Last-Event-ID header on a first connection`() = runTest {
+        pairSuccessfully()
+        server.takeRequest() // the pairing call made by pairSuccessfully()
+        server.enqueue(sseResponse(sseEvent(seq = 1, phase = "completed")))
+
+        transport.taskEvents("t-1").toList()
+
+        val recorded = server.takeRequest()
+        assertEquals("/api/iqoo/tasks/t-1/events", recorded.path)
+        assertNull(recorded.getHeader("Last-Event-ID"))
+    }
+
+    @Test
+    fun `taskEvents resumes with the Last-Event-ID header when given afterSeq`() = runTest {
+        pairSuccessfully()
+        server.takeRequest() // the pairing call
+        server.enqueue(sseResponse(sseEvent(seq = 3, phase = "completed"))) // what the server sends after Last-Event-ID: 2
+
+        val events = transport.taskEvents("t-1", afterSeq = 2).toList()
+
+        assertEquals("2", server.takeRequest().getHeader("Last-Event-ID"))
+        assertEquals(listOf<Long?>(3), events.map { it.seq })
+    }
+
+    @Test
+    fun `taskEvents takes seq from the SSE id line and leaves it null when an event has none`() = runTest {
+        pairSuccessfully()
+        // The first event has no id: line, so nothing could have been carried over
+        // from an earlier one; the second has id: 7. Both JSON bodies say "seq":99
+        // on purpose — the id: line is the source, the body is not read for it.
+        val body = """data: {"type": "execution.step", "task_id": "t-1", "seq": 99, "phase": "planning", "message": "Planning"}""" + "\n\n" +
+            "id: 7\n" +
+            """data: {"type": "execution.step", "task_id": "t-1", "seq": 99, "phase": "completed", "message": "Done"}""" + "\n\n"
+        server.enqueue(sseResponse(body))
+
+        val events = transport.taskEvents("t-1").toList()
+
+        assertEquals(listOf<Long?>(null, 7), events.map { it.seq })
+    }
+
+    // --- getTask(): a response the app cannot decode ------------------------------
+
+    @Test
+    fun `getTask with a body that is not valid JSON fails cleanly instead of throwing`() = runTest {
+        pairSuccessfully()
+        server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
+
+        val result = transport.getTask("t-1")
+
+        assertTrue(result is TransportResult.Failure)
+        assertTrue((result as TransportResult.Failure).message.contains("Unexpected response"))
+    }
+
+    @Test
+    fun `getTask with a status the app does not list fails cleanly instead of throwing`() = runTest {
+        pairSuccessfully()
+        // "testing" is accepted by the repo's task store (interfaces/api/task_store.py,
+        // ALL_STATUSES) but is not a TaskStatus value.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"task_id":"t-1","instruction":"open chrome","input_type":"text","status":"testing"}""",
+            ),
+        )
+
+        assertTrue(transport.getTask("t-1") is TransportResult.Failure)
+    }
+
     // --- unpair() -----------------------------------------------------------
 
     @Test
@@ -231,6 +307,16 @@ class HttpSseSamTransportTest {
         assertTrue(result is TransportResult.Failure)
         assertFalse((result as TransportResult.Failure).message.contains("HTTP"))
     }
+
+    private fun sseResponse(body: String) = MockResponse().setResponseCode(200)
+        .setHeader("Content-Type", "text/event-stream")
+        .setBody(body)
+
+    /** One event framed the way interfaces/api/server.py's _format_sse() frames it. */
+    private fun sseEvent(seq: Int, phase: String) =
+        "id: $seq\n" +
+            """data: {"type": "execution.step", "task_id": "t-1", "seq": $seq, "phase": "$phase", "message": "$phase step", "timestamp": "2026-10-18T07:37:47.433928"}""" +
+            "\n\n"
 
     private suspend fun pairSuccessfully() {
         server.enqueue(

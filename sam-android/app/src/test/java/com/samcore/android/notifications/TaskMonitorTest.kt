@@ -7,6 +7,7 @@ import com.samcore.android.data.transport.TransportResult
 import com.samcore.android.fakes.FakeSamTransport
 import com.samcore.android.fakes.FakeTaskKeepAlive
 import com.samcore.android.fakes.FakeTaskNotifier
+import com.samcore.android.fakes.StreamScript
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +20,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,19 +47,26 @@ import org.junit.Test
  * TaskMonitor on real threads, which showed a lookup result from a just-replaced
  * watch could still overwrite the new watch's snapshot; they force that window
  * deterministically (gates / a hook in the keep-alive call) instead of relying on
- * timing. Like everything in this file they have been type-checked but NEVER
- * executed by JUnit (see the build report).
+ * timing. The reconnect tests at the end drive a virtual clock by hand and assert
+ * the wait schedule exactly. Like everything in this file they have been
+ * type-checked but NEVER executed by JUnit (see the build report).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TaskMonitorTest {
 
+    // reconnectBackoffMillis defaults to EMPTY here — no reconnecting — so every
+    // test written before reconnecting existed keeps testing the single-attempt
+    // behavior it was written for (an empty list is that mode, not a special
+    // case). The reconnect tests at the end opt in explicitly; one of them
+    // builds the monitor without this helper to exercise the production default.
     private fun taskMonitor(
         transport: FakeSamTransport,
         notifier: FakeTaskNotifier,
         keepAlive: TaskKeepAlive = FakeTaskKeepAlive(),
         scope: CoroutineScope = CoroutineScope(UnconfinedTestDispatcher()),
         maxWatchMillis: Long = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS,
-    ): TaskMonitor = TaskMonitor(transport, notifier, keepAlive, scope, maxWatchMillis)
+        reconnectBackoffMillis: List<Long> = emptyList(),
+    ): TaskMonitor = TaskMonitor(transport, notifier, keepAlive, scope, maxWatchMillis, reconnectBackoffMillis)
 
     private fun snapshot(status: TaskStatus, taskId: String = "t-1") = TaskSnapshot(
         taskId = taskId,
@@ -439,5 +448,344 @@ class TaskMonitorTest {
         assertEquals(1, notifier.notifiedSnapshots.size)
         assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.first().status)
         assertFalse(monitor.isWatching.value)
+    }
+
+    // --- reconnecting (virtual time) -----------------------------------------------
+    //
+    // A stream that ends is not a task that ended: when the status lookup says
+    // "still running" (or cannot say), the monitor waits and opens a new stream
+    // that resumes after the last event it showed. Everything here runs on a clock
+    // the test moves by hand, so the schedule is asserted exactly (999 ms: nothing
+    // yet; 1000 ms: reconnected) instead of by sleeping. FakeSamTransport's
+    // streamScripts script one connection each; taskEventsRequests records the
+    // (taskId, afterSeq) of every connection actually made.
+
+    private class VirtualClock {
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(UnconfinedTestDispatcher(scheduler))
+
+        /** Moves time forward and runs everything that falls due, including work scheduled for exactly the new instant. */
+        fun advance(millis: Long) {
+            scheduler.advanceTimeBy(millis)
+            scheduler.runCurrent()
+        }
+    }
+
+    private fun event(seq: Long?, phase: String, taskId: String = "t-1") =
+        TaskEvent(type = "execution.step", taskId = taskId, phase = phase, message = "$phase step", seq = seq)
+
+    private fun request(taskId: String, afterSeq: Long?) = taskId to afterSeq
+
+    @Test
+    fun `a dropped stream on a running task is reconnected after the delay, resuming from the last event shown`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(
+                events = listOf(event(1, "received"), event(2, "executing")),
+                failure = java.io.IOException("connection dropped"),
+            )
+            streamScripts += StreamScript(events = listOf(event(3, "verifying"), event(4, "completed")))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+
+        // The first connection has dropped, the lookup says the task is still
+        // running, and the monitor is now waiting out its delay.
+        assertEquals(listOf(request("t-1", null)), transport.taskEventsRequests)
+        assertEquals(listOf<Long?>(1, 2), monitor.events.value.map { it.seq })
+        assertTrue(monitor.isWatching.value) // the foreground service must not stop while we wait
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+
+        clock.advance(999)
+        assertEquals(1, transport.taskEventsRequests.size) // one millisecond short
+
+        clock.advance(1)
+        assertEquals(listOf(request("t-1", null), request("t-1", 2)), transport.taskEventsRequests)
+        assertEquals(listOf<Long?>(1, 2, 3, 4), monitor.events.value.map { it.seq })
+        assertEquals(1, notifier.notifiedSnapshots.size)
+        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
+        assertEquals(2, transport.getTaskCalls) // one lookup per stream that ended, none extra at the end
+        assertFalse(monitor.isWatching.value)
+    }
+
+    @Test
+    fun `events the server replays on reconnect are not shown twice`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(
+                events = listOf(event(1, "received"), event(2, "executing")),
+                failure = java.io.IOException("connection dropped"),
+            )
+            // A server that ignores the resume point and replays everything, the
+            // boundary event included.
+            streamScripts += StreamScript(events = listOf(event(1, "received"), event(2, "executing"), event(3, "completed")))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val monitor = taskMonitor(transport, FakeTaskNotifier(), scope = clock.scope, reconnectBackoffMillis = listOf(100))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(100)
+
+        assertEquals(listOf<Long?>(1, 2, 3), monitor.events.value.map { it.seq })
+        assertEquals(listOf(request("t-1", null), request("t-1", 2)), transport.taskEventsRequests) // it did ask to resume
+    }
+
+    @Test
+    fun `when the status lookup fails too, the watch reconnects from the beginning and announces once the task is known to be finished`() {
+        // The network is down for the first attempt: the stream fails before
+        // delivering anything AND the lookup fails. Nothing has been shown, so the
+        // retry starts from the beginning (no resume point).
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(failure = java.io.IOException("network down"))
+            streamScripts += StreamScript(events = listOf(event(1, "executing"), event(2, "completed")))
+            getTaskResults.add(TransportResult.Failure("unreachable"))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(500))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        assertTrue(monitor.isWatching.value)
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+
+        clock.advance(500)
+
+        assertEquals(listOf(request("t-1", null), request("t-1", null)), transport.taskEventsRequests)
+        assertEquals(1, notifier.notifiedSnapshots.size)
+        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
+        assertFalse(monitor.isWatching.value)
+    }
+
+    @Test
+    fun `events that arrived without a seq are never replayed, so the watch ends instead of reconnecting`() {
+        // Nothing to resume from: reconnecting from the start would show these
+        // events a second time, and de-duplicating needs a seq.
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(
+                events = listOf(event(null, "received"), event(null, "executing")),
+                failure = java.io.IOException("connection dropped"),
+            )
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(10_000)
+
+        assertEquals(1, transport.taskEventsRequests.size)
+        assertEquals(2, monitor.events.value.size)
+        assertFalse(monitor.isWatching.value)
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+    }
+
+    @Test
+    fun `a task that finished while the stream was down is announced at once, without reconnecting`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(events = listOf(event(1, "received")), failure = java.io.IOException("connection dropped"))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+
+        assertEquals(1, notifier.notifiedSnapshots.size)
+        assertFalse(monitor.isWatching.value)
+        clock.advance(60_000)
+        assertEquals(1, transport.taskEventsRequests.size) // not even one reconnect
+        assertEquals(1, notifier.notifiedSnapshots.size) // and no second announcement
+    }
+
+    @Test
+    fun `reconnecting gives up after the configured attempts and the watch ends silently`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            taskEventsError = java.io.IOException("unreachable") // every connection fails at once, delivering nothing
+            repeat(4) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100, 200, 400))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        assertEquals(1, transport.taskEventsRequests.size)
+
+        clock.advance(99)
+        assertEquals(1, transport.taskEventsRequests.size)
+        clock.advance(1) // t = 100: first reconnect, after the first wait
+        assertEquals(2, transport.taskEventsRequests.size)
+
+        clock.advance(199)
+        assertEquals(2, transport.taskEventsRequests.size)
+        clock.advance(1) // t = 300: second reconnect, after the second wait
+        assertEquals(3, transport.taskEventsRequests.size)
+
+        clock.advance(399)
+        assertEquals(3, transport.taskEventsRequests.size)
+        clock.advance(1) // t = 700: third and last reconnect, after the third wait
+        assertEquals(4, transport.taskEventsRequests.size)
+
+        assertEquals(4, transport.getTaskCalls) // one lookup per connection
+        assertFalse(monitor.isWatching.value)
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+        assertEquals(TaskStatus.EXECUTING, monitor.snapshot.value?.status)
+
+        clock.advance(60_000)
+        assertEquals(4, transport.taskEventsRequests.size) // budget spent: no fifth connection
+    }
+
+    @Test
+    fun `a reconnect that delivers something new restores the whole budget`() {
+        // Budget of two, waits of 100 ms then 5 s. Each of the first three
+        // connections delivers one new event and then drops. Progress resets the
+        // schedule every time, so every wait is the short one and the budget is
+        // never spent; without the reset the third drop would use the 5 s wait and
+        // the fourth would exhaust the budget.
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            for (seq in 1L..3L) {
+                streamScripts += StreamScript(events = listOf(event(seq, "executing")), failure = java.io.IOException("dropped"))
+            }
+            streamScripts += StreamScript(events = listOf(event(4, "completed")))
+            repeat(3) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100, 5_000))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(300)
+
+        assertEquals(listOf<Long?>(null, 1, 2, 3), transport.taskEventsRequests.map { it.second })
+        assertEquals(listOf<Long?>(1, 2, 3, 4), monitor.events.value.map { it.seq })
+        assertEquals(1, notifier.notifiedSnapshots.size)
+        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
+    }
+
+    @Test
+    fun `the cap still bounds reconnecting, and the final lookup still runs`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            taskEventsError = java.io.IOException("unreachable")
+            repeat(3) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED))) // what the final lookup finds
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(
+            transport,
+            notifier,
+            scope = clock.scope,
+            maxWatchMillis = 1_000,
+            reconnectBackoffMillis = listOf(400, 400, 400, 400, 400),
+        )
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(1_001)
+
+        assertEquals(3, transport.taskEventsRequests.size) // t = 0, 400, 800 — the wait due to end at 1200 was cut off by the cap
+        assertEquals(4, transport.getTaskCalls) // one per connection, plus the final lookup
+        assertEquals(1, notifier.notifiedSnapshots.size)
+        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
+        assertFalse(monitor.isWatching.value)
+    }
+
+    @Test
+    fun `watching a new task while the old one waits to reconnect cancels that reconnect`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
+            taskEventsNeverCompleteForIds += "t-2"
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING, taskId = "t-1")))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
+
+        monitor.watch(snapshot(TaskStatus.EXECUTING, taskId = "t-1")) // drops, is told "still running", now waits
+        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2"))
+        clock.advance(60_000)
+
+        assertEquals(1, transport.taskEventsRequests.count { it.first == "t-1" }) // never reconnected
+        assertEquals(1, transport.getTaskCalls) // only t-1's single lookup: the superseded watch ran no more
+        assertEquals("t-2", monitor.snapshot.value?.taskId)
+        assertTrue(monitor.events.value.isEmpty())
+        assertTrue(monitor.isWatching.value) // t-2 is being watched
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+    }
+
+    @Test
+    fun `stopWatching while waiting to reconnect cancels the reconnect`() {
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        assertTrue(monitor.isWatching.value) // waiting to reconnect
+        monitor.stopWatching()
+        assertFalse(monitor.isWatching.value)
+        clock.advance(60_000)
+
+        assertEquals(1, transport.taskEventsRequests.size)
+        assertEquals(1, transport.getTaskCalls)
+        assertTrue(notifier.notifiedSnapshots.isEmpty())
+    }
+
+    @Test
+    fun `with no backoff delays the monitor never reconnects`() {
+        // The empty list is the "reconnecting off" setting that every older test in
+        // this file relies on; this one states it outright.
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+        }
+        val monitor = taskMonitor(transport, FakeTaskNotifier(), scope = clock.scope, reconnectBackoffMillis = emptyList())
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(600_000)
+
+        assertEquals(1, transport.taskEventsRequests.size)
+        assertFalse(monitor.isWatching.value)
+    }
+
+    @Test
+    fun `negative reconnect delays are rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            taskMonitor(FakeSamTransport(), FakeTaskNotifier(), reconnectBackoffMillis = listOf(100, -1))
+        }
+    }
+
+    @Test
+    fun `the production default reconnects, starting with a one second wait`() {
+        // Built without the helper, so no backoff argument is passed: this is the
+        // behavior the app actually gets from AppContainer.
+        val clock = VirtualClock()
+        val transport = FakeSamTransport().apply {
+            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
+            streamScripts += StreamScript(events = listOf(event(2, "completed")))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
+            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
+        }
+        val notifier = FakeTaskNotifier()
+        val monitor = TaskMonitor(transport, notifier, FakeTaskKeepAlive(), clock.scope)
+
+        monitor.watch(snapshot(TaskStatus.QUEUED))
+        clock.advance(999)
+        assertEquals(1, transport.taskEventsRequests.size)
+        clock.advance(1)
+
+        assertEquals(2, transport.taskEventsRequests.size)
+        assertEquals(1, notifier.notifiedSnapshots.size)
     }
 }

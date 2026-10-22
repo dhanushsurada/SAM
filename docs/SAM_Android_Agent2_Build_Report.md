@@ -4,6 +4,8 @@ Structured against the 12 points the original Agent-2 brief asked for as final o
 Companion to `SAM_Android_Agent2_Recon_Report.md` (read first if you haven't) and the
 project itself (`SAM_Android_v0_Agent2.zip`), which also contains its own `README.md`.
 
+> **Later passes supersede parts of this section.** The paragraph below describes the first slice only. What has since been type-checked and executed — and what still has not — is recorded in the *Hardening pass*, *Phase 3 addendum* and *Phase 4 addendum* sections further down.
+
 **Read this whole report before trusting any single line in it** — point 7 and 9 in
 particular mean everything below was written and manually reviewed, not compiled,
 run, or tested. That's not a formality: point 10 lists four real mistakes this
@@ -751,3 +753,265 @@ change. If you have already made local fixes while verifying the previous
 phase, `patch -p1` may reject hunks in files you also edited; the three new
 files are purely additive, and the rest can be merged by hand or with
 `git apply --3way` inside a repository that has your fixes committed.
+
+---
+
+## Phase 4 addendum — bounded reconnect using `Last-Event-ID`
+
+> **Read this first**
+>
+> 1. **Scope disclosure.** I was not asked to build this. After the foreground-service
+>    phase your messages were just "Continue", so I took the item the Phase 3
+>    addendum (§8 there) recommended as next. It is a separate patch on top of the
+>    Phase 3 tree (§11) and can be switched off with one constructor argument
+>    (§9). **Nothing on the hardening brief's "do not implement" list was
+>    touched** — no wake word, microphone, voice, accessibility/device control,
+>    intents/app launching, or discovery.
+> 2. **Status: built, type-checked, and its Kotlin logic executed on a plain JVM
+>    (the real `TaskMonitor`). Never built with Gradle, never run through JUnit,
+>    never run against a real OkHttp/okhttp-sse stack, never run on a device.**
+>    The server behaviour it leans on *was* executed on the repo side (the repo's
+>    own reconnect test passes and its raw SSE bytes were captured, §3) — but the
+>    phone-side client has never talked to that server.
+> 3. **The reconnect depends on server behaviour that `docs/iqoo/PROTOCOL.md`
+>    does not document**: the SSE `id:` line, the `seq` numbering and the
+>    `Last-Event-ID` header. `interfaces/api/server.py`, `events.py` and the
+>    repo's offline tests are the source. Provisional until Agent 3's contract
+>    says so (§7).
+> 4. **Auditing what reconnecting leans on turned up two things** (§4): an
+>    uncaught-exception path in the transport (**fixed**) and a task status the
+>    server can return that the app's enum cannot represent (**flagged, not
+>    changed**).
+> 5. **Every number is a guess, not a measurement** — the retry schedule, and
+>    (unchanged from Phase 3) the 60 s SSE timeout and the 30 min cap. The 31 s
+>    in the schedule is *waiting time only*; if every attempt hangs to its own
+>    timeout, giving up takes about 10 minutes (arithmetic, §2).
+
+### 1. What was built
+
+What it is meant to do for the user — intent only, none of it observed on a
+device: if the link to SAM Core drops while a task is running (a Wi-Fi roam, a
+brief outage, SAM Core restarting), the app waits a moment and reopens the event
+stream from where it stopped instead of quietly giving up, so the completion
+notification can still arrive. If nothing gets through within the retry
+schedule it gives up silently, exactly as it did before this pass. Nothing in
+the UI changes.
+
+| File | Change |
+|---|---|
+| `notifications/TaskMonitor.kt` | **Rewritten around a connect → look up → wait → reconnect loop.** New constructor parameter `reconnectBackoffMillis` (default 1, 2, 4, 8, 16 s; an empty list turns reconnecting off). Internal `Lookup` outcome (`TERMINAL` / `RUNNING` / `FAILED` / `SUPERSEDED`); `appendEventIfCurrent` now reports whether it appended. `watch()`, `stopWatching()`, the generation counter, the lock, the keep-alive call and `invokeOnCompletion` are unchanged from Phase 3. |
+| `data/transport/SamTransport.kt` | `taskEvents(taskId, afterSeq: Long? = null)` — additive; every existing call still compiles. |
+| `data/transport/SamTransportModels.kt` | `TaskEvent.seq: Long?`, marked `@Transient` — filled in by the transport, never read from JSON. |
+| `data/transport/HttpSseSamTransport.kt` | Sends `Last-Event-ID` when `afterSeq` is given; fills `seq` from the SSE `id:` line; `getTask`/`sendTask` now turn an undecodable body into `TransportResult.Failure` instead of throwing (§4.1). The invented `POST /api/connect/pair` placeholder is untouched and still provisional. |
+| `notifications/TaskWatchForegroundService.kt` | Lifetime backstop margin 60 s → 120 s (§2). |
+| tests | `FakeSamTransport` (per-connection stream scripts, a log of every `taskEvents` request); `TaskMonitorTest` +13; `HttpSseSamTransportTest` +5. |
+| `README.md` | Status, reconnect bullet, known gaps, test counts. |
+
+**Unchanged:** all UI, `TaskStatusViewModel`, `AppContainer` (so production gets
+the default schedule), the manifest, `SamNotifications`, `TaskKeepAlive`.
+
+### 2. Design decisions — each is there to prevent a named failure
+
+| Decision | Failure it prevents | Basis |
+|---|---|---|
+| **Reconnect lives in `TaskMonitor`, not in the transport.** | A retry hidden inside the transport would be invisible to the monitor, which owns "is the task really finished?", the cap and `isWatching` — the foreground service obeys that flag and must see the watch end. | Design |
+| **After every stream end, ask the server for the authoritative status** (as before) and decide from that. | Falsely announcing completion because a connection dropped; and, new here, *missing* a completion that happened while the link was down — a lookup that finds the task finished is announced immediately, without reconnecting. | Design. Relies on `gateway.py` writing the stored status before it publishes the terminal event — true at every terminal publish site I read there; read from source, not executed |
+| **Resume cursor = the SSE `id:` line** (`TaskEvent.seq`, `@Transient`), not a JSON field. | `Last-Event-ID` is defined against the `id:` line. The repo server sends *both* an `id:` line and a JSON `"seq"` (captured, §3), but PROTOCOL.md documents neither; making the field transient means a differently-typed `seq` in some future body cannot make an otherwise-good event fail to decode. | Source + captured bytes |
+| **Events whose `seq` is not above the last one shown are skipped.** | A server that ignores the resume header, or re-sends the boundary event, would show events twice. Insurance only: the repo server does honour the header (captured). | Executed (runner) |
+| **If events arrived without any `seq`, do not reconnect.** | Resuming "from the beginning" would replay events already shown, with no way to de-duplicate. The cost is the old behaviour (silent end). | Executed (runner) |
+| **A failed status lookup counts as "can't tell" and still reconnects** — from the beginning if nothing was shown yet. | The most plausible reason for a failed lookup right after a dropped stream is that the network is down (a guess, not a measurement), which is exactly what reconnecting is for; ending the watch there would make the feature useless. **Cost: a permanent failure (task unknown → 404, revoked pairing, app unpaired) is indistinguishable and burns the whole schedule** — `TransportResult.Failure` carries no status. | Design |
+| **Budget = consecutive reconnects with no new event; a connection that delivers one restores it.** A heartbeats-only connection is not progress. | A flapping link that makes progress between drops should not exhaust a lifetime budget; a server that accepts connections but never says anything new must not be retried forever. | Executed (runner) |
+| **Schedule 1, 2, 4, 8, 16 s** (5 reconnects after the first connection, 31 s of waiting, so at most 6 connections in a row without a new event). | Hammering a dead link vs. giving up before a Wi-Fi roam completes. **An unmeasured guess.** Wall-clock to give up = 31 s + the time each attempt takes to fail: fast when the network is simply off, but up to ~70 s per stream attempt (10 s connect + 60 s SSE read timeout) and ~25 s per status lookup if everything hangs → 6 × 70 + 6 × 25 + 31 ≈ **600 s (10 min)** worst case. Arithmetic, not measured; still far inside the 30 min cap. | Arithmetic |
+| **The 30 min cap wraps the whole loop, waits and lookups included; if it fires, one final lookup runs** (as before). | A reconnect loop that never ends; a terminal event lost on a flaky link at the very end. | Executed (runner); its virtual-time JUnit twin is type-checked only |
+| **`isWatching` stays true while waiting to reconnect.** | The foreground service stopping during a back-off would defeat the point of having it. | Executed (runner) |
+| **`taskEvents(..., afterSeq = null)` is additive with a default.** | Breaking other implementers. The only ones are `HttpSseSamTransport` and the test fake. | Compiler |
+| **Service lifetime margin 60 s → 120 s.** | The service's backstop (cap + margin) firing before the monitor has finished its own cap path. After the cap, up to two blocking calls can still run — one already in flight (its coroutine only notices cancellation when the call returns) and the one final lookup — each normally ≤ ~25 s (10 s connect + 15 s read). | Arithmetic |
+| **`executeForSnapshot` also catches `SerializationException`.** | §4.1. | Read from source; 2 tests (type-checked only) |
+
+### 3. Verification — what was actually established
+
+| Claim | Evidence | Result | Limits |
+|---|---|---|---|
+| Non-UI main (12 files) + all tests (6 files) type-check | Official Kotlin 2.0.21 compiler against hand-written Android/AndroidX/OkHttp/JUnit/serialization stubs and the real `kotlin-stdlib` + `kotlinx-coroutines-core` jars | **Throwaway copy (the 3 `X.serializer()` calls rewritten to `serializer<X>()`; every other file byte-identical to the project — checked with `cmp` and `diff`): 0 errors, 0 warnings.** **Unmodified sources: 8 diagnostics, all at or caused by those 3 call sites** — 3× "unresolved reference `serializer`", 4× type-inference follow-ons at two of them, and 1× "unresolved reference `copy`" on the line after the `TaskEvent` call (`parsed` has no type once its initialiser fails). Phase 3 had 5 for its tree because its `TaskEvent` call was an argument, with no follow-on line. | Stubs are my own model of the libraries. **Not covered: the 13 Compose UI / `MainActivity` files**, manifest merging, resource linking, AGP/R8, lint. The serialization compiler plugin cannot run here, so nothing has checked that the plugin accepts `@Transient val seq: Long? = null`. |
+| **The repo server does what the reconnect assumes** | (a) The repo's own `test_sse_event_stream_reconnect_no_duplicates` run on an isolated copy of the repo: **4 / 4 checks pass** (cold replay, `id:` on every chunk, caught-up reconnect yields no duplicates, partial reconnect never re-sends event 1). (b) Raw SSE bytes captured from the real FastAPI route (`interfaces/api/server.py`) through starlette's in-process `TestClient` with the repo's mocked gateway: no header → events 1, 2, 3 each as `id: N\ndata: {…"seq": N…}\n\n`; `Last-Event-ID: 2` → only event 3; `Last-Event-ID: 3` on a finished task → **empty body, stream closed**; `abc` and `0` → full replay; unknown task → **404 `{"detail":"Task not found"}`**. Captured twice; identical apart from task id and timestamps. | Executed | In-process: no socket, no real HTTP server, no OkHttp. **The heartbeat framing (`: heartbeat\n\n` about every second while a task is running) and the idle-stream behaviour were read from `server.py`, not captured** — the captured task had already finished. |
+| **`TaskMonitor`'s reconnect logic behaves as designed** | The real `TaskMonitor` class (compiled from a byte-identical copy of the project's file), the project's own fakes, real threads and real time, driven by a plain-`main` runner: **38 scenarios = the 24 Phase 3 scenarios unchanged (reconnect off) + 14 new** (13 mirroring the new JUnit tests, plus a 200-iteration stress run that supersedes a watch that is reconnecting in a tight loop) | **38 / 38 pass; 25 consecutive full runs clean** (2-core sandbox; a full pass takes ~9 s because the scenarios use real delays) | kotlinx-coroutines **1.6.4** (bundled with the compiler), not the **1.9.0** the app pins. Real time, not JUnit's virtual time. A scripted fake transport, not an SSE connection. |
+| The scenarios can actually fail (not vacuous) | **23 mutation checks plus an unmodified control**, each re-introducing one specific bug, each compiled alone and run against all 38 scenarios | Control 38 / 38. **All 23 caught** (failing-scenario counts in brackets, from the final run on the frozen sources). *Phase 3 guarantees (10):* stale lookup applied/announced (3); stale events appended (2); finished watch always clears `isWatching` (6); no cap (3); throwing keep-alive propagates (1); `stopWatching` doesn't clear the flag (5); generation bumped after cancelling (1); stale watch still announces (2); announce regardless of terminal status (12); keep-alive never requested (3). *Reconnect (13):* resume point never sent (3); replays not de-duplicated (1); progress never restores the budget (1); no budget (1); no wait between attempts (6); reconnects although events had no `seq` (1); final lookup skipped at the cap (3); terminal lookup doesn't end the loop (1); failed lookup ends the watch (1); final lookup always runs (2); cursor never advances (4); de-dup off by one (1); *any* connection restores the budget (1). Each reconnect mutation fails the scenario written for it. | Mutation IDs are not contiguous (no M8, R11–R13, R16–R18): the script defines exactly the 24 runs in the log and nothing was run and left out. The whole mutation set was run twice on identical sources and the only count that differed was "stale lookup applied" (2, then 3): the stress scenarios catch a bug only some of the time, while the two deterministic scenarios for it (a lookup result arriving after a supersede / after a stop) failed in all three runs I have: Phase 3 and both runs of this pass. **Not mutation-tested:** the `isCurrent` re-check after each wait — I could not construct a scenario in which removing it changes anything observable, because cancelling the superseded job already stops the loop at the wait; it is kept as defence in depth. Does not prove the lock's atomicity (as in Phase 3). |
+| The patch and the zip are what they claim | `patch -p1` on a pristine extraction of the delivered `SAM_Android_v0_Agent2_fgs.zip`; `git apply --check -p1` on another; `patch -R -p1` on a copy of the new tree; the new zip extracted and compared with the project — executed on the files delivered with this report, output in the verification log | Forward result **byte-identical to the project**; `git apply --check` OK; reverse result **byte-identical to the delivered Phase 3 tree**; the new zip holds the project's 50 files, byte-identical | Shows only that the delivered artifacts are consistent with each other, not that the code is right. |
+| The 53 JUnit tests (19 transport + 34 `TaskMonitor`; was 14 + 21 = 35) | Type-checked only | **NEVER EXECUTED by JUnit.** | The 13 new `TaskMonitor` tests drive a hand-moved virtual clock (`TestCoroutineScheduler` + `UnconfinedTestDispatcher` + `advanceTimeBy` followed by `runCurrent`) — the same API surface as the two Phase 3 cap tests, evaluated only against my stub of `kotlinx-coroutines-test`. The 5 new transport tests need `MockWebServer`/`okhttp-sse`, which are Maven-only here. Two of them rest on `kotlinx.serialization` behaviour I could not run: that a JSON `"seq": 99` is ignored for a `@Transient` property under `ignoreUnknownKeys`, and that an unknown enum value (`"testing"`) surfaces as a `SerializationException`. |
+| `okhttp-sse` behaviour the transport relies on | **Not verified.** Specifically: what `onEvent` reports for `id` when an event has no `id:` line (the test deliberately puts the id-less event *first* so it passes either way). **The reconnect assumes every event carries its own, strictly increasing `id:`** — true of the repo server, unverified for anything else: if the library carries the previous id over to an id-less event, that event would look like a replay and be skipped; that a non-2xx or non-`text/event-stream` response reaches `onFailure` (my understanding; the transport turns it into a closed flow); that the library does not retry on its own (my understanding). | — | Needs a real run. |
+| The service, notifications, permissions, OEM behaviour, Doze, battery | — | **No evidence**, as in Phase 3. | §6 |
+
+### 4. What auditing it turned up
+
+1. **A latent crash path — fixed.** `executeForSnapshot` caught only
+   `IOException`. `json.decodeFromString` throws `SerializationException` for a
+   body that is not JSON, lacks a required field, or carries an enum value the
+   app does not know. That escaped `getTask`/`sendTask`, which every caller
+   treats as returning a `TransportResult`. From `TaskMonitor`'s application-scoped
+   scope (a `SupervisorJob`, no exception handler) an uncaught exception on a
+   background coroutine would take the app down — standard Android behaviour,
+   not reproduced here. It predates this pass (it is in the v0 baseline); it
+   matters more now because reconnecting calls `getTask` repeatedly. Fix: the
+   exception becomes `TransportResult.Failure("Unexpected response from SAM
+   Core: …")`. 2 tests (type-checked only). `pair()` already had a broad catch;
+   `checkConnection` and `cancelTask` decode nothing.
+2. **A status the app cannot represent — flagged, deliberately not changed.**
+   `interfaces/api/task_store.py` lists `testing` in `ALL_STATUSES`; the app's
+   `TaskStatus` has no such value, so a lookup that lands on it is now reported
+   as a failed lookup (before this pass: an uncaught exception). PROTOCOL.md says
+   `testing` is "not yet emitted by anything in Phase 1 or 2", so this is
+   dormant today. If the server ever starts emitting it, the snapshot would not update
+   during that phase and the monitor would treat the lookup as transient. Whether to add `TESTING` is a contract question for Agent 3.
+3. **PROTOCOL.md and the server disagree by omission.** The doc's SSE example has
+   no `seq`, and it never mentions the `id:` line or `Last-Event-ID`; the server
+   sends all three and has a test for the reconnect. I followed the server and
+   its test, and recorded the dependency (§7) rather than inventing a contract.
+4. **Event history is in memory, tasks are not** (read from source). `events.py`
+   keeps each task's numbered history in RAM; `gateway.py` calls
+   `recover_orphaned_tasks()` at startup, which marks every unfinished task
+   `failed`. So after a SAM Core restart a reconnecting phone should get an empty
+   stream, a lookup that says `failed`, and a failure notification — *if* the
+   server is back inside the retry schedule. Unverified; it is on the device list.
+5. **The service margin from Phase 3 no longer covered the worst case** — see §2;
+   raised and re-argued rather than left as it was.
+
+### 5. Corrections to earlier sections of this report
+
+- **Phase 3 §3 ("The 35 JUnit tests") and the README:** now 53 (19 + 34).
+- **Phase 3 §5, second bullet** said that with no reconnect a stream cut after
+  60 s of silence ends the watch without a notification. There is now a bounded
+  reconnect; the silent end happens only after its schedule is spent.
+- **Phase 3 §7, "Replay"** said the app "currently uses neither beyond 'stream
+  ends'". It now sends `Last-Event-ID` and reads `seq`.
+- **Phase 3 §8** recommended this item; it is done. Its two smaller candidates —
+  a `contentIntent` on both notifications, and a UI signal when the OS refuses
+  the keep-alive — are **untouched**.
+- **Phase 3 §3, first row** (5 diagnostics on unmodified sources) was right for
+  the Phase 3 tree; this tree has 8 for the reason given in §3 above.
+- README's "No reconnect" known gap is replaced by "Reconnect is bounded and
+  blunt", and the 60 s-timeout bullet no longer says "because there is no
+  reconnect".
+- **This report's opening paragraph** ("everything below was written and manually
+  reviewed, not compiled, run, or tested") described the first slice only and had
+  been stale since the hardening pass. I added a note directly under the title
+  pointing at the later sections; the paragraph itself is left as written.
+- `SAM_Android_phase3_verification_log.txt` is untouched and still describes the
+  Phase 3 tree.
+
+### 6. Not verified — what has to be run on a real device
+
+Roughly in the order I'd do them:
+
+1. **`./gradlew test` and `./gradlew lint` first.** Tests I'm least sure of on a
+   first real run: the 13 virtual-clock reconnect tests (`advanceTimeBy` in
+   kotlinx-coroutines-test 1.9.0 does not run work due *exactly* at the target
+   instant, which is why each `advance` is followed by `runCurrent()` — reasoned
+   from the docs, not observed; experimental-API opt-in notices on
+   `TestCoroutineScheduler` should be warnings, not errors — also unobserved);
+   and the 5 new transport tests (they call `server.takeRequest()` without a
+   timeout, so if a request never arrives they would hang rather than fail).
+2. **Airplane mode for ~10 s mid-task, then off.** Expect: the event list
+   stops, then resumes with no duplicates and no missing steps; the completion
+   notification arrives; the ongoing notification stays up throughout.
+3. **Airplane mode for longer than the schedule** (say 2 min). Expect: the watch
+   ends silently, the ongoing notification goes away, and no completion
+   notification even if the task finishes later. Time how long giving up really
+   takes (I expect a little over 31 s with the network simply off — unobserved).
+4. **A task that finishes while the phone is offline**, connectivity back inside
+   the schedule: the completion notification should fire exactly once.
+5. **Restart SAM Core mid-task** (see §4.4): expect a failure notification if the
+   phone reconnects after the restart, silence if it does not. Also observe the
+   task screen's event list.
+6. **A hung connection** (e.g. a proxy that accepts and stalls): the 60 s read
+   timeout should cut it and trigger a reconnect.
+7. **Revoked/unknown task** (delete the task on the server, or unpair on the
+   server side): watch the app burn the schedule, and measure how long the ongoing
+   notification stays up for nothing.
+8. **Doze / screen off ≥ 10 min with a drop in the middle.** The app holds no
+   wake lock and the back-off waits are coroutine timers; whether Android
+   stretches them is unobserved.
+9. **Process kill mid-wait** (`adb shell am kill`): nothing should restart, and
+   nothing is persisted.
+10. **Battery** with a flapping link (the schedule makes at most 6 connection
+    attempts per outage, so I expect this to be small — unmeasured).
+
+### 7. Provisional assumptions Agent 3's contract must settle
+
+- **`Last-Event-ID`, the `id:` line and `seq`.** Document them: per-task numbering
+  from 1 with no gaps (`events.py`), replay of everything above the given id,
+  stream closed after a terminal event, a caught-up reconnect on a finished task
+  returning an empty stream, a non-numeric id meaning "from the start".
+- **How long event history is kept** and what a reconnect finds after a server
+  restart or eviction (today: history is in memory; the task record is not).
+- **Heartbeat interval** (carried over): the 60 s SSE timeout assumes one well
+  under it.
+- **A status code or error kind for "task unknown" and "not authorised"**, so the
+  client can stop at once instead of burning the schedule.
+- **The `testing` status** (§4.2).
+- **Task time limits and queueing** (carried over from Phase 3).
+- **Pairing**: `POST /api/connect/pair` is still an invented placeholder.
+- **Device link type** (carried over): the `dataSync` service type assumes an
+  ordinary long-lived HTTP stream.
+
+### 8. Recommended next item
+
+**Tell permanent failures from transient ones.** It removes the least defensible
+behaviour this pass introduces: a revoked pairing or a task the server no longer
+knows keeps the foreground notification up for the whole schedule (up to ~10 min
+in the worst case) for nothing. It needs `TransportResult.Failure` to carry an
+optional HTTP status or kind, a small additive change across the transport, the
+fake and the monitor, and the virtual-clock harness already covers that shape of
+test. Other candidates, none started: a "reconnecting…" signal in the UI;
+a `contentIntent` on both notifications; waiting for a validated network
+(`ConnectivityManager` callback) instead of a fixed schedule; persisting the
+watched task and last `seq` so a restart can resume — that one moves the "does
+not survive process death" boundary and needs a product decision. The device
+checks in §6 may change which of these matters most.
+
+### 9. If you'd rather not have it
+
+- **One-line off-switch:** build the monitor with
+  `reconnectBackoffMillis = emptyList()` in `AppContainer`. Behaviour returns to
+  Phase 3 (one lookup after the stream ends, then done).
+- **Independent and worth keeping either way:** the `SerializationException`
+  fix (a crash fix), `TaskEvent.seq`, the `afterSeq` parameter (unused when
+  reconnecting is off).
+- **Whole pass:** `patch -R -p1 < SAM_Android_phase4_reconnect.patch` from the
+  project root restores the Phase 3 tree (checked on a copy, byte-for-byte —
+  see the verification log).
+
+### 10. Sources
+
+- Repo behaviour, read from the main SAM repository (as in the reconnaissance
+  pass; an isolated copy was used to execute the tests and captures):
+  `interfaces/api/server.py` (`_format_sse`, `event_stream`, `stream_events` —
+  header parsing, heartbeat, closing rules), `interfaces/api/events.py`
+  (`seq = len(history) + 1`, in-memory history, nothing appended after a terminal
+  event), `interfaces/api/gateway.py` (store updated before the event is
+  published; `recover_orphaned_tasks()` at start-up), `interfaces/api/task_store.py`
+  (`ALL_STATUSES`, `TERMINAL_STATUSES`), `tests/test_iqoo_phase3a_offline.py`,
+  `docs/iqoo/PROTOCOL.md`.
+- **No Android or OkHttp documentation was consulted in this pass.** The
+  foreground-service facts are the Phase 3 ones, including its caveat that two of
+  those documentation pages were not re-confirmed.
+
+### 11. Files changed since the Phase 3 zip
+
+9 files, **+642 / −64** (see `SAM_Android_phase4_reconnect.patch`; `patch -p1`
+or `git apply` from the project root of the Phase 3 tree reproduces the new tree
+byte-for-byte — checked on a pristine copy). **Modified:** `TaskMonitor.kt`,
+`HttpSseSamTransport.kt`, `SamTransport.kt`, `SamTransportModels.kt`,
+`TaskWatchForegroundService.kt`, `FakeSamTransport.kt`,
+`HttpSseSamTransportTest.kt`, `TaskMonitorTest.kt`, `README.md`. **New:** none.
+**Removed:** none. Earlier deliverables are left as they were; the full tree is
+`SAM_Android_v0_Agent2_reconnect.zip`, and the evidence is in
+`SAM_Android_phase4_verification_log.txt`.
+
+### 12. Git
+
+Still **no Git repository** in this environment, so there is **no commit and no
+SHA** — none is fabricated. The patch is the portable form of this change; the
+same caveat as Phase 3 applies if you have already made local fixes while
+verifying: `patch -p1` may reject hunks in files you also edited
+(`git apply --3way` inside a repository that has your fixes committed is the
+easier route).
