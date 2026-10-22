@@ -11,14 +11,52 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-if ! command -v brew >/dev/null 2>&1; then
-  echo "Homebrew is required. Install it from https://brew.sh, then rerun setup.sh." >&2
+if command -v brew >/dev/null 2>&1; then
+  BREW="$(command -v brew)"
+else
+  echo "Homebrew is required to install the macOS developer prerequisites."
+  read -r -p "Run the official Homebrew installer from https://brew.sh now? It may request administrator access. [y/N] " answer
+  if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+    echo "Install Homebrew from https://brew.sh, then rerun setup.sh." >&2
+    exit 1
+  fi
+  curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | /bin/bash
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    BREW=/opt/homebrew/bin/brew
+  elif [[ -x /usr/local/bin/brew ]]; then
+    BREW=/usr/local/bin/brew
+  else
+    echo "Homebrew installer finished, but its brew executable was not found. Follow Homebrew's shell setup instructions and rerun." >&2
+    exit 1
+  fi
+  eval "$("$BREW" shellenv)"
+fi
+
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Apple Command Line Tools are required to build the developer app." >&2
+  echo "Run: xcode-select --install, complete the installation, then rerun setup.sh." >&2
   exit 1
+fi
+
+MISSING_BREW_PACKAGES=()
+command -v python3 >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(python@3.12)
+command -v node >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(node)
+command -v npm >/dev/null 2>&1 || { [[ " ${MISSING_BREW_PACKAGES[*]} " == *" node "* ]] || MISSING_BREW_PACKAGES+=(node); }
+command -v cargo >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(rust)
+if (( ${#MISSING_BREW_PACKAGES[@]} )); then
+  echo "SAM's developer setup needs these build prerequisites: ${MISSING_BREW_PACKAGES[*]}"
+  read -r -p "Install them now with Homebrew? [y/N] " answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+  "$BREW" install "${MISSING_BREW_PACKAGES[@]}"
+  else
+    echo "Install the listed Homebrew packages and rerun setup.sh." >&2
+    exit 1
+  fi
 fi
 
 for tool in python3 node npm cargo; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Missing $tool. Install Python 3, Node.js, and Rust toolchain, then rerun." >&2
+    echo "'$tool' is still unavailable after prerequisite setup. Open a new terminal and rerun setup.sh." >&2
     exit 1
   fi
 done
@@ -27,9 +65,9 @@ PYTHON=python3
 if command -v python3.12 >/dev/null 2>&1; then PYTHON=python3.12; fi
 if command -v python3.11 >/dev/null 2>&1; then PYTHON=python3.11; fi
 
-if ! brew list portaudio >/dev/null 2>&1; then
+if ! "$BREW" list portaudio >/dev/null 2>&1; then
   echo "Installing PortAudio (Homebrew)..."
-  brew install portaudio
+  "$BREW" install portaudio
 fi
 
 if [[ ! -x .venv/bin/python ]]; then

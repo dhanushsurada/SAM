@@ -6,12 +6,11 @@
  *
  * `path` fields (chroma_path, log_path, etc.) are rendered read-only —
  * they're derived from SAM_DATA_DIR, not something a settings UI should
- * invite editing. Config has no HTTP layer either way (Settings.save()
- * writes local YAML directly) — see PHASE5_PLAN.md §F for the endpoint
- * this page would need to persist anything for real.
+ * invite editing. Editable values are loaded and saved through the local
+ * /api/settings endpoint; paths and detected hardware remain read-only.
  */
 
-export type FieldType = "text" | "number" | "toggle" | "select" | "password" | "path";
+export type FieldType = "text" | "number" | "toggle" | "select" | "password" | "path" | "readonly";
 
 export interface SettingField {
   key: string;
@@ -143,9 +142,9 @@ export const SETTINGS_SCHEMA: SettingSection[] = [
     id: "runtime",
     title: "Runtime",
     fields: [
-      { key: "api_host", label: "API host", type: "text", default: "0.0.0.0" },
-      { key: "api_port", label: "API port", type: "number", default: 8420 },
-      { key: "incognito", label: "Incognito (skip memory writes)", type: "toggle", default: false },
+      { key: "api_host", label: "API host", type: "readonly", default: "0.0.0.0" },
+      { key: "api_port", label: "API port", type: "readonly", default: 8420 },
+      { key: "incognito", label: "Incognito (skip memory writes)", type: "toggle", default: false, description: "Session only; resets when SAM restarts." },
       { key: "log_level", label: "Log level", type: "select", default: "INFO", options: ["DEBUG", "INFO", "WARNING", "ERROR"] },
       { key: "log_path", label: "Log path", type: "path", default: "~/.sam_data/logs/sam.log" },
       { key: "detected_ram_gb", label: "Detected RAM", type: "path", default: "16 GB" },

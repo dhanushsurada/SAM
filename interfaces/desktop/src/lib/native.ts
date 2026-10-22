@@ -88,6 +88,18 @@ export async function hideQuickAssistant(): Promise<void> {
   await invoke<void>("hide_quick_assistant");
 }
 
+export async function launchAtLoginEnabled(): Promise<boolean> {
+  if (!isNative()) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<boolean>("launch_at_login_enabled");
+}
+
+export async function setLaunchAtLogin(enabled: boolean): Promise<boolean> {
+  if (!isNative()) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<boolean>("set_launch_at_login", { enabled });
+}
+
 /** Which window this JS runtime is mounted in ("main" vs
  * "quick-assistant"). Browser mode has no Tauri window label at all, so it
  * always resolves to "main" — the ordinary app is the only thing a plain

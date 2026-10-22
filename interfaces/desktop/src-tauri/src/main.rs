@@ -40,6 +40,7 @@ use tauri::{
     Manager, RunEvent, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_autostart::ManagerExt;
 
 /// Built fresh on each use rather than a top-level `const` — that keeps
 /// this file from depending on `Shortcut::new` being a `const fn`, which
@@ -69,6 +70,22 @@ fn hide_quick_assistant(app: tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn launch_at_login_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())?;
+    } else {
+        manager.disable().map_err(|e| e.to_string())?;
+    }
+    manager.is_enabled().map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -94,6 +111,8 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             hide_quick_assistant,
+            launch_at_login_enabled,
+            set_launch_at_login,
             runtime::runtime_status,
             runtime::runtime_start,
             runtime::runtime_stop,

@@ -292,6 +292,16 @@ class Settings:
         nothing), apply only the model keys, and replace the user file
         atomically. Everything else in it stays exactly as it was.
         """
+        Settings.persist_overrides(changes)
+
+    @staticmethod
+    def persist_overrides(changes: dict) -> None:
+        """Atomically persist only explicitly changed user settings.
+
+        Start from the file Settings would actually load, then merge the
+        overrides. This keeps unrelated and future settings intact and avoids
+        freezing runtime-derived defaults into the user's configuration.
+        """
         target = SAM_DATA_DIR / "settings.yaml"
         source = target if target.exists() else CONFIG_PATH
         data = {}
