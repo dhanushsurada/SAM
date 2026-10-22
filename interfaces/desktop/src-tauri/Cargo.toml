@@ -37,6 +37,7 @@ eventsource-stream = "0.2"
 # already depends on this internally; declared explicitly since its trait
 # methods are called directly rather than only used transitively.
 futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "time"] }
 
 [[bin]]
 name = "sam-desktop"

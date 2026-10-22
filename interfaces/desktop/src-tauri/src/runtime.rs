@@ -27,7 +27,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
+
+static MODEL_PULL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MODEL_PULL_CANCEL: AtomicBool = AtomicBool::new(false);
+
+struct ModelPullGuard;
+impl Drop for ModelPullGuard {
+    fn drop(&mut self) {
+        MODEL_PULL_ACTIVE.store(false, Ordering::Release);
+        MODEL_PULL_CANCEL.store(false, Ordering::Release);
+    }
+}
 
 // ─── Installed runtime configuration ───────────────────────────────────
 // setup.sh writes this user-controlled config outside the source checkout.
@@ -315,16 +327,14 @@ pub async fn model_select(name: String) -> Result<Value, String> {
 /// listens for those instead of reading this command's return value
 /// (Phase B §B: a command for the side effect, events for the data).
 ///
-/// Cancellation: dropping this future (e.g. the window closing, or a
-/// future "cancel" command that aborts the task this was spawned as)
-/// closes the underlying connection, which is the entire cancellation
-/// mechanism — matching ModelManager.pull()'s own design, which relies
-/// on exactly that and Ollama's resumability to avoid needing anything
-/// more (docs/RUNTIME_BRIDGE_DESIGN.md §E). Nothing here needs to
-/// implement a separate cancel path.
 #[tauri::command]
 pub async fn model_pull(app: AppHandle, name: String) -> Result<(), String> {
     validate_model_name(&name)?;
+    if MODEL_PULL_ACTIVE.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return Err("A model download is already active".to_string());
+    }
+    let _guard = ModelPullGuard;
+    MODEL_PULL_CANCEL.store(false, Ordering::Release);
     let url = format!("{}/api/models/pull", api_base_url()?);
     let resp = reqwest::Client::new()
         .post(&url)
@@ -341,7 +351,20 @@ pub async fn model_pull(app: AppHandle, name: String) -> Result<(), String> {
     }
 
     let mut stream = resp.bytes_stream().eventsource();
-    while let Some(event) = stream.next().await {
+    loop {
+        let next = tokio::select! {
+            event = stream.next() => event,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                if MODEL_PULL_CANCEL.load(Ordering::Acquire) {
+                    let _ = app.emit("model-pull-progress", serde_json::json!({
+                        "name": name, "status": "cancelled", "detail": "Download cancelled; retry to resume with Ollama."
+                    }));
+                    return Err("Model download cancelled; retry to resume with Ollama.".to_string());
+                }
+                continue;
+            }
+        };
+        let Some(event) = next else { break; };
         match event {
             Ok(ev) => {
                 // ev.data is the raw text after "data: " -- passed
@@ -372,4 +395,14 @@ pub async fn model_pull(app: AppHandle, name: String) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn model_pull_cancel() -> bool {
+    if MODEL_PULL_ACTIVE.load(Ordering::Acquire) {
+        MODEL_PULL_CANCEL.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    }
 }

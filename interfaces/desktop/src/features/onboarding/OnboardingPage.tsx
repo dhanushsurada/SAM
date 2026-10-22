@@ -138,6 +138,7 @@ export function OnboardingPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.pullModel(modelName)}>Download model</Button>
+                {runtime.pulling && <Button variant="ghost" size="sm" onClick={() => void runtime.cancelPull()}>Cancel download</Button>}
                 <Button variant="primary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.selectModel(modelName)}>Use this model</Button>
               </div>
               {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}

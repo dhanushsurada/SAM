@@ -2965,6 +2965,9 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 name = "sam-desktop"
 version = "0.1.0"
 dependencies = [
+ "eventsource-stream",
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
@@ -2972,6 +2975,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
+ "tokio",
 ]
 
 [[package]]
