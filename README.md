@@ -26,7 +26,7 @@
 | Chip | M2 (Apple Silicon) | M3 |
 | RAM | 16GB | 16GB+ |
 | Storage | 256GB free | 512GB |
-| macOS | Ventura (13) | Sonoma (14) |
+| macOS | Sonoma (14) | Sequoia (15) or later |
 
 ---
 
@@ -37,20 +37,20 @@
 git clone https://github.com/dhanushsurada/SAM
 cd SAM
 
-# 2. Run setup (installs everything — takes 15-30 min first time)
+# 2. Run the source-based developer setup
 chmod +x setup.sh
 ./setup.sh
 ```
 
-Setup does all of this automatically:
-- Installs Ollama
-- Pulls Qwen 2.5 14B (auto-selects model based on your RAM)
-- Pulls nomic-embed-text (embeddings)
-- Pulls Moondream (vision)
-- Creates Python virtual environment
-- Installs all Python packages
-- Installs Playwright + Chromium
-- Sets up launchd agent so SAM starts on every boot
+The macOS setup supports Python 3.11 and 3.12, preferring 3.11 to stay
+inside the compatibility range of the declared dependencies. It reads
+`compatibility/manifest.json`, checks the desktop toolchain and dependency
+manifest, offers to install missing prerequisites through Homebrew, then
+builds and launches a Tauri `.app` from this checkout. Ollama is installed
+with the macOS Homebrew cask when needed. Setup reviews configured model
+downloads with you before pulling them; it preserves existing model choices.
+This is a developer setup, not a standalone DMG installer. See
+[`docs/deployment/DESKTOP_INSTALL.md`](docs/deployment/DESKTOP_INSTALL.md).
 
 ---
 
@@ -59,14 +59,15 @@ Setup does all of this automatically:
 ### Start SAM
 
 ```bash
-# Activate virtual environment
+# For command-line development only; the installed desktop app starts the API.
 source .venv/bin/activate
 
-# Start SAM
+# Start the separate voice loop manually
 python main.py
 ```
 
-Or if already set up with launchd, SAM starts automatically on boot.
+The desktop app starts and manages the SAM API. “Open SAM at login” is
+controlled from Settings; setup does not install a second launchd manager.
 
 ### Wake SAM
 

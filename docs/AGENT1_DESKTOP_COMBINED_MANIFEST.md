@@ -3,6 +3,13 @@
 Unzip at the repository root. Supersedes `sam-desktop-combined.zip` from
 last round — this is the complete current state, native shell through C7.
 
+> **Historical delivery snapshot.** The “New this round”, verification, and
+> remaining-work notes below record the state when the agent archive was
+> delivered; they are not a current implementation checklist. Later work
+> added runtime-backed onboarding, settings persistence, and user-controlled
+> login startup. Current installation policy and validation status live in
+> `docs/deployment/DESKTOP_INSTALL.md` and `interfaces/desktop/README.md`.
+
 ## New this round (C6, C7)
 
 - `runtime/setup_state.py` — the onboarding-journey state
@@ -25,8 +32,10 @@ last round — this is the complete current state, native shell through C7.
   background timer the whole app pays for regardless of what's on
   screen.
 
-Nothing yet *calls* `useRuntime()` — Onboarding, Settings, and
-Permissions still don't consume it. That's C8/C9, not started.
+Since this snapshot, Onboarding and Settings consume the shared runtime
+state. The `/api/settings` endpoint persists editable preferences locally,
+while credentials are redacted and incognito remains session-only.
+Permissions has not been converted into a runtime-backed settings surface.
 
 ## Verification (re-run fresh this round, not carried over)
 
@@ -36,21 +45,21 @@ Permissions still don't consume it. That's C8/C9, not started.
 | TypeScript (`runtime.tsx`, `App.tsx`, `native.ts`, and the full existing tree) | Real `tsc --noEmit`, full tree: **0 errors** |
 | Rust (`runtime.rs`'s 2 new commands) | Unverified by execution, same as every other Rust command so far — no `cargo` in this sandbox |
 
-## First run — unchanged from last round
+## First run — snapshot instructions superseded
 
 ```bash
-cd interfaces/desktop
-npm install
-cd src-tauri && cargo check
-cd ../../..
-npm run tauri icon /path/to/SAM_LOGO.png   # (run from interfaces/desktop)
-cd interfaces/desktop && npm run tauri dev
+./setup.sh
 ```
+
+On macOS, the developer installer selects a compatible Python from
+`compatibility/manifest.json`, installs Ollama through its macOS Homebrew cask
+when needed, builds the `.app`, and opens it. First native launch starts the
+API and routes fresh installs to the persisted onboarding journey. The native
+Rust build still needs validation on a machine with Cargo and Rust installed.
 
 ## Still open
 
-C8 (wire Onboarding's steps to `useRuntime()`/`useSetupState`,
-gate "Ready" on real health, stop showing terminal copy-paste for model
-setup), C9 (Settings' "SAM Runtime" section). Everything else flagged in
-`PHASE_C1-C3_REPORT.md` and `RUNTIME_BRIDGE_DESIGN.md` §I is exactly as
-open as it was there.
+The current desktop still needs native Rust build/launch verification.
+Android/Connect, JEV responsibility boundaries, task-state synchronization,
+and remaining Core features are tracked in their current workstream documents;
+this historical delivery report does not redefine them.
