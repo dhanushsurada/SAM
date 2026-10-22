@@ -74,6 +74,11 @@ def main() -> int:
         alias.parent.mkdir(parents=True, exist_ok=True)
         if not alias.exists():
             alias.symlink_to(interpreter)
+        # The consumer keeps optional features opt-in and writable per user.
+        # Bundle pip as a management tool so a consumer can install selected
+        # manifest groups into ~/.sam_data/python-packages without uv or the
+        # source checkout being present.
+        run([uv, "pip", "install", "--python", str(alias), "--target", str(site_packages), "pip>=24,<27"])
         # Resolve the same declared core group used by the source installers.
         lines = subprocess.check_output(
             [sys.executable, str(ROOT / "runtime/environment_manager.py"),
@@ -87,7 +92,10 @@ def main() -> int:
             "architecture": platform.machine(),
             "dependency_groups": ["core"],
             "created_unix": int(time.time()),
-            "optional_capabilities": "Install through SAM setup when capability package management is available.",
+            "optional_capability_strategy": "user-writable-python-packages",
+            "optional_dependency_groups": [],
+            "user_data_root": "~/.sam_data",
+            "user_packages_dir": "~/.sam_data/python-packages",
         }
         (stage / "bundle.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         backup = None

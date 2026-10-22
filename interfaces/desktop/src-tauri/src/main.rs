@@ -119,6 +119,8 @@ fn main() {
             runtime::runtime_restart,
             runtime::ollama_status,
             runtime::ollama_start,
+            runtime::open_ollama_download,
+            runtime::runtime_repair_configuration,
             runtime::setup_state_get,
             runtime::setup_state_set,
             runtime::runtime_api_base_url,

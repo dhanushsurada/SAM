@@ -3,6 +3,7 @@ import { FiServer, FiHardDrive, FiWifi, FiCpu, FiRefreshCw } from "react-icons/f
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill, type SamState } from "@/components/StatusPill";
 import { Button } from "@/components/Button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { getEnvironmentReport, getHealth, repairEnvironment, type EnvironmentReport } from "@/api/client";
 import type { HealthStatus } from "@/api/types";
 
@@ -27,6 +28,7 @@ export function DiagnosticsPage() {
   const [loading, setLoading] = useState(true);
   const [repairing, setRepairing] = useState(false);
   const [repairMessage, setRepairMessage] = useState<string | null>(null);
+  const [pendingRepairGroup, setPendingRepairGroup] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -105,15 +107,15 @@ export function DiagnosticsPage() {
         <section className="space-y-2 rounded-md border border-line bg-surface p-3">
           <h2 className="text-sm font-medium text-ink">Installation and recovery</h2>
           <p className="text-xs text-mute">Onboarding: {report.setup.journey.state}. Free space: {report.environment.hardware.disk.free_gb ?? "unknown"} GB.</p>
-          <p className="text-xs text-mute">Repair installs manifest-pinned packages into a source install's virtual environment. System prerequisites still need their platform installer.</p>
-          {report.setup.dependency_repair_supported === false && <p className="text-xs text-warn">This managed app runtime cannot be modified in place. Install a refreshed app package to update its dependencies.</p>}
+          <p className="text-xs text-mute">Install or repair optional capabilities using the manifest's package constraints. Consumer packages are stored under your SAM user data folder; source installs use their virtual environment.</p>
+          {report.setup.dependency_repair_supported === false && <p className="text-xs text-warn">A writable package manager is unavailable in this runtime. Reinstall SAM from its latest DMG or use the source setup route.</p>}
           <div className="flex flex-wrap gap-2">
             {Object.entries(report.dependencies).filter(([group]) => group !== "core").map(([group, state]) => (
-              <Button key={group} variant="secondary" size="sm" disabled={repairing || state.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => void repair([group])}>
-                Repair {group}
+              <Button key={group} variant="secondary" size="sm" disabled={repairing || state.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => setPendingRepairGroup(group)}>
+                Install {group} capability
               </Button>
             ))}
-            <Button variant="secondary" size="sm" disabled={repairing || report.dependencies.core?.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => void repair(["core"])}>
+            <Button variant="secondary" size="sm" disabled={repairing || report.dependencies.core?.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => setPendingRepairGroup("core")}>
               Repair core
             </Button>
           </div>
@@ -136,6 +138,20 @@ export function DiagnosticsPage() {
           ))}
         </section>
       </>}
+      <ConfirmDialog
+        open={pendingRepairGroup !== null}
+        title={`Install ${pendingRepairGroup ?? ""} dependencies?`}
+        description={`SAM will download the version-constrained ${pendingRepairGroup ?? "selected"} packages from the configured Python package index into its writable per-user package directory. Some groups can be large and may require additional macOS tools or permissions. Existing app resources, settings, memory, and models are not replaced.`}
+        confirmLabel="Install packages"
+        destructive={false}
+        confirming={repairing}
+        onConfirm={() => {
+          const group = pendingRepairGroup;
+          setPendingRepairGroup(null);
+          if (group) void repair([group]);
+        }}
+        onCancel={() => setPendingRepairGroup(null)}
+      />
     </div>
   );
 }

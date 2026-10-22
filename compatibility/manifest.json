@@ -14,7 +14,15 @@
       "runtime_managed_by_bundle": true,
       "ollama_bundled": false,
       "models_bundled": false,
-      "optional_dependency_groups_bundled": []
+      "optional_dependency_groups_bundled": [],
+      "optional_dependency_strategy": "user-writable-python-packages",
+      "upgrade_policy": "manual-dmg-replace-preserve-user-data",
+      "runtime_paths": {
+        "configuration": "~/.sam_data/desktop-runtime.json",
+        "logs": "~/.sam_data/logs",
+        "user_packages": "~/.sam_data/python-packages",
+        "models": "managed-by-ollama"
+      }
     },
     "source_developer_platforms": ["macos", "linux", "windows"]
   },

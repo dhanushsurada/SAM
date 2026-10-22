@@ -218,6 +218,14 @@ export function ollamaStart(): Promise<OllamaActionResult> {
   return invokeNative<OllamaActionResult>("ollama_start");
 }
 
+export function openOllamaDownload(): Promise<void> {
+  return invokeNative<void>("open_ollama_download");
+}
+
+export function repairRuntimeConfiguration(): Promise<void> {
+  return invokeNative<void>("runtime_repair_configuration");
+}
+
 /** Return shape is ModelManager.status()'s existing dict, already
  * consumed today by the real /brain page — deliberately left as
  * `unknown` here rather than guessed at and re-typed; callers that need
