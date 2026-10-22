@@ -5,7 +5,8 @@ import { Switch } from "@/components/Switch";
 import { SETTINGS_SCHEMA, type SettingField } from "./types";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
 import { Button } from "@/components/Button";
-import { isNative, launchAtLoginEnabled, setLaunchAtLogin } from "@/lib/native";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { isNative, launchAtLoginEnabled, setLaunchAtLogin, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
 import { getSettings, updateSettings } from "@/api/client";
 
 type FormState = Record<string, string | number | boolean>;
@@ -113,6 +114,9 @@ export function SettingsPage() {
   const [launchAtLogin, setLaunchAtLoginValue] = useState<boolean | null>(null);
   const [launchAtLoginError, setLaunchAtLoginError] = useState<string | null>(null);
   const [pullName, setPullName] = useState("");
+  const [confirmPull, setConfirmPull] = useState(false);
+  const [ollamaActionMessage, setOllamaActionMessage] = useState<string | null>(null);
+  const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const runtime = useRuntime();
   useRuntimePolling();
 
@@ -163,6 +167,31 @@ export function SettingsPage() {
     }
   };
 
+  const startOllama = async () => {
+    setOllamaActionMessage(null);
+    try {
+      const result = await runtime.startOllama();
+      setOllamaActionMessage(result.message);
+    } catch (error) {
+      setOllamaActionMessage(error instanceof Error ? error.message : "Could not start Ollama.");
+    }
+  };
+
+  const repairRuntime = async () => {
+    setRuntimeRepairing(true);
+    setSettingsMessage(null);
+    try {
+      await repairRuntimeConfiguration();
+      await runtime.startProcess("api");
+      await runtime.refresh();
+      setSettingsMessage("SAM runtime configuration was recreated and the API start was requested.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Runtime repair failed. Reinstall SAM from its DMG.");
+    } finally {
+      setRuntimeRepairing(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader
@@ -185,13 +214,21 @@ export function SettingsPage() {
           <h2 className="text-sm font-medium text-ink">Live runtime and models</h2>
           <p className="text-xs text-mute">These controls use the same runtime state as onboarding.</p>
         </div>
-        {runtime.error && <p className="text-xs text-danger">Runtime status: {runtime.error}</p>}
+        {runtime.error && <>
+          <p className="text-xs text-danger">Runtime status: {runtime.error}</p>
+          <Button variant="secondary" size="sm" disabled={runtimeRepairing} loading={runtimeRepairing} onClick={() => void repairRuntime()}>Repair runtime setup</Button>
+        </>}
         <p className="text-xs text-mute">API: {runtime.snapshot?.processes.api?.state ?? (runtime.loading ? "checking" : "unknown")} · Ollama: {runtime.snapshot?.ollama.state ?? "unknown"}</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>
-          <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>
+          {runtime.snapshot?.ollama.state === "NOT_INSTALLED" ?
+            <Button variant="secondary" size="sm" onClick={() => void openOllamaDownload().catch((error) => setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama download page."))}>Get Ollama</Button> :
+            <Button variant="secondary" size="sm" onClick={() => void startOllama()}>Start Ollama</Button>}
           <Button variant="ghost" size="sm" onClick={() => { void runtime.refresh(); void runtime.refreshModels(); }}>Refresh status</Button>
         </div>
+        {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <p className="text-xs text-mute">Install the official Ollama macOS app, then return here and refresh. SAM does not bundle Ollama. You can also configure a reachable Ollama endpoint in the Brain settings.</p>}
+        {runtime.snapshot?.ollama.state === "STOPPED" && <p className="text-xs text-mute">Ollama is installed but not responding. Start it here, open the Ollama app, or check the configured Ollama host.</p>}
+        {ollamaActionMessage && <p role="status" className="text-xs text-mute">{ollamaActionMessage}</p>}
         <div className="flex items-center justify-between border-t border-line pt-3">
           <div>
             <p className="text-sm text-ink">Open SAM at login</p>
@@ -212,6 +249,7 @@ export function SettingsPage() {
         </div>
         {runtime.models && <>
           <p className="text-xs text-mute">Selected: {runtime.models.selected_model} · Active: {runtime.models.active_model ?? "none"}</p>
+          {runtime.models.models.length === 0 && <p className="text-xs text-warn">No model is installed. SAM's model-backed chat, planning, and other Brain features remain unavailable until you choose and download one.</p>}
           <div className="flex flex-wrap items-center gap-2">
             <select aria-label="Select installed model" value={runtime.models.selected_model} onChange={(e) => void runtime.selectModel(e.target.value)} className="rounded-md border border-line bg-void px-2 py-1 text-sm text-ink">
               {runtime.models.models.filter((model) => model.compatibility !== "incompatible").map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
@@ -221,12 +259,22 @@ export function SettingsPage() {
         </>}
         <div className="flex flex-wrap gap-2">
           <input aria-label="Model to download" value={pullName} onChange={(e) => setPullName(e.target.value)} placeholder="Model name (downloads can be large)" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm text-ink" />
-          <Button variant="secondary" size="sm" disabled={!pullName || runtime.pulling} onClick={() => void runtime.pullModel(pullName)}>Download model</Button>
+          <Button variant="secondary" size="sm" disabled={!pullName || runtime.pulling || runtime.snapshot?.ollama.state !== "READY"} onClick={() => setConfirmPull(true)}>{runtime.pullError ? "Retry model download" : "Download model"}</Button>
           {runtime.pulling && <Button variant="ghost" size="sm" onClick={() => void runtime.cancelPull()}>Cancel download</Button>}
         </div>
         {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}
         {(runtime.pullError || runtime.modelsError) && <p className="text-xs text-danger">{runtime.pullError || runtime.modelsError}</p>}
       </Card>}
+
+      <ConfirmDialog
+        open={confirmPull}
+        title="Download this model?"
+        description={`Ollama will download ${pullName || "the selected model"}. Model downloads can require several gigabytes of storage and network data. Check available disk space before confirming. The download can be cancelled and retried later.`}
+        confirmLabel="Download model"
+        destructive={false}
+        onConfirm={() => { setConfirmPull(false); if (pullName.trim()) void runtime.pullModel(pullName.trim()); }}
+        onCancel={() => setConfirmPull(false)}
+      />
 
       <nav className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line pb-3 text-xs text-mute">
         {SETTINGS_SCHEMA.map((s) => (
