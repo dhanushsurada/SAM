@@ -22,6 +22,8 @@ import type {
   SetupState,
   SetupJourneyState,
 } from "@/lib/native";
+import type { BrainStatus } from "@/api/types";
+import { isNative } from "@/lib/native";
 
 /**
  * The one place Onboarding, Settings, and Permissions all read runtime
@@ -52,11 +54,11 @@ interface RuntimeContextValue {
   restartProcess: (name?: ProcessName) => Promise<LifecycleResponse>;
   startOllama: () => Promise<OllamaActionResult>;
 
-  models: unknown | null;
+  models: BrainStatus | null;
   modelsLoading: boolean;
   modelsError: string | null;
   refreshModels: () => Promise<void>;
-  selectModel: (name: string) => Promise<unknown>;
+  selectModel: (name: string) => Promise<BrainStatus>;
 
   pulling: boolean;
   pullProgress: ModelPullProgress | null;
@@ -85,7 +87,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [models, setModels] = useState<unknown | null>(null);
+  const [models, setModels] = useState<BrainStatus | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
@@ -241,5 +243,5 @@ export function useRuntime(): RuntimeContextValue {
  * beyond subscribing/unsubscribing; read `snapshot` via useRuntime(). */
 export function useRuntimePolling(): void {
   const { subscribeToPolling } = useRuntime();
-  useEffect(() => subscribeToPolling(), [subscribeToPolling]);
+  useEffect(() => (isNative() ? subscribeToPolling() : undefined), [subscribeToPolling]);
 }

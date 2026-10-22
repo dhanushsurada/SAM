@@ -102,11 +102,20 @@ fn main() {
             runtime::ollama_start,
             runtime::setup_state_get,
             runtime::setup_state_set,
+            runtime::runtime_api_base_url,
             runtime::models_list,
             runtime::model_select,
             runtime::model_pull,
         ])
         .setup(|app| {
+            // The desktop app owns the SAM backend lifecycle. Installers do
+            // not also register launchd/Task Scheduler services for it.
+            std::thread::spawn(|| {
+                if let Err(error) = runtime::runtime_start(Some("api".to_string())) {
+                    eprintln!("SAM: backend startup failed: {error}");
+                }
+            });
+
             // Registered at runtime rather than only declared, so a
             // failure (shortcut already bound to another app) is visible
             // in the logs instead of silently no-op-ing at startup.

@@ -124,32 +124,17 @@ With Ollama reachable, this becomes one of:
   delete — nothing reads them — but the installer won't touch them for you
   either way.
 
-## Installing / reinstalling SAM (Phase 4)
+## Installing / reinstalling SAM
 
-Three installers, one shared structure: check platform → Python →
-PortAudio → Ollama → RAM-tiered model pull → venv → `pip install` →
-Playwright Chromium → initialize `~/.sam_data`.
-
-- **`setup.sh` (macOS).** Safe to run again on an existing install: reuses
-  a valid `.venv` instead of recreating it (checks for `.venv/bin/python3`;
-  if `.venv` exists but looks incomplete, it's rebuilt, not silently left
-  broken); `ollama pull` is already idempotent server-side; the `launchd`
-  agent is unloaded before its plist is replaced if one's already running,
-  then reloaded, with the real `launchctl` exit code checked — the old
-  behavior silently swallowed load failures. Never touches an existing
-  `~/.sam_data` or your `settings.yaml`.
-- **`setup_windows.ps1` (Windows).** Same `.venv` reuse pattern, same
-  `~/.sam_data` target. The Task Scheduler step already used
-  `-Force`, which safely replaces an existing task — no separate
-  unload step needed there, unlike launchd. **Implemented, not verified
-  on real Windows hardware** — no environment to test it against so far.
-- **`setup_linux.sh` (Linux, new in Phase 4).** Debian/Ubuntu (`apt`)
-  only — checks for `apt` explicitly and exits cleanly elsewhere rather
-  than guessing. `portaudio19-dev` via `apt`, Ollama via its official Linux
-  install script, RAM read from `/proc/meminfo`. Same venv-reuse and
-  `~/.sam_data` behavior as macOS. **No auto-start-on-boot in this first
-  version** — no systemd unit yet, start manually. **Implemented, not
-  verified on real Linux hardware.**
+Desktop installation is source-based today; the setup scripts preserve the
+user's SAM model settings and ask before downloading configured models.
+macOS and Windows build the Tauri desktop app, which owns starting the API.
+Their legacy launchd/Task Scheduler Python supervisors are disabled and
+preserved by setup to avoid a second process manager. Linux remains an
+explicit Debian/Ubuntu Python-backend setup with manual startup and no Tauri
+desktop or login autostart. See
+[`DESKTOP_INSTALL.md`](DESKTOP_INSTALL.md) for prerequisites, install scope,
+runtime configuration, and current unverified platform builds.
 
 None of the three will silently pull large models without printing what
 it's doing first, and none will delete or overwrite `~/.sam_data` or an

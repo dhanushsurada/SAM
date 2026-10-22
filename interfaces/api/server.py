@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -73,6 +74,20 @@ BASE_DIR = Path(__file__).parent.parent.parent
 CLIENT_DIR = BASE_DIR / "interfaces" / "web"
 
 app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase3a")
+# The packaged Tauri webview has a distinct origin and cannot use Vite's
+# development proxy. Keep CORS limited to Tauri v2's platform origins and
+# the local Vite development server; this is transport configuration, not
+# an authentication boundary.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Last-Event-ID", "X-SAM-Device", "X-SAM-Timestamp", "X-SAM-Nonce", "X-SAM-Signature"],
+)
 app.include_router(connect_router)  # agent/cross-device: /api/connect/*
 
 _gateway: TaskGateway = None  # constructed lazily on first request / at startup

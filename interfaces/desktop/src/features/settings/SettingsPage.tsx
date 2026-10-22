@@ -1,8 +1,11 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/Card";
 import { Switch } from "@/components/Switch";
 import { SETTINGS_SCHEMA, type SettingField } from "./types";
+import { useRuntime, useRuntimePolling } from "@/stores/runtime";
+import { Button } from "@/components/Button";
+import { isNative } from "@/lib/native";
 
 type FormState = Record<string, string | number | boolean>;
 
@@ -90,6 +93,14 @@ function Field({
 
 export function SettingsPage() {
   const [values, setValues] = useState<FormState>(initialState);
+  const [pullName, setPullName] = useState("");
+  const runtime = useRuntime();
+  useRuntimePolling();
+
+  useEffect(() => {
+    if (!isNative()) return;
+    void runtime.refreshModels();
+  }, [runtime.refreshModels]);
 
   const setField = (key: string, value: string | number | boolean) =>
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -101,6 +112,35 @@ export function SettingsPage() {
         mode="demo"
         description="Every field and default here comes straight from config/settings.py. Editable locally for preview — nothing here is saved anywhere: Settings.save() writes a local YAML file directly, which a browser has no endpoint to reach yet."
       />
+
+      {isNative() && <Card as="section" className="space-y-3">
+        <div>
+          <h2 className="text-sm font-medium text-ink">Live runtime and models</h2>
+          <p className="text-xs text-mute">These controls use the same runtime state as onboarding.</p>
+        </div>
+        {runtime.error && <p className="text-xs text-danger">Runtime status: {runtime.error}</p>}
+        <p className="text-xs text-mute">API: {runtime.snapshot?.processes.api?.state ?? (runtime.loading ? "checking" : "unknown")} · Ollama: {runtime.snapshot?.ollama.state ?? "unknown"}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>
+          <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>
+          <Button variant="ghost" size="sm" onClick={() => { void runtime.refresh(); void runtime.refreshModels(); }}>Refresh status</Button>
+        </div>
+        {runtime.models && <>
+          <p className="text-xs text-mute">Selected: {runtime.models.selected_model} · Active: {runtime.models.active_model ?? "none"}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Select installed model" value={runtime.models.selected_model} onChange={(e) => void runtime.selectModel(e.target.value)} className="rounded-md border border-line bg-void px-2 py-1 text-sm text-ink">
+              {runtime.models.models.filter((model) => model.compatibility !== "incompatible").map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+            </select>
+            <Button variant="ghost" size="sm" onClick={() => void runtime.refreshModels()}>Refresh models</Button>
+          </div>
+        </>}
+        <div className="flex flex-wrap gap-2">
+          <input aria-label="Model to download" value={pullName} onChange={(e) => setPullName(e.target.value)} placeholder="Model name (downloads can be large)" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm text-ink" />
+          <Button variant="secondary" size="sm" disabled={!pullName || runtime.pulling} onClick={() => void runtime.pullModel(pullName)}>Download model</Button>
+        </div>
+        {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}
+        {(runtime.pullError || runtime.modelsError) && <p className="text-xs text-danger">{runtime.pullError || runtime.modelsError}</p>}
+      </Card>}
 
       <nav className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line pb-3 text-xs text-mute">
         {SETTINGS_SCHEMA.map((s) => (

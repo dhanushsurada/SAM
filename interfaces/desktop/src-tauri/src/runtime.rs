@@ -23,43 +23,56 @@
 
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
 
-// ─── Dev-mode Python/CLI resolution (Phase C §11's production gap) ────────
-//
-// Both functions below are correct for a dev checkout and will not be
-// correct once this is packaged and installed elsewhere — that's not
-// hidden, it's the explicit, named production gap this phase was told
-// not to solve yet. Keeping both as single functions (rather than
-// inlining `"python3"` and a relative path at each call site) is what
-// makes the eventual production fix a one-place change instead of a
-// repo-wide find-and-replace.
+// ─── Installed runtime configuration ───────────────────────────────────
+// setup.sh writes this user-controlled config outside the source checkout.
+// Runtime paths never depend on CARGO_MANIFEST_DIR or the app's cwd.
+const RUNTIME_CONFIG: &str = ".sam_data/desktop-runtime.json";
 
-/// CARGO_MANIFEST_DIR is this crate's own directory
-/// (interfaces/desktop/src-tauri) baked in at *compile* time — reliable
-/// for a dev build run from a checkout. Meaningless once this binary is
-/// installed somewhere else, which is exactly why this isn't the answer
-/// for a packaged `.app`.
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("..")
+#[derive(Debug, Deserialize)]
+struct RuntimeConfig {
+    app_root: PathBuf,
+    resources_dir: PathBuf,
+    sam_cli: PathBuf,
+    python: PathBuf,
+    api_base_url: String,
+    environment_path: Option<String>,
 }
 
-fn sam_cli_path() -> PathBuf {
-    repo_root().join("sam_cli.py")
+fn runtime_config() -> Result<RuntimeConfig, String> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "User home is unavailable; run the platform setup script to configure SAM Desktop".to_string())?;
+    let path = home.join(RUNTIME_CONFIG);
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!(
+        "SAM Desktop runtime configuration is missing at {}: {e}. Run the platform setup script first.",
+        path.display()
+    ))?;
+    let config: RuntimeConfig = serde_json::from_str(&raw)
+        .map_err(|e| format!("invalid SAM Desktop runtime configuration {}: {e}", path.display()))?;
+    for (label, candidate) in [
+        ("application root", &config.app_root),
+        ("resources directory", &config.resources_dir),
+        ("SAM CLI", &config.sam_cli),
+        ("Python executable", &config.python),
+    ] {
+        if !candidate.exists() {
+            return Err(format!("configured {label} does not exist: {}", candidate.display()));
+        }
+    }
+    if !config.api_base_url.starts_with("http://") && !config.api_base_url.starts_with("https://") {
+        return Err("api_base_url must be an http(s) URL".to_string());
+    }
+    Ok(config)
 }
 
-/// Relies on `python3` already being on PATH — true for a repo checkout
-/// with its environment active, not guaranteed inside a packaged app
-/// with no shell environment inherited the same way.
-fn python_command() -> &'static str {
-    "python3"
+fn api_base_url() -> Result<String, String> {
+    Ok(runtime_config()?.api_base_url.trim_end_matches('/').to_string())
 }
 
 /// Every CLI-bridge command shares this shape: run sam_cli.py, capture
@@ -73,15 +86,21 @@ fn python_command() -> &'static str {
 /// `sh -c "..."`, so there's no injection surface even in principle,
 /// independent of validate_model_name's own check elsewhere in this file.
 fn run_sam_cli(args: &[&str]) -> Result<Value, String> {
-    let mut cmd = Command::new(python_command());
-    cmd.arg(sam_cli_path());
+    let config = runtime_config()?;
+    let mut cmd = Command::new(&config.python);
+    cmd.arg(&config.sam_cli);
     cmd.args(args);
     cmd.arg("--json");
+    cmd.current_dir(&config.app_root);
+    cmd.env("PYTHONPATH", &config.resources_dir);
+    if let Some(path) = &config.environment_path {
+        cmd.env("PATH", path);
+    }
 
     let output = cmd.output().map_err(|e| {
         format!(
-            "could not run sam_cli.py (is `{}` on PATH?): {e}",
-            python_command()
+            "could not run SAM CLI using configured Python {}: {e}",
+            config.python.display()
         )
     })?;
 
@@ -94,6 +113,11 @@ fn run_sam_cli(args: &[&str]) -> Result<Value, String> {
             String::from_utf8_lossy(&output.stderr).trim(),
         )
     })
+}
+
+#[tauri::command]
+pub fn runtime_api_base_url() -> Result<String, String> {
+    api_base_url()
 }
 
 // ─── Runtime lifecycle (CLI bridge) ────────────────────────────────────────
@@ -172,16 +196,6 @@ pub fn setup_state_set(state: String, model: Option<String>) -> Result<Value, St
 
 // ─── Models (HTTP passthrough to the already-running SAM API gateway) ─────
 
-/// Phase C §12's explicit instruction: one function, not
-/// "http://localhost:8420" scattered across every command below. Dev
-/// value only — see the production-gap note in
-/// docs/RUNTIME_BRIDGE_DESIGN.md §I. This is the one place a later
-/// production fix (an absolute URL switched on by isNative(), per that
-/// doc) needs to change.
-fn api_base_url() -> String {
-    "http://localhost:8420".to_string()
-}
-
 /// Ollama's own name:tag grammar, checked before a model name ever
 /// reaches a URL or JSON body. A second, independent gate — not a
 /// replacement for ModelManager.validate_selection's own check on the
@@ -228,7 +242,7 @@ async fn relay_gateway_json(resp: reqwest::Response) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn models_list() -> Result<Value, String> {
-    let url = format!("{}/api/models", api_base_url());
+    let url = format!("{}/api/models", api_base_url()?);
     let resp = reqwest::get(&url)
         .await
         .map_err(|e| format!("could not reach the SAM gateway at {url}: {e}"))?;
@@ -238,7 +252,7 @@ pub async fn models_list() -> Result<Value, String> {
 #[tauri::command]
 pub async fn model_select(name: String) -> Result<Value, String> {
     validate_model_name(&name)?;
-    let url = format!("{}/api/models/select", api_base_url());
+    let url = format!("{}/api/models/select", api_base_url()?);
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&ModelRequestBody { model: &name })
@@ -264,7 +278,7 @@ pub async fn model_select(name: String) -> Result<Value, String> {
 #[tauri::command]
 pub async fn model_pull(app: AppHandle, name: String) -> Result<(), String> {
     validate_model_name(&name)?;
-    let url = format!("{}/api/models/pull", api_base_url());
+    let url = format!("{}/api/models/pull", api_base_url()?);
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&ModelRequestBody { model: &name })

@@ -1,12 +1,9 @@
 #!/bin/bash
 # SAM Setup Script — Linux (Debian/Ubuntu family, apt-based)
 #
-# STATUS: implemented, NOT yet verified on a real machine. This mirrors
-# setup.sh's (macOS) structure step-for-step so the two stay easy to compare
-# and maintain together. Treat as "implemented, unverified" until someone
-# actually runs it start-to-finish on real Debian/Ubuntu hardware — see
-# docs/deployment/LOCAL_RUNTIME.md for the same convention already used for
-# the Windows script's real-machine gap.
+# Scope: Python backend developer setup for Debian/Ubuntu (apt-based) only.
+# It does not install the Tauri desktop shell or configure login startup.
+# The backend is started manually; its API process is controlled by SAMRuntime.
 #
 # v1 scope: no systemd unit / autostart-on-boot here on purpose (the
 # macOS/launchd equivalent). Run manually for now; a --user systemd unit can
@@ -39,6 +36,10 @@ if ! command -v apt-get &> /dev/null; then
     echo -e "${RED}ERROR: this script only supports apt-based distributions (Debian/Ubuntu family).${NC}"
     echo -e "${RED}No other package manager is supported yet — see Phase 4 docs.${NC}"
     exit 1
+fi
+if ! command -v curl >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y curl
 fi
 
 echo -e "${GREEN}[1/8] Checking Python...${NC}"
@@ -75,54 +76,38 @@ else
     echo "  PortAudio already installed"
 fi
 
-echo -e "${GREEN}[2/8] Installing Ollama...${NC}"
+echo -e "${GREEN}[2/8] Checking Ollama...${NC}"
 if ! command -v ollama &> /dev/null; then
-    echo "  Downloading Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
+    read -r -p "Ollama is required for local models. Install it now using the official installer? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        curl -fsSL https://ollama.com/install.sh | sh
+    else
+        echo "Install Ollama and rerun setup_linux.sh." >&2
+        exit 1
+    fi
     echo "  Ollama installed"
 else
     echo "  Ollama already installed"
 fi
 
-echo -e "${GREEN}[3/8] Starting Ollama...${NC}"
-if ! pgrep -x "ollama" > /dev/null; then
+echo -e "${GREEN}[3/8] Waiting for Ollama...${NC}"
+if ! curl --silent --fail --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then
     ollama serve &>/dev/null &
-    sleep 3
-else
-    echo "  Ollama already running"
 fi
-
-echo -e "${GREEN}[4/8] Pulling AI models (this takes time — grab a coffee)...${NC}"
-
-# Detect RAM via /proc/meminfo directly rather than `free`, which is not
-# guaranteed to be installed on minimal/container Debian images.
-RAM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-echo "  Detected RAM: ${RAM_GB}GB"
-
-if [ "$RAM_GB" -ge 32 ]; then
-    MODEL="qwen2.5:32b"
-elif [ "$RAM_GB" -ge 16 ]; then
-    MODEL="qwen2.5:14b"
-else
-    MODEL="qwen2.5:7b"
-fi
-
-echo "  Pulling brain model: $MODEL"
-ollama pull $MODEL
-
-echo "  Pulling embedding model: nomic-embed-text"
-ollama pull nomic-embed-text
-
-echo "  Pulling vision model: moondream"
-ollama pull moondream
+OLLAMA_READY=false
+for _ in {1..60}; do
+    if curl --silent --fail --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then OLLAMA_READY=true; break; fi
+    sleep 1
+done
+if [[ "$OLLAMA_READY" != true ]]; then echo "Ollama failed to become ready." >&2; exit 1; fi
 
 echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
 if [ -d ".venv" ] && [ -x ".venv/bin/python3" ]; then
     echo "  Existing .venv found — reusing it (run 'rm -rf .venv' first for a clean rebuild)"
 else
     if [ -d ".venv" ]; then
-        echo -e "${YELLOW}  .venv exists but looks incomplete — recreating it${NC}"
-        rm -rf .venv
+        echo -e "${RED}  .venv exists but is incomplete. Move it aside and rerun; setup will not delete it.${NC}"
+        exit 1
     fi
     $PYTHON -m venv .venv
 fi
@@ -153,7 +138,21 @@ mkdir -p "$HOME/.sam_data/memory/chroma"
 mkdir -p "$HOME/.sam_data/founder_mode/export"
 mkdir -p "$HOME/.sam_data/skills/compiled"
 
-echo -e "${GREEN}[8/8] Auto-start on boot...${NC}"
+echo -e "${GREEN}[8/8] Review configured model downloads...${NC}"
+MODEL_LIST=$(.venv/bin/python - <<'PY'
+from config.settings import Settings
+s = Settings()
+for item in (s.primary_model, s.fallback_model, s.embedding_model, s.vision_model): print(item or "")
+PY
+)
+while IFS= read -r model; do
+    [[ -n "$model" ]] || continue
+    if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "$model"; then echo "Already installed: $model"; continue; fi
+    read -r -p "Download '$model'? This may require several GB. [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then ollama pull "$model"; else echo "Skipped $model."; fi
+done <<< "$MODEL_LIST"
+
+echo -e "${GREEN}Startup behavior${NC}"
 echo -e "${YELLOW}  Not configured in this version — start SAM manually (see below).${NC}"
 echo -e "${YELLOW}  A systemd --user unit is planned once this installer is verified${NC}"
 echo -e "${YELLOW}  on real hardware; see setup_linux.sh header.${NC}"
@@ -162,7 +161,7 @@ echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║            SAM Setup Complete! (Linux)               ║${NC}"
 echo -e "${BLUE}╠═══════════════════════════════════════════════════════╣${NC}"
-echo -e "${BLUE}║  Brain model: ${GREEN}$MODEL${BLUE}                       ║${NC}"
+echo -e "${BLUE}║  Models: use current config; downloads were opt-in    ║${NC}"
 echo -e "${BLUE}║                                                       ║${NC}"
 echo -e "${BLUE}║  To start SAM now:                                    ║${NC}"
 echo -e "${BLUE}║  ${GREEN}source .venv/bin/activate && python main.py${BLUE}        ║${NC}"

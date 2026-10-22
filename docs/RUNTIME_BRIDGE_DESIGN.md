@@ -22,7 +22,7 @@ Tauri commands (src-tauri/src/runtime.rs — new)
   |     works even when `api`         -> runtime.health.compute_health
   |     is not running yet            -> runtime.ollama.OllamaManager (new)
   |
-  +--> HTTP passthrough -----------> GET/POST http://localhost:8420/api/models*
+  +--> HTTP passthrough -----------> configured SAM API endpoint /api/models*
         (models_list, model_select,    -> interfaces/api/server.py
          model_pull)                    -> core.model_manager.ModelManager
         only meaningful once `api`
@@ -249,41 +249,35 @@ rebuilt.
   independently validated by `ModelManager.validate_selection` in
   Python — the frontend crossing the native boundary doesn't grant it
   a shortcut past checks that already exist.
-- The CLI/JSON bridge invokes `sam_cli.py`/`python` with an **argument
-  list** (`Command::new("python").arg("sam_cli.py").arg("status").arg("--json")`),
-  never a shell string — so there is no injection surface even in
-  principle, independent of the regex validation above.
-- No new network surface: the HTTP-passthrough commands talk to
-  `localhost:8420`, already what the browser build talks to today;
-  nothing here opens a port, accepts remote connections, or adds any
-  capability SAM didn't already have.
+- The CLI/JSON bridge invokes the configured Python and SAM CLI paths with
+  an **argument list**, never a shell string — so no user-provided command
+  is interpreted by a shell.
+- The HTTP-passthrough commands reuse the configured SAM API endpoint.
+  The API listener itself is unchanged; the CORS allowlist permits only
+  the local Vite and Tauri webview origins and is not authentication.
 - Conversations, memory, Founder Mode data and prompts are untouched by
   every command in §B — none of them read or transmit anything from
   those subsystems; this is true by construction, not an added
   restriction.
 
-## I. Production gap — explicitly still open
+## I. Installation status and remaining packaging gap
 
-**Good news specific to this phase's design:** `runtime_status`,
-`runtime_start/stop/restart`, `ollama_status`, `ollama_start` are CLI-
-subprocess-based, not HTTP-based — they do not depend on the Vite proxy
-at all and will work unchanged in a packaged `.app`. That part of
-production packaging is solved as a side effect of this design, not
-deferred.
+The desktop bridge now reads Python, SAM CLI, resource-root, `PATH`, and
+API endpoint values from `~/.sam_data/desktop-runtime.json` (Windows uses
+the user's home directory). The source-based setup scripts write this
+configuration; the packaged Tauri app no longer derives paths from
+`CARGO_MANIFEST_DIR` or the current working directory. Runtime/model API
+calls in the native frontend use that configured endpoint, while Vite's
+relative `/api` proxy remains the browser-development path. `server.py`
+allows the Tauri v2 origins required by the packaged webview.
 
-**Still unresolved, unchanged from last round:** `models_list`,
-`model_select`, `model_pull` go over `http://localhost:8420`, reached
-today via a *relative* URL that only resolves correctly through Vite's
-dev proxy. A packaged `.app` has no such proxy. This phase does not fix
-it (§12 says not to unless required) — Phase C or a dedicated
-packaging pass will need either an absolute base URL switched on by
-`isNative()` (already the exact check `native.ts` uses for other
-native/browser branching) plus real CORS on `server.py` (flagged two
-rounds ago, still true), or routing those three commands through the
-same CLI/JSON bridge as everything else instead of HTTP. Recommend the
-former only because `ModelManager` already lives inside the long-running
-`api` process and a pull can run for minutes — reusing that process
-beats spawning a fresh CLI invocation per model operation.
+The currently supported desktop installation is still a **developer
+installation from a source checkout**. The setup scripts build a local
+`.app` or MSI and point it at that checkout's Python environment and SAM
+resources. A distributable macOS DMG with a bundled Python environment,
+Python dependencies, SAM sources/resources, signing, and notarization is
+not implemented. See `docs/deployment/DESKTOP_INSTALL.md` for platform
+scope and first-launch behavior.
 
 ## J. Files
 
@@ -293,7 +287,8 @@ beats spawning a fresh CLI invocation per model operation.
 - `sam_cli.py` — add a `--json` output mode to `status`/`start`/`stop`/`restart`/`doctor` (same commands, second serializer; this *is* the "bridge" §4 asked for)
 - `interfaces/api/server.py` — new `POST /api/models/pull` SSE endpoint, thin wrapper over `ModelManager.pull()`
 - `src-tauri/src/runtime.rs` — the 9 commands in §B
-- `~/.sam_data/setup_state.json` — new persisted file (§C), not a code file but worth naming since nothing writes it today
+- `~/.sam_data/setup_state.json` — setup journey state owned by
+  `runtime/setup_state.py` and exposed through the CLI bridge
 
 **Modify:**
 - `core/model_manager.py` — add `pull()`
@@ -309,4 +304,8 @@ beats spawning a fresh CLI invocation per model operation.
 
 ---
 
-Design gate: stopping here, as instructed. Nothing above has been built.
+Implementation status (2026-10-22): the frontend typecheck and production
+Vite build pass. Python syntax checks pass for the CORS wiring. Native Rust
+builds and macOS/Windows installer runs remain unverified because Cargo and
+PowerShell are unavailable in the current environment. Do not infer a
+successful `.app`/MSI build or complete first launch from the frontend build.
