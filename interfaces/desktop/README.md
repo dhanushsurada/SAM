@@ -14,7 +14,19 @@ For a supported macOS developer install, run the repository-level
 `../../setup.sh`; it checks the compatibility manifest, creates the Python
 environment, installs prerequisites with consent, and builds/opens the Tauri
 app. This requires macOS 14+, Python 3.11 or 3.12, Node/npm, Rust, and Apple
-Command Line Tools. It does not create a consumer DMG.
+Command Line Tools. Setup preserves an incompatible environment as a dated
+backup before recreating it; rerunning setup reuses a supported environment,
+repairs dependencies through the selected manifest groups, and skips models
+already present in Ollama.
+
+The separate macOS consumer packaging route is `npm ci` followed by
+`npm run package:macos-consumer` from this directory. It requires `uv`, network
+access, and native build tools on the packaging Mac. It stages a managed Python
+runtime and core dependencies into the app resources and creates an app and
+DMG. The app writes its runtime paths under `~/.sam_data`; uninstalling the
+app removes the application bundle but preserves settings, credentials, and
+models in user data. The current output is unsigned and is not a trusted public
+release until signing and notarization are configured.
 
 Core Python dependencies are installed by default; voice, vision, memory,
 and integration dependencies are optional prompts. Select voice when
@@ -65,8 +77,10 @@ further.
 ## What's real vs. demo right now
 
 Live backends include the task gateway (`/api/iqoo/*`), Brain/model controls
-(`/api/models`), and local settings read/write (`/api/settings`). Memory,
-Founder Mode, Skills, Diagnostics, and Licensing remain demo interfaces.
+(`/api/models`), local settings read/write (`/api/settings`), and environment
+capability reporting (`/api/environment`). Diagnostics and onboarding use live
+environment/runtime data. Memory, Founder Mode, Skills, and Licensing still
+contain demo-backed surfaces.
 Full breakdown, with the exact remaining endpoints, is in `PHASE5_PLAN.md` §F.
 
 ## Status

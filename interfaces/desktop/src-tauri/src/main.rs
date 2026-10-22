@@ -127,6 +127,9 @@ fn main() {
             runtime::model_pull,
         ])
         .setup(|app| {
+            if let Err(error) = runtime::initialize_packaged_runtime(app.handle()) {
+                eprintln!("SAM: could not initialize bundled runtime configuration: {error}");
+            }
             // The desktop app owns the SAM backend lifecycle. Installers do
             // not also register launchd/Task Scheduler services for it.
             std::thread::spawn(|| {
