@@ -239,6 +239,10 @@ export function modelPull(name: string): Promise<void> {
   return invokeNative<void>("model_pull", { name });
 }
 
+export function cancelModelPull(): Promise<boolean> {
+  return invokeNative<boolean>("model_pull_cancel");
+}
+
 /** Subscribes to pull progress; returns an unsubscribe function. No-ops
  * (returns a function that does nothing) in a plain browser tab, where
  * there is no native event stream to listen to. */

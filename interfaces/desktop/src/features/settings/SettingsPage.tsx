@@ -222,6 +222,7 @@ export function SettingsPage() {
         <div className="flex flex-wrap gap-2">
           <input aria-label="Model to download" value={pullName} onChange={(e) => setPullName(e.target.value)} placeholder="Model name (downloads can be large)" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm text-ink" />
           <Button variant="secondary" size="sm" disabled={!pullName || runtime.pulling} onClick={() => void runtime.pullModel(pullName)}>Download model</Button>
+          {runtime.pulling && <Button variant="ghost" size="sm" onClick={() => void runtime.cancelPull()}>Cancel download</Button>}
         </div>
         {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}
         {(runtime.pullError || runtime.modelsError) && <p className="text-xs text-danger">{runtime.pullError || runtime.modelsError}</p>}

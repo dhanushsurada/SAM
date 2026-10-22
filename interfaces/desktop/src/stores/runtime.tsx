@@ -9,6 +9,7 @@ import {
   modelsList,
   modelSelect,
   modelPull,
+  cancelModelPull,
   onModelPullProgress,
   getSetupState,
   setSetupState,
@@ -64,6 +65,7 @@ interface RuntimeContextValue {
   pullProgress: ModelPullProgress | null;
   pullError: string | null;
   pullModel: (name: string) => Promise<void>;
+  cancelPull: () => Promise<void>;
 
   setupState: SetupState | null;
   advanceSetupState: (state: SetupJourneyState, model?: string) => Promise<void>;
@@ -167,6 +169,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         setPulling(false);
       } else if (progress.status === "success") {
         setPulling(false);
+      } else if (progress.status === "cancelled") {
+        setPulling(false);
       }
     }).then((fn) => {
       unlisten = fn;
@@ -214,6 +218,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshModels]);
 
+  const cancelPull = useCallback(async () => {
+    try {
+      await cancelModelPull();
+    } catch (e) {
+      setPullError(describeError(e));
+    }
+  }, []);
+
   const advanceSetupState = useCallback(async (state: SetupJourneyState, model?: string) => {
     const result = await setSetupState(state, model);
     setSetupStateValue(result);
@@ -223,7 +235,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     snapshot, loading, error, refresh,
     startProcess, stopProcess, restartProcess, startOllama,
     models, modelsLoading, modelsError, refreshModels, selectModel,
-    pulling, pullProgress, pullError, pullModel,
+    pulling, pullProgress, pullError, pullModel, cancelPull,
     setupState, advanceSetupState,
     subscribeToPolling,
   };

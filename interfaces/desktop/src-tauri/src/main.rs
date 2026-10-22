@@ -125,6 +125,7 @@ fn main() {
             runtime::models_list,
             runtime::model_select,
             runtime::model_pull,
+            runtime::model_pull_cancel,
         ])
         .setup(|app| {
             if let Err(error) = runtime::initialize_packaged_runtime(app.handle()) {
