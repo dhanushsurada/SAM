@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -65,8 +66,10 @@ class HttpSseSamTransport(
     // ~60x that. PROVISIONAL: this is an assumption about the pre-existing
     // (hackathon-track) server; Agent 3's contract must state a heartbeat
     // interval, and this value must stay comfortably above it. If a future
-    // server sends no heartbeats, idle streams will be cut at this timeout
-    // and the watch will end without a completion notification.
+    // server sends no heartbeats, idle streams will be cut at this timeout;
+    // TaskMonitor then reconnects (bounded — see its RECONNECT section), so a
+    // silent server would look like a flapping connection and the watch would
+    // end without a completion notification once that budget is spent.
     //
     // Regular request/response calls keep the timeout in [client]; only the
     // event stream uses this one. internal (not private) only so a test can
@@ -202,17 +205,35 @@ class HttpSseSamTransport(
         }
     } catch (e: IOException) {
         TransportResult.Failure("Could not reach SAM Core: ${e.message}", e)
+    } catch (e: SerializationException) {
+        // A body that is not valid JSON, lacks a required field, or carries a
+        // status this app's TaskStatus does not list (the repo's task store also
+        // accepts "testing", which TaskStatus lacks — interfaces/api/task_store.py
+        // ALL_STATUSES) used to escape from here as an uncaught exception. Callers
+        // treat this function as returning a TransportResult, and TaskMonitor now
+        // calls getTask repeatedly from a background scope where an escaped
+        // exception ends the whole process. Reported as a failed lookup instead.
+        TransportResult.Failure("Unexpected response from SAM Core: ${e.message}", e)
     }
 
     // --- Task events (grounded — GET /api/iqoo/tasks/{id}/events, SSE) -----
 
-    override fun taskEvents(taskId: String): Flow<TaskEvent> = callbackFlow {
+    override fun taskEvents(taskId: String, afterSeq: Long?): Flow<TaskEvent> = callbackFlow {
         val base = currentBaseUrl
         if (base == null) {
             close(IllegalStateException("Not paired"))
             return@callbackFlow
         }
-        val request = Request.Builder().url("$base/api/iqoo/tasks/$taskId/events").build()
+        val request = Request.Builder()
+            .url("$base/api/iqoo/tasks/$taskId/events")
+            .apply {
+                // Resume point. interfaces/api/server.py reads this header (digits
+                // only — anything else means "from the start") and replays just
+                // the events with a higher seq; not described in PROTOCOL.md, so
+                // provisional. Omitted on a first connection: no header = full history.
+                if (afterSeq != null) header("Last-Event-ID", afterSeq.toString())
+            }
+            .build()
 
         // PROTOCOL.md: "Heartbeat comment lines (`: heartbeat\n\n`) are sent
         // during idle gaps" — SSE comment lines (no "event:"/"data:" prefix)
@@ -221,7 +242,10 @@ class HttpSseSamTransport(
         val listener = object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
-                    trySend(json.decodeFromString(TaskEvent.serializer(), data))
+                    // seq comes from the SSE "id:" line (the protocol-level resume
+                    // cursor), not from the JSON body — see TaskEvent.seq.
+                    val parsed = json.decodeFromString(TaskEvent.serializer(), data)
+                    trySend(parsed.copy(seq = id?.toLongOrNull()))
                 } catch (e: Exception) {
                     // Malformed event payload — drop it rather than crash the
                     // stream; the task-status screen falls back to polling

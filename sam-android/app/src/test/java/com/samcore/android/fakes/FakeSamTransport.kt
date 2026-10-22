@@ -14,6 +14,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * What ONE connection made by taskEvents() does: emit [events] in order, then
+ * either throw [failure] (a dropped connection), stay open forever
+ * ([staysOpen]), or — with neither — complete normally (the server closed it).
+ */
+class StreamScript(
+    val events: List<TaskEvent> = emptyList(),
+    val failure: Throwable? = null,
+    val staysOpen: Boolean = false,
+)
 
 /**
  * Controllable SamTransport for tests. Every method is scriptable via a
@@ -44,6 +57,13 @@ class FakeSamTransport : SamTransport {
      *  (needed to test a second watch superseding a first while BOTH streams stay open). */
     val taskEventsNeverCompleteForIds = mutableSetOf<String>()
 
+    /** One script per taskEvents() call, consumed in order — for tests that need
+     *  the first connection to behave differently from the second (drop, then
+     *  resume). Once the queue is empty the plain [taskEventsToEmit] /
+     *  [taskEventsError] behavior above applies again, so a test can script the
+     *  first connections and let every later one fail the same way. */
+    val streamScripts = ArrayDeque<StreamScript>()
+
     /** When set, replaces taskEvents() entirely — lets a test hand TaskMonitor a
      *  stream it controls (e.g. a SharedFlow it can emit into at an exact moment). */
     var taskEventsOverride: ((taskId: String) -> Flow<TaskEvent>)? = null
@@ -60,6 +80,15 @@ class FakeSamTransport : SamTransport {
 
     var lastRequestedTaskEventsId: String? = null
     var lastGetTaskId: String? = null
+
+    /** Every taskEvents() call so far, in order, as (taskId, afterSeq). Recorded when
+     *  the call is made, not when the stream is collected. */
+    val taskEventsRequests: MutableList<Pair<String, Long?>> = CopyOnWriteArrayList()
+
+    private val getTaskCallCount = AtomicInteger(0)
+
+    /** How many times getTask() has been called. */
+    val getTaskCalls: Int get() = getTaskCallCount.get()
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
     override val connectionState: Flow<ConnectionState> = _connectionState
@@ -79,6 +108,7 @@ class FakeSamTransport : SamTransport {
     override suspend fun sendTask(request: TaskRequest): TransportResult<TaskSnapshot> = sendTaskResult
 
     override suspend fun getTask(taskId: String): TransportResult<TaskSnapshot> {
+        getTaskCallCount.incrementAndGet()
         lastGetTaskId = taskId
         getTaskGate?.let { gate ->
             getTaskReachedGate.complete(Unit)
@@ -87,9 +117,22 @@ class FakeSamTransport : SamTransport {
         return if (getTaskResults.isNotEmpty()) getTaskResults.removeFirst() else TransportResult.Failure("no more results queued")
     }
 
-    override fun taskEvents(taskId: String): Flow<TaskEvent> {
+    override fun taskEvents(taskId: String, afterSeq: Long?): Flow<TaskEvent> {
         lastRequestedTaskEventsId = taskId
+        taskEventsRequests.add(taskId to afterSeq)
         taskEventsOverride?.let { return it(taskId) }
+        val script = synchronized(streamScripts) { if (streamScripts.isNotEmpty()) streamScripts.removeFirst() else null }
+        if (script != null) {
+            return flow {
+                for (event in script.events) {
+                    emit(event)
+                }
+                script.failure?.let { throw it }
+                if (script.staysOpen) {
+                    awaitCancellation()
+                }
+            }
+        }
         return flow {
             for (event in taskEventsToEmit) {
                 emit(event)

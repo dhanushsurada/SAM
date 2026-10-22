@@ -1,0 +1,1109 @@
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-10-17 07:09:42.000000000 +0000
++++ b/README.md	2026-10-19 08:14:25.522679100 +0000
+@@ -1,10 +1,11 @@
+-# SAM for Android — v0 (Agent 2, first slice + hardening pass + foreground-service pass)
++# SAM for Android — v0 (Agent 2, first slice + hardening pass + foreground-service pass + reconnect pass)
+ 
+ Native Android client for SAM Core, per `SAM_Master_PDR_2026-09-23.docx` §13. See the
+ companion `SAM_Android_Agent2_Recon_Report.md` and `SAM_Android_Agent2_Build_Report.md`
+ (delivered alongside this project, not inside it) for the full reconnaissance and
+ build status — the build report's "Hardening pass" addendum is the most direct
+-answer to "is this actually buildable and tested yet." This file covers just
++answer to "is this actually buildable and tested yet"; its Phase 3 and Phase 4
++addenda cover the foreground service and the reconnect. This file covers just
+ what's in this project folder.
+ 
+ ## Status, in one line
+@@ -22,14 +23,18 @@
+ stubs standing in for Android/AndroidX/OkHttp/JUnit. Result: clean, except
+ three `DeviceInfo.serializer()`-style calls that need kotlinx.serialization's
+ own compiler plugin (unavailable here — Maven-only distribution); against the
+-unmodified files those are the *only* diagnostics (5 lines, 3 call sites). The
+-Compose UI layer was not re-checked in the foreground-service pass (see the
+-build report's Phase 3 addendum). Separately, `TaskMonitor` was run — real class,
+-the project's own test fakes, real threads — through 24 scenarios (all pass,
+-and each bug they target was re-introduced on purpose to confirm they fail).
+-That is real signal about the logic; it says nothing about Android itself. The
+-**foreground service has never run on any Android.** See the build report for
+-exactly what each of these does and doesn't prove.
++unmodified files those are the *only* diagnostics (8 lines, all at or caused by
++the 3 call sites: 3 "unresolved reference", 4 type-inference follow-ons at two of
++them, and one "unresolved reference `copy`" on the line after the `TaskEvent` call). The
++Compose UI layer was not re-checked in the foreground-service or reconnect passes
++(see the build report's Phase 3 and Phase 4 addenda). Separately, `TaskMonitor`
++was run — real class, the project's own test fakes, real threads — through 38
++scenarios (all pass, 25 runs in a row, and 23 bugs deliberately re-introduced
++one at a time were each caught by at least one scenario). That is real signal
++about the logic; it says nothing about Android itself. The **foreground service
++has never run on any Android**, and the reconnect has never talked to a real
++server or a real OkHttp client. See the build report for exactly what each of
++these does and doesn't prove.
+ 
+ ## Opening this project
+ 
+@@ -49,7 +54,7 @@
+ - Project/module setup: Gradle Kotlin DSL, version catalog (`gradle/libs.versions.toml`), Compose enabled.
+ - Theme (`ui/theme/`): colors sampled directly from `SAM_LOGO.png` (`#FD6902` / white), dark-only per PDR §7 — light mode not implemented.
+ - `data/transport/SamTransport.kt`: the interface everything else is built against.
+-- `data/transport/HttpSseSamTransport.kt`: v0 implementation. Task/health/event endpoints shaped after the real `docs/iqoo/PROTOCOL.md` in the main repo; **the pairing endpoint (`POST /api/connect/pair`) is an invented placeholder** — no existing HTTP pairing endpoint was found during reconnaissance. See the class doc comment. Uses a separate client for the SSE connection with a **finite 60 s read timeout** (a default 10 s client timeout would have killed long-idle task streams; an infinite one — what the hardening pass used — would let a half-open connection hold the foreground service open until `TaskMonitor`'s cap). The 60 s figure is a **provisional assumption** derived from the repo server's ~1 s heartbeat (`interfaces/api/server.py`), not from a documented contract: Agent 3's contract has to state a heartbeat interval well under it. Explicit timeouts for everything else too.
++- `data/transport/HttpSseSamTransport.kt`: v0 implementation. Task/health/event endpoints shaped after the real `docs/iqoo/PROTOCOL.md` in the main repo; **the pairing endpoint (`POST /api/connect/pair`) is an invented placeholder** — no existing HTTP pairing endpoint was found during reconnaissance. See the class doc comment. Uses a separate client for the SSE connection with a **finite 60 s read timeout** (a default 10 s client timeout would have killed long-idle task streams; an infinite one — what the hardening pass used — would let a half-open connection hold the foreground service open until `TaskMonitor`'s cap). The 60 s figure is a **provisional assumption** derived from the repo server's ~1 s heartbeat (`interfaces/api/server.py`), not from a documented contract: Agent 3's contract has to state a heartbeat interval well under it. Explicit timeouts for everything else too. `taskEvents(taskId, afterSeq)` can resume a dropped stream: it sends the SSE `Last-Event-ID` header, which `interfaces/api/server.py` honors (replays only events with a higher `seq`) but `docs/iqoo/PROTOCOL.md` does not mention — provisional until Agent 3's contract says. Each event's `TaskEvent.seq` is filled in from the SSE `id:` line. `getTask`/`sendTask` now report a body they cannot decode (invalid JSON, or a status the app's `TaskStatus` does not list — the repo's task store also accepts `testing`) as a failed `TransportResult` instead of letting the exception escape.
+ - `data/local/PairedDeviceStore.kt` (interface) / `DevicePrefsStore.kt` (real DataStore-backed implementation): local persistence of the paired device. Split into an interface specifically so `HttpSseSamTransport` is unit-testable without a real Android `Context`.
+ - `notifications/TaskNotifier.kt` (interface) / `SamNotifications.kt` (real implementation): same reasoning, for `TaskMonitor`.
+ - Four screens + ViewModels: Onboarding, Pairing, Connection & device state, Task status (with live SSE event list).
+@@ -57,21 +62,23 @@
+ - Task-completion notifications (`notifications/`): a notification channel, a runtime `POST_NOTIFICATIONS` request made at the point it's relevant (sending a task) rather than at launch, and an app-scoped `TaskMonitor` that keeps watching a task's events even if the user backs out of the task-status screen — so the notification can still fire. It survives navigating between screens within one app session; whether it survives the app being backgrounded is what the foreground service (next item) is for — **unverified on any device**. The terminal-status check (only notify when the task is actually done) lives in `TaskMonitor`, not guessed from SSE `phase` strings — see `TaskMonitorTest`.
+ - **Foreground service for in-flight tasks** (`notifications/TaskKeepAlive.kt`, `TaskWatchForegroundService.kt`, `TaskMonitor.isWatching`): when `TaskMonitor` starts watching a task it asks for a `dataSync`-type foreground service, which shows a low-importance ongoing notification (generic text — no task instruction on the lock screen) and **stops itself** as soon as the watch ends, however it ended. Goal: lower the odds that Android freezes or kills the process while the user is in another app or the screen is off. Design points that matter if you change it: the service is start-only from outside (no `stop()` — stopping from outside can race its start-up); it calls `startForeground()` first thing; it ends with `stopSelf(startId)`; `START_NOT_STICKY`; it handles Android 15's `onTimeout`. Scope note: the earlier hardening brief said *not* to implement a foreground service; this was added after "go for the next phase", and is isolated so it can be dropped (see the build report's Phase 3 addendum).
+ - `TaskMonitor` hardening that came with it: every write a watch makes to shared state (snapshot, events, announcement) is made under a lock and only if that watch is still the current one, so a watch that was just replaced or stopped cannot overwrite the new watch's state; each watch is also bounded (default 30 min, **provisional**) so a stream that stays open but never finishes can't pin the service forever.
++- **Bounded reconnect** (`TaskMonitor`, added after the foreground-service pass; **the reconnect-pass item that was listed as the next step**): when a stream ends, `TaskMonitor` asks for the authoritative status. Terminal → announce once and end, as before. Still running, or the lookup failed (usually: the network is down) → wait, then open a new stream that resumes after the last event already shown. The wait before each consecutive reconnect that follows a connection that delivered nothing new is `1 s, 2 s, 4 s, 8 s, 16 s` (default, **provisional and unmeasured**); when those five are spent the watch ends silently, exactly as it did before this pass. A connection that delivers a new event restores the whole budget. The 30 min cap still bounds everything, and `isWatching` stays true while waiting so the foreground service stays up. Replayed events are skipped by `seq`; events that arrive *without* a `seq` are never replayed (the watch just ends). Passing an empty list for `reconnectBackoffMillis` turns reconnecting off — the whole reconnect pass can be dropped that way, or by reverting its patch.
+ - Manifest permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (now actually requested and used, not just declared), `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC` (the latter is required from Android 14 for a `dataSync` service; targetSdk is 35).
+ - A network security config permitting cleartext HTTP app-wide, scoped to this app's single-purpose use case and documented why (see the file itself) — the initial CIDR-based draft was wrong and was corrected after checking Android's own docs.
+ - `android:allowBackup="false"` in the manifest (paired-device info shouldn't ride along in a phone backup/restore to a different device) — this was already in place, confirmed still here during this pass. No logging anywhere in the app, so nothing to check for leaking the pairing code or address into logs.
+-- **Unit tests** (`app/src/test/`, 35 `@Test` methods): `HttpSseSamTransport` (14 — pairing, connection state, task CRUD, SSE framing incl. heartbeat lines, the finite SSE timeout, unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (21 — event collection, the terminal-only notification gate, watch cancellation, keep-alive request, `isWatching` in every way a watch can end, the cap in virtual time, stale work from a replaced/stopped watch). Type-checked against the harness; **never executed by JUnit** — see the build report. (The earlier reports' "11 / 17 tests" was a miscount; the delivered files had 12 + 6 = 18.) The `TaskMonitor` behaviours were additionally executed as 24 plain-`main` scenarios on a real coroutines runtime — see the build report, Phase 3 addendum, for what that does and doesn't establish.
++- **Unit tests** (`app/src/test/`, 53 `@Test` methods): `HttpSseSamTransport` (19 — pairing, connection state, task CRUD, SSE framing incl. heartbeat lines, the finite SSE timeout, the `Last-Event-ID` header and `seq` from the `id:` line, undecodable task bodies, unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (34 — event collection, the terminal-only notification gate, watch cancellation, keep-alive request, `isWatching` in every way a watch can end, the cap in virtual time, stale work from a replaced/stopped watch, and 13 reconnect tests on a hand-driven virtual clock that assert the wait schedule to the millisecond). Type-checked against the harness; **never executed by JUnit** — see the build report. (The earlier reports' "11 / 17 tests" was a miscount; the Phase 3 files had 14 + 21 = 35.) The `TaskMonitor` behaviours were additionally executed as plain-`main` scenarios on a real coroutines runtime — see the build report's Phase 3 and Phase 4 addenda for what that does and doesn't establish.
+ 
+-## Known gaps in the foreground-service work (also in the build report)
++## Known gaps in the foreground-service and reconnect work (also in the build report)
+ 
+ - **Not run on any device or emulator.** All OS behaviour here comes from Android's documentation, not observation.
+ - **Does not survive the process being killed.** `START_NOT_STICKY`, nothing persisted: a foreground service lowers the odds of being killed, it does not recover from it. vivo/iQOO's own battery managers may still kill the app; that is unmeasured.
+-- **No reconnect.** If the stream drops while the task is still running, `TaskMonitor` does one status lookup, announces only if the task is already finished, and ends — the user is not told when it finishes later. The repo server supports `Last-Event-ID` replay (`interfaces/api/server.py`); a bounded reconnect loop is the natural next item.
++- **Reconnect is bounded and blunt.** When the backoff schedule is spent (31 s of waiting in total with the defaults, plus however long each attempt takes to fail — up to about 70 s for a stream attempt (10 s connect + 60 s read timeout) and 25 s for a status lookup, so roughly 10 minutes if every one of the 6 attempts hangs; arithmetic, not measured) the watch ends silently and the user is not told when the task finishes later. It cannot tell a permanent failure from a transient one (`TransportResult.Failure` carries no HTTP status), so a task the server no longer knows, a revoked pairing or an unpaired app use up the whole budget before it gives up. It does not wait for connectivity (no `ConnectivityManager` callback), the UI is not told it is reconnecting, and it does not detect a gap in `seq`. The reconnect depends on `server.py` behaviour (`Last-Event-ID`, `seq` numbering) that `PROTOCOL.md` does not describe.
+ - **Silent when Android refuses to start the service** (e.g. Android 12+ background-start limits): the watch proceeds without keep-alive and there is no UI signal.
+ - Neither the ongoing nor the completion notification has a tap action (no `contentIntent`).
+-- The 60 s SSE timeout and 30 min watch cap are provisional (see above). If a future server sends no heartbeat, idle streams would be cut at 60 s and — because there is no reconnect — the watch would end without a notification.
++- The 60 s SSE timeout, the 30 min watch cap and the reconnect schedule are provisional (see above). If a future server sends no heartbeat, idle streams would be cut at 60 s and the watch would burn through its reconnect budget and end without a notification.
+ - Battery cost of holding a ~1 Hz-heartbeat connection open is unmeasured.
+-- `TaskMonitor.stopWatching()` has no production caller yet (tests only); one task at a time.
++- `TaskMonitor.stopWatching()` has no production caller yet (tests only); one task at a time. Unpairing mid-task does not stop the watch either; it just fails its reconnects until the budget is spent.
++- `TaskStatus` has no `testing` value although the repo's task store accepts one (`interfaces/api/task_store.py`, `ALL_STATUSES`; `PROTOCOL.md` says it is "not yet emitted by anything in Phase 1 or 2"). A status lookup that lands on it is reported as a failed lookup, not shown. Not changed here.
+ 
+ ## What's deliberately not in this slice
+ 
+@@ -93,7 +100,10 @@
+ of the new unit tests actually executed, zero installs, zero taps on a real screen —
+ all confirmed impossible from here, not just "not gotten to." (The foreground-service
+ pass added one real execution path — `TaskMonitor` run on a plain JVM against the
+-project's own fakes — but that is a stand-in for the JUnit run, not the JUnit run.) If this sandbox's
++project's own fakes, extended to the reconnect logic in the Phase 4 pass — but
++that is a stand-in for the JUnit run, not the JUnit run. The transport's new
++`Last-Event-ID` and `id:` handling has only been type-checked: `MockWebServer`
++and `okhttp-sse` are Maven-only and were never available to run.) If this sandbox's
+ network allowlist can be extended, adding those four hosts is what would unblock a
+ real build; otherwise this needs Android Studio, Claude Code with real network access,
+ or a real machine.
+diff -ruN a/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt b/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt
+--- a/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt	2026-10-16 05:18:20.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/data/transport/HttpSseSamTransport.kt	2026-10-18 07:41:53.802037919 +0000
+@@ -8,6 +8,7 @@
+ import kotlinx.coroutines.flow.callbackFlow
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.withContext
++import kotlinx.serialization.SerializationException
+ import kotlinx.serialization.encodeToString
+ import kotlinx.serialization.json.Json
+ import okhttp3.MediaType.Companion.toMediaType
+@@ -65,8 +66,10 @@
+     // ~60x that. PROVISIONAL: this is an assumption about the pre-existing
+     // (hackathon-track) server; Agent 3's contract must state a heartbeat
+     // interval, and this value must stay comfortably above it. If a future
+-    // server sends no heartbeats, idle streams will be cut at this timeout
+-    // and the watch will end without a completion notification.
++    // server sends no heartbeats, idle streams will be cut at this timeout;
++    // TaskMonitor then reconnects (bounded — see its RECONNECT section), so a
++    // silent server would look like a flapping connection and the watch would
++    // end without a completion notification once that budget is spent.
+     //
+     // Regular request/response calls keep the timeout in [client]; only the
+     // event stream uses this one. internal (not private) only so a test can
+@@ -202,17 +205,35 @@
+         }
+     } catch (e: IOException) {
+         TransportResult.Failure("Could not reach SAM Core: ${e.message}", e)
++    } catch (e: SerializationException) {
++        // A body that is not valid JSON, lacks a required field, or carries a
++        // status this app's TaskStatus does not list (the repo's task store also
++        // accepts "testing", which TaskStatus lacks — interfaces/api/task_store.py
++        // ALL_STATUSES) used to escape from here as an uncaught exception. Callers
++        // treat this function as returning a TransportResult, and TaskMonitor now
++        // calls getTask repeatedly from a background scope where an escaped
++        // exception ends the whole process. Reported as a failed lookup instead.
++        TransportResult.Failure("Unexpected response from SAM Core: ${e.message}", e)
+     }
+ 
+     // --- Task events (grounded — GET /api/iqoo/tasks/{id}/events, SSE) -----
+ 
+-    override fun taskEvents(taskId: String): Flow<TaskEvent> = callbackFlow {
++    override fun taskEvents(taskId: String, afterSeq: Long?): Flow<TaskEvent> = callbackFlow {
+         val base = currentBaseUrl
+         if (base == null) {
+             close(IllegalStateException("Not paired"))
+             return@callbackFlow
+         }
+-        val request = Request.Builder().url("$base/api/iqoo/tasks/$taskId/events").build()
++        val request = Request.Builder()
++            .url("$base/api/iqoo/tasks/$taskId/events")
++            .apply {
++                // Resume point. interfaces/api/server.py reads this header (digits
++                // only — anything else means "from the start") and replays just
++                // the events with a higher seq; not described in PROTOCOL.md, so
++                // provisional. Omitted on a first connection: no header = full history.
++                if (afterSeq != null) header("Last-Event-ID", afterSeq.toString())
++            }
++            .build()
+ 
+         // PROTOCOL.md: "Heartbeat comment lines (`: heartbeat\n\n`) are sent
+         // during idle gaps" — SSE comment lines (no "event:"/"data:" prefix)
+@@ -221,7 +242,10 @@
+         val listener = object : EventSourceListener() {
+             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                 try {
+-                    trySend(json.decodeFromString(TaskEvent.serializer(), data))
++                    // seq comes from the SSE "id:" line (the protocol-level resume
++                    // cursor), not from the JSON body — see TaskEvent.seq.
++                    val parsed = json.decodeFromString(TaskEvent.serializer(), data)
++                    trySend(parsed.copy(seq = id?.toLongOrNull()))
+                 } catch (e: Exception) {
+                     // Malformed event payload — drop it rather than crash the
+                     // stream; the task-status screen falls back to polling
+diff -ruN a/app/src/main/java/com/samcore/android/data/transport/SamTransport.kt b/app/src/main/java/com/samcore/android/data/transport/SamTransport.kt
+--- a/app/src/main/java/com/samcore/android/data/transport/SamTransport.kt	2026-09-24 06:35:34.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/data/transport/SamTransport.kt	2026-10-18 07:39:57.634031013 +0000
+@@ -41,8 +41,16 @@
+ 
+     /** Server-sent execution events for one task. Terminates when the stream
+      *  closes (a terminal-phase event, per PROTOCOL.md) or is cancelled by the
+-     *  collector. */
+-    fun taskEvents(taskId: String): Flow<TaskEvent>
++     *  collector.
++     *
++     *  [afterSeq] resumes a dropped stream: when non-null, the stream starts
++     *  with the events whose [TaskEvent.seq] is greater than it instead of the
++     *  task's full history; null means "from the beginning". The HTTP
++     *  implementation sends it as the SSE Last-Event-ID header, which the
++     *  repo's server (interfaces/api/server.py) honors — PROTOCOL.md does not
++     *  document that, so treat it as provisional. A transport that cannot
++     *  resume may ignore it (the collector de-duplicates by seq regardless). */
++    fun taskEvents(taskId: String, afterSeq: Long? = null): Flow<TaskEvent>
+ 
+     suspend fun cancelTask(taskId: String): TransportResult<Unit>
+ 
+diff -ruN a/app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt b/app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt
+--- a/app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt	2026-09-24 06:32:50.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/data/transport/SamTransportModels.kt	2026-10-18 07:39:54.914030852 +0000
+@@ -2,6 +2,7 @@
+ 
+ import kotlinx.serialization.SerialName
+ import kotlinx.serialization.Serializable
++import kotlinx.serialization.Transient
+ 
+ /**
+  * Shapes in this file are a v0 working assumption, not a frozen contract.
+@@ -70,6 +71,23 @@
+     val phase: String,
+     val message: String,
+     val timestamp: String? = null,
++    /**
++     * Position of this event in its task's history: the cursor for resuming a
++     * dropped stream (SamTransport.taskEvents' afterSeq). The repo's server
++     * numbers a task's events 1, 2, 3 … with no gaps (interfaces/api/events.py)
++     * and sends the number as the SSE "id:" line of every event.
++     *
++     * @Transient on purpose: it is filled in by the transport from that "id:"
++     * line, never read from the JSON body, so a server whose JSON carries a
++     * differently-typed "seq" cannot make an otherwise-good event fail to
++     * decode. null means "the transport could not tell" — TaskMonitor then
++     * treats the stream as not resumable (see its RECONNECT section).
++     *
++     * docs/iqoo/PROTOCOL.md documents neither the "id:" line nor this field
++     * (its example event has no seq); interfaces/api/server.py and its offline
++     * tests are the source here. Provisional until Agent 3's contract says.
++     */
++    @Transient val seq: Long? = null,
+ )
+ 
+ /** Thin wrapper so callers don't need to know this is HTTP+SSE underneath. */
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt b/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt
+--- a/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt	2026-10-17 07:22:06.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/TaskMonitor.kt	2026-10-18 07:40:49.526034098 +0000
+@@ -9,6 +9,7 @@
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.catch
+@@ -25,22 +26,48 @@
+  * KEEP-ALIVE. Each watch() asks [keepAlive] for a foreground service so Android
+  * is much less likely to freeze/kill the process while the user is in another
+  * app. [isWatching] is the single source of truth the service obeys: it stays
+- * true for exactly as long as a watch is live and goes false however the watch
+- * ends (terminal task, stream failure, cap expiry, cancellation), at which
+- * point the service stops itself. See TaskKeepAlive for why there is no
+- * stop() call from here.
++ * true for exactly as long as a watch is live — including while it waits to
++ * reconnect — and goes false however the watch ends (terminal task, giving up
++ * on reconnecting, cap expiry, cancellation), at which point the service stops
++ * itself. See TaskKeepAlive for why there is no stop() call from here.
++ *
++ * RECONNECT. A stream that ends is not the same as a task that ended, so when
++ * it does, the watch asks for the authoritative status (getTask) and:
++ *  - terminal            -> announces it (once) and ends, exactly as before;
++ *  - still running, or the lookup itself failed (usually: the network is down)
++ *                        -> waits, then opens a new stream that resumes AFTER
++ *                           the last event already shown (TaskEvent.seq ->
++ *                           SamTransport.taskEvents(afterSeq)).
++ * Bounded, so a dead link can never pin the foreground service:
++ *  1. [reconnectBackoffMillis] lists the wait before each consecutive
++ *     reconnect that follows a connection that produced no new event; its
++ *     size is the budget. When it is spent the watch ends silently — the same
++ *     outcome as before reconnecting existed. An empty list disables
++ *     reconnecting entirely. A connection that delivers at least one new event
++ *     counts as progress and restores the full budget (and the shortest wait).
++ *     A connection that stays open with only heartbeats counts as no progress.
++ *  2. [maxWatchMillis] still caps the whole watch, waits and lookups included.
++ * Replays are harmless: an event whose seq is not above the last one shown is
++ * skipped, so a server that ignores the resume point just costs bandwidth. If
++ * events arrived WITHOUT a seq there is nothing safe to resume from (replaying
++ * from the start would show them twice), so the watch does not reconnect.
++ * Defaults are provisional and unmeasured; they assume the repo's server
++ * (events numbered 1, 2, 3 … per task, `Last-Event-ID` honored) which
++ * docs/iqoo/PROTOCOL.md does not describe — Agent 3's contract must.
+  *
+  * WHAT THIS DOES NOT DO — stated plainly, per PDR §18:
+  *  - It does not survive the process being killed. A foreground service lowers
+  *    the odds; nothing is persisted, and a killed process loses the watch with
+  *    no recovery on relaunch.
+- *  - It does not reconnect. If the stream ends while the task is still running
+- *    (network blip, server restart, read timeout), the watch makes one
+- *    authoritative status lookup, notifies only if that shows a terminal
+- *    status, and then ends — the user is not told the task finished later. The
+- *    server supports replay-from-seq via Last-Event-ID (interfaces/api/
+- *    server.py), so a bounded reconnect loop is the natural next step; it is
+- *    deliberately not part of this change.
++ *  - It cannot tell a permanent failure from a transient one:
++ *    TransportResult.Failure carries no status, so a task the server no longer
++ *    knows (404), a revoked pairing or an unpaired app burn the whole budget
++ *    (31 s of waiting with the defaults) before the watch gives up.
++ *  - It does not wait for connectivity (no ConnectivityManager callback) — it
++ *    just retries on a fixed schedule — and the UI is not told that it is
++ *    reconnecting; the screen simply stops updating until events resume.
++ *  - It does not detect gaps in seq (an event dropped inside the transport
++ *    would be skipped over, not re-requested).
+  *  - One live task at a time: watching a new one supersedes the previous.
+  *
+  * STALE WORK. Cancellation is cooperative: a watch that has just been
+@@ -53,11 +80,13 @@
+  * stop arrived is still delivered — it is true information about a task that
+  * really finished, delivered at most once, and the call into the notifier is
+  * kept outside the lock so a slow system call can never block the caller of
+- * watch() (usually the main thread).
++ * watch() (usually the main thread). A superseded watch also stops reconnecting
++ * (it is cancelled while waiting, and re-checks before connecting again).
+  *
+- * BOUNDS. A watch can never outlive [maxWatchMillis]. That is the backstop
+- * for a stream that stays open but never delivers a terminal event; the
+- * transport's own SSE read timeout is the (faster) detector for a dead
++ * BOUNDS. A watch can never outlive [maxWatchMillis] (plus the one final
++ * lookup, and whatever blocking call was in flight when the cap fired). That is
++ * the backstop for a stream that stays open but never delivers a terminal event;
++ * the transport's own SSE read timeout is the (faster) detector for a dead
+  * connection. The default is provisional: the repo's server hard-fails a task
+  * after 600 s of execution (interfaces/api/gateway.py,
+  * DEFAULT_TASK_TIMEOUT_SECONDS) but that clock excludes time spent queued, so
+@@ -75,9 +104,11 @@
+     private val keepAlive: TaskKeepAlive,
+     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+     private val maxWatchMillis: Long = DEFAULT_MAX_WATCH_MILLIS,
++    private val reconnectBackoffMillis: List<Long> = DEFAULT_RECONNECT_BACKOFF_MILLIS,
+ ) {
+     init {
+         require(maxWatchMillis > 0) { "maxWatchMillis must be positive" }
++        require(reconnectBackoffMillis.all { it >= 0 }) { "reconnect delays must not be negative" }
+     }
+ 
+     // Guards watchJob, watchGeneration, and — crucially — every "is this watch
+@@ -152,48 +183,114 @@
+         }
+     }
+ 
++    private fun isCurrent(generation: Long): Boolean = synchronized(lock) { generation == watchGeneration }
++
++    /** What a status lookup found, as far as the watch loop cares. */
++    private enum class Lookup {
++        /** Terminal status: applied to [snapshot] and announced. The watch is over. */
++        TERMINAL,
++
++        /** Applied to [snapshot]; the task has not finished. */
++        RUNNING,
++
++        /** The lookup itself failed. [snapshot] is left alone. */
++        FAILED,
++
++        /** This watch is no longer the current one; nothing was applied or announced. */
++        SUPERSEDED,
++    }
++
+     private suspend fun watchUntilDone(taskId: String, generation: Long) {
+         // withTimeoutOrNull swallows only its OWN timeout (returns null). If
+         // the surrounding job is cancelled — superseded or stopWatching() —
+-        // the CancellationException still propagates and the lookup below is
+-        // skipped, so a cancelled watch normally announces nothing; the
+-        // generation checks below cover the cases where cancellation arrives
+-        // too late for that to be enough.
+-        withTimeoutOrNull(maxWatchMillis) {
+-            transport.taskEvents(taskId)
+-                .catch { /* handled uniformly below, same as normal stream completion */ }
+-                .collect { event -> appendEventIfCurrent(generation, event) }
++        // the CancellationException still propagates and nothing below runs,
++        // so a cancelled watch normally announces nothing; the generation
++        // checks cover the cases where cancellation arrives too late for that
++        // to be enough.
++        val ranToEnd = withTimeoutOrNull(maxWatchMillis) {
++            streamUntilDone(taskId, generation)
++            true
++        }
++        if (ranToEnd == null) {
++            // The cap expired mid-stream or mid-wait. One last authoritative
++            // look (as before reconnecting existed): the terminal event may
++            // have been lost on a flaky link, and a still-running task correctly
++            // stays silent instead of falsely announcing completion.
++            refreshAndMaybeNotify(taskId, generation)
+         }
++    }
+ 
+-        // Reached once the stream ends — the server closed it after a terminal
+-        // event (PROTOCOL.md's documented behavior), .catch above absorbed a
+-        // failure, or the cap expired. Either way, ask for the authoritative
+-        // current status rather than guessing which "phase" string in the
+-        // events meant done — a dropped connection or a cap expiry on a
+-        // still-running task correctly stays silent instead of falsely
+-        // announcing completion. TaskMonitorTest asserts this directly.
+-        refreshAndMaybeNotify(taskId, generation)
++    /**
++     * One connection after another until the task is terminal, this watch is
++     * superseded, the reconnect budget is spent, or the stream cannot safely be
++     * resumed. Returns normally in all of those cases; the cap cancels it from
++     * outside.
++     */
++    private suspend fun streamUntilDone(taskId: String, generation: Long) {
++        var lastSeq: Long? = null // cursor: highest seq appended so far
++        var appendedAny = false
++        var reconnectsSinceProgress = 0
++
++        while (true) {
++            var progressed = false
++            transport.taskEvents(taskId, afterSeq = lastSeq)
++                .catch { /* handled uniformly below, same as normal stream completion */ }
++                .collect { event ->
++                    val seq = event.seq
++                    val shown = lastSeq
++                    // A replay overlap (a server that ignores the resume point, or
++                    // one that re-sends the boundary event): already shown.
++                    if (seq != null && shown != null && seq <= shown) return@collect
++                    if (appendEventIfCurrent(generation, event)) {
++                        progressed = true
++                        appendedAny = true
++                        if (seq != null) lastSeq = seq
++                    }
++                }
++
++            // The stream ended — the server closed it after a terminal event
++            // (PROTOCOL.md's documented behavior), .catch absorbed a failure, or
++            // it was cut. Ask for the authoritative current status rather than
++            // guessing which "phase" string in the events meant done: a dropped
++            // connection on a still-running task must not falsely announce
++            // completion. TaskMonitorTest asserts this directly.
++            if (progressed) reconnectsSinceProgress = 0
++            when (refreshAndMaybeNotify(taskId, generation)) {
++                Lookup.TERMINAL, Lookup.SUPERSEDED -> return
++                Lookup.RUNNING, Lookup.FAILED -> Unit
++            }
++
++            // Still running (or we could not find out). Reconnect if we may.
++            if (reconnectsSinceProgress >= reconnectBackoffMillis.size) return // budget spent: end silently
++            if (appendedAny && lastSeq == null) return // events without seq: replaying would show them twice
++            delay(reconnectBackoffMillis[reconnectsSinceProgress])
++            reconnectsSinceProgress++
++            if (!isCurrent(generation)) return // superseded while waiting; don't open a stream for a dead watch
++        }
+     }
+ 
+     /**
+      * The event list is read-modify-write, so it must be atomic with respect
+      * to watch(), which resets it: otherwise an event from a watch that was
+      * superseded a moment ago could be appended to the NEW watch's list.
++     * Returns whether the event was appended (false = this watch is stale).
+      */
+-    private fun appendEventIfCurrent(generation: Long, event: TaskEvent) {
++    private fun appendEventIfCurrent(generation: Long, event: TaskEvent): Boolean =
+         synchronized(lock) {
+             if (generation == watchGeneration) {
+                 _events.value = _events.value + event
++                true
++            } else {
++                false
+             }
+         }
+-    }
+ 
+-    private suspend fun refreshAndMaybeNotify(taskId: String, generation: Long) {
++    private suspend fun refreshAndMaybeNotify(taskId: String, generation: Long): Lookup {
+         val result = transport.getTask(taskId)
+         if (result !is TransportResult.Success) {
+             // Failure case deliberately left alone here: the UI still shows the
+             // last-known snapshot/events either way, same as before this change.
+-            return
++            return if (isCurrent(generation)) Lookup.FAILED else Lookup.SUPERSEDED
+         }
+         val latest = result.value
+ 
+@@ -201,9 +298,9 @@
+         // that arrives after this watch was superseded or stopped is dropped
+         // entirely — it must neither overwrite the newer watch's snapshot nor
+         // announce.
+-        val announce = synchronized(lock) {
++        val outcome = synchronized(lock) {
+             if (generation != watchGeneration) {
+-                false
++                Lookup.SUPERSEDED
+             } else {
+                 _snapshot.value = latest
+                 // The terminal check lives here — not inside the notifier — so
+@@ -213,18 +310,28 @@
+                 // caller), but this is the gate that actually matters for
+                 // TaskMonitor's contract: a dropped connection on a still-running
+                 // task must not falsely announce completion.
+-                latest.status in TERMINAL_STATUSES
++                if (latest.status in TERMINAL_STATUSES) Lookup.TERMINAL else Lookup.RUNNING
+             }
+         }
+-        if (announce) {
++        if (outcome == Lookup.TERMINAL) {
+             notifier.notifyFinished(latest)
+         }
++        return outcome
+     }
+ 
+     companion object {
+         /** Provisional — see the class doc's BOUNDS section. */
+         const val DEFAULT_MAX_WATCH_MILLIS = 30 * 60 * 1000L
+ 
++        /**
++         * Provisional and unmeasured: the wait before each consecutive reconnect
++         * that follows a connection that delivered nothing new (1 s, 2 s, 4 s,
++         * 8 s, 16 s — five reconnects, 31 s of waiting). Sized for a Wi-Fi roam
++         * or a SAM Core restart (seconds to tens of seconds); a longer outage
++         * ends the watch silently, as it did before reconnecting existed.
++         */
++        val DEFAULT_RECONNECT_BACKOFF_MILLIS: List<Long> = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L)
++
+         private val TERMINAL_STATUSES = setOf(TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+     }
+ }
+diff -ruN a/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt b/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt
+--- a/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt	2026-10-16 05:17:00.000000000 +0000
++++ b/app/src/main/java/com/samcore/android/notifications/TaskWatchForegroundService.kt	2026-10-18 07:40:16.522032136 +0000
+@@ -96,8 +96,18 @@
+     }
+ 
+     companion object {
+-        /** TaskMonitor's own cap plus slack, so the monitor's cap is the normal path and this is the backstop. */
+-        const val MAX_SERVICE_LIFETIME_MILLIS = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS + 60_000L
++        /**
++         * TaskMonitor's own cap plus slack, so the monitor's cap is the normal path
++         * and this is the backstop. The slack must cover what can still run AFTER
++         * the cap: a blocking status lookup that was already in flight when the cap
++         * fired (its coroutine only notices the cancellation when the call returns)
++         * and then the one final lookup. Each is normally bounded by the HTTP
++         * client's connect and read timeouts (10 s + 15 s = 25 s), so roughly 50 s
++         * when both fail slowly. It was 60 s when only the final lookup could run
++         * after the cap (reconnecting added the in-flight one); 120 s keeps about
++         * the same headroom. Arithmetic, not a measurement.
++         */
++        const val MAX_SERVICE_LIFETIME_MILLIS = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS + 120_000L
+ 
+         fun startIntent(context: Context): Intent = Intent(context, TaskWatchForegroundService::class.java)
+     }
+diff -ruN a/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt b/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt
+--- a/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt	2026-10-16 05:20:16.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/data/transport/HttpSseSamTransportTest.kt	2026-10-18 07:44:35.626047538 +0000
+@@ -215,6 +215,82 @@
+         assertEquals(HttpSseSamTransport.SSE_READ_TIMEOUT_SECONDS * 1_000, millis.toLong())
+     }
+ 
++    // --- taskEvents(): resuming a dropped stream ------------------------------
++    //
++    // The wire shapes below follow what the repo's own route returned when run
++    // offline on 2026-10-18 (FastAPI TestClient against interfaces/api/server.py):
++    // "id: <seq>\ndata: {json}\n\n"; Last-Event-ID: 2 on a three-event task replied
++    // with event 3 only. Ids and timestamps are shortened. This file's tests still
++    // have not been executed by JUnit here; the server side of that exchange was.
++
++    @Test
++    fun `taskEvents sends no Last-Event-ID header on a first connection`() = runTest {
++        pairSuccessfully()
++        server.takeRequest() // the pairing call made by pairSuccessfully()
++        server.enqueue(sseResponse(sseEvent(seq = 1, phase = "completed")))
++
++        transport.taskEvents("t-1").toList()
++
++        val recorded = server.takeRequest()
++        assertEquals("/api/iqoo/tasks/t-1/events", recorded.path)
++        assertNull(recorded.getHeader("Last-Event-ID"))
++    }
++
++    @Test
++    fun `taskEvents resumes with the Last-Event-ID header when given afterSeq`() = runTest {
++        pairSuccessfully()
++        server.takeRequest() // the pairing call
++        server.enqueue(sseResponse(sseEvent(seq = 3, phase = "completed"))) // what the server sends after Last-Event-ID: 2
++
++        val events = transport.taskEvents("t-1", afterSeq = 2).toList()
++
++        assertEquals("2", server.takeRequest().getHeader("Last-Event-ID"))
++        assertEquals(listOf<Long?>(3), events.map { it.seq })
++    }
++
++    @Test
++    fun `taskEvents takes seq from the SSE id line and leaves it null when an event has none`() = runTest {
++        pairSuccessfully()
++        // The first event has no id: line, so nothing could have been carried over
++        // from an earlier one; the second has id: 7. Both JSON bodies say "seq":99
++        // on purpose — the id: line is the source, the body is not read for it.
++        val body = """data: {"type": "execution.step", "task_id": "t-1", "seq": 99, "phase": "planning", "message": "Planning"}""" + "\n\n" +
++            "id: 7\n" +
++            """data: {"type": "execution.step", "task_id": "t-1", "seq": 99, "phase": "completed", "message": "Done"}""" + "\n\n"
++        server.enqueue(sseResponse(body))
++
++        val events = transport.taskEvents("t-1").toList()
++
++        assertEquals(listOf<Long?>(null, 7), events.map { it.seq })
++    }
++
++    // --- getTask(): a response the app cannot decode ------------------------------
++
++    @Test
++    fun `getTask with a body that is not valid JSON fails cleanly instead of throwing`() = runTest {
++        pairSuccessfully()
++        server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
++
++        val result = transport.getTask("t-1")
++
++        assertTrue(result is TransportResult.Failure)
++        assertTrue((result as TransportResult.Failure).message.contains("Unexpected response"))
++    }
++
++    @Test
++    fun `getTask with a status the app does not list fails cleanly instead of throwing`() = runTest {
++        pairSuccessfully()
++        // "testing" is accepted by the repo's task store (interfaces/api/task_store.py,
++        // ALL_STATUSES) but is not a TaskStatus value.
++        server.enqueue(
++            MockResponse().setResponseCode(200).setBody(
++                """{"task_id":"t-1","instruction":"open chrome","input_type":"text","status":"testing"}""",
++            ),
++        )
++
++        assertTrue(transport.getTask("t-1") is TransportResult.Failure)
++    }
++
+     // --- unpair() -----------------------------------------------------------
+ 
+     @Test
+@@ -232,6 +308,16 @@
+         assertFalse((result as TransportResult.Failure).message.contains("HTTP"))
+     }
+ 
++    private fun sseResponse(body: String) = MockResponse().setResponseCode(200)
++        .setHeader("Content-Type", "text/event-stream")
++        .setBody(body)
++
++    /** One event framed the way interfaces/api/server.py's _format_sse() frames it. */
++    private fun sseEvent(seq: Int, phase: String) =
++        "id: $seq\n" +
++            """data: {"type": "execution.step", "task_id": "t-1", "seq": $seq, "phase": "$phase", "message": "$phase step", "timestamp": "2026-10-18T07:37:47.433928"}""" +
++            "\n\n"
++
+     private suspend fun pairSuccessfully() {
+         server.enqueue(
+             MockResponse().setResponseCode(200)
+diff -ruN a/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt b/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt
+--- a/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt	2026-10-16 23:59:58.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/fakes/FakeSamTransport.kt	2026-10-18 07:42:37.966040544 +0000
+@@ -14,6 +14,19 @@
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.flow
+ import kotlinx.coroutines.withContext
++import java.util.concurrent.CopyOnWriteArrayList
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * What ONE connection made by taskEvents() does: emit [events] in order, then
++ * either throw [failure] (a dropped connection), stay open forever
++ * ([staysOpen]), or — with neither — complete normally (the server closed it).
++ */
++class StreamScript(
++    val events: List<TaskEvent> = emptyList(),
++    val failure: Throwable? = null,
++    val staysOpen: Boolean = false,
++)
+ 
+ /**
+  * Controllable SamTransport for tests. Every method is scriptable via a
+@@ -44,6 +57,13 @@
+      *  (needed to test a second watch superseding a first while BOTH streams stay open). */
+     val taskEventsNeverCompleteForIds = mutableSetOf<String>()
+ 
++    /** One script per taskEvents() call, consumed in order — for tests that need
++     *  the first connection to behave differently from the second (drop, then
++     *  resume). Once the queue is empty the plain [taskEventsToEmit] /
++     *  [taskEventsError] behavior above applies again, so a test can script the
++     *  first connections and let every later one fail the same way. */
++    val streamScripts = ArrayDeque<StreamScript>()
++
+     /** When set, replaces taskEvents() entirely — lets a test hand TaskMonitor a
+      *  stream it controls (e.g. a SharedFlow it can emit into at an exact moment). */
+     var taskEventsOverride: ((taskId: String) -> Flow<TaskEvent>)? = null
+@@ -61,6 +81,15 @@
+     var lastRequestedTaskEventsId: String? = null
+     var lastGetTaskId: String? = null
+ 
++    /** Every taskEvents() call so far, in order, as (taskId, afterSeq). Recorded when
++     *  the call is made, not when the stream is collected. */
++    val taskEventsRequests: MutableList<Pair<String, Long?>> = CopyOnWriteArrayList()
++
++    private val getTaskCallCount = AtomicInteger(0)
++
++    /** How many times getTask() has been called. */
++    val getTaskCalls: Int get() = getTaskCallCount.get()
++
+     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
+     override val connectionState: Flow<ConnectionState> = _connectionState
+ 
+@@ -79,6 +108,7 @@
+     override suspend fun sendTask(request: TaskRequest): TransportResult<TaskSnapshot> = sendTaskResult
+ 
+     override suspend fun getTask(taskId: String): TransportResult<TaskSnapshot> {
++        getTaskCallCount.incrementAndGet()
+         lastGetTaskId = taskId
+         getTaskGate?.let { gate ->
+             getTaskReachedGate.complete(Unit)
+@@ -87,9 +117,22 @@
+         return if (getTaskResults.isNotEmpty()) getTaskResults.removeFirst() else TransportResult.Failure("no more results queued")
+     }
+ 
+-    override fun taskEvents(taskId: String): Flow<TaskEvent> {
++    override fun taskEvents(taskId: String, afterSeq: Long?): Flow<TaskEvent> {
+         lastRequestedTaskEventsId = taskId
++        taskEventsRequests.add(taskId to afterSeq)
+         taskEventsOverride?.let { return it(taskId) }
++        val script = synchronized(streamScripts) { if (streamScripts.isNotEmpty()) streamScripts.removeFirst() else null }
++        if (script != null) {
++            return flow {
++                for (event in script.events) {
++                    emit(event)
++                }
++                script.failure?.let { throw it }
++                if (script.staysOpen) {
++                    awaitCancellation()
++                }
++            }
++        }
+         return flow {
+             for (event in taskEventsToEmit) {
+                 emit(event)
+diff -ruN a/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt b/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt
+--- a/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt	2026-10-17 00:02:12.000000000 +0000
++++ b/app/src/test/java/com/samcore/android/notifications/TaskMonitorTest.kt	2026-10-18 07:44:05.186045729 +0000
+@@ -7,6 +7,7 @@
+ import com.samcore.android.fakes.FakeSamTransport
+ import com.samcore.android.fakes.FakeTaskKeepAlive
+ import com.samcore.android.fakes.FakeTaskNotifier
++import com.samcore.android.fakes.StreamScript
+ import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.ExperimentalCoroutinesApi
+@@ -19,6 +20,7 @@
+ import org.junit.Assert.assertEquals
+ import org.junit.Assert.assertFalse
+ import org.junit.Assert.assertNull
++import org.junit.Assert.assertThrows
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ 
+@@ -45,19 +47,26 @@
+  * TaskMonitor on real threads, which showed a lookup result from a just-replaced
+  * watch could still overwrite the new watch's snapshot; they force that window
+  * deterministically (gates / a hook in the keep-alive call) instead of relying on
+- * timing. Like everything in this file they have been type-checked but NEVER
+- * executed by JUnit (see the build report).
++ * timing. The reconnect tests at the end drive a virtual clock by hand and assert
++ * the wait schedule exactly. Like everything in this file they have been
++ * type-checked but NEVER executed by JUnit (see the build report).
+  */
+ @OptIn(ExperimentalCoroutinesApi::class)
+ class TaskMonitorTest {
+ 
++    // reconnectBackoffMillis defaults to EMPTY here — no reconnecting — so every
++    // test written before reconnecting existed keeps testing the single-attempt
++    // behavior it was written for (an empty list is that mode, not a special
++    // case). The reconnect tests at the end opt in explicitly; one of them
++    // builds the monitor without this helper to exercise the production default.
+     private fun taskMonitor(
+         transport: FakeSamTransport,
+         notifier: FakeTaskNotifier,
+         keepAlive: TaskKeepAlive = FakeTaskKeepAlive(),
+         scope: CoroutineScope = CoroutineScope(UnconfinedTestDispatcher()),
+         maxWatchMillis: Long = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS,
+-    ): TaskMonitor = TaskMonitor(transport, notifier, keepAlive, scope, maxWatchMillis)
++        reconnectBackoffMillis: List<Long> = emptyList(),
++    ): TaskMonitor = TaskMonitor(transport, notifier, keepAlive, scope, maxWatchMillis, reconnectBackoffMillis)
+ 
+     private fun snapshot(status: TaskStatus, taskId: String = "t-1") = TaskSnapshot(
+         taskId = taskId,
+@@ -440,4 +449,343 @@
+         assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.first().status)
+         assertFalse(monitor.isWatching.value)
+     }
++
++    // --- reconnecting (virtual time) -----------------------------------------------
++    //
++    // A stream that ends is not a task that ended: when the status lookup says
++    // "still running" (or cannot say), the monitor waits and opens a new stream
++    // that resumes after the last event it showed. Everything here runs on a clock
++    // the test moves by hand, so the schedule is asserted exactly (999 ms: nothing
++    // yet; 1000 ms: reconnected) instead of by sleeping. FakeSamTransport's
++    // streamScripts script one connection each; taskEventsRequests records the
++    // (taskId, afterSeq) of every connection actually made.
++
++    private class VirtualClock {
++        val scheduler = TestCoroutineScheduler()
++        val scope = CoroutineScope(UnconfinedTestDispatcher(scheduler))
++
++        /** Moves time forward and runs everything that falls due, including work scheduled for exactly the new instant. */
++        fun advance(millis: Long) {
++            scheduler.advanceTimeBy(millis)
++            scheduler.runCurrent()
++        }
++    }
++
++    private fun event(seq: Long?, phase: String, taskId: String = "t-1") =
++        TaskEvent(type = "execution.step", taskId = taskId, phase = phase, message = "$phase step", seq = seq)
++
++    private fun request(taskId: String, afterSeq: Long?) = taskId to afterSeq
++
++    @Test
++    fun `a dropped stream on a running task is reconnected after the delay, resuming from the last event shown`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(
++                events = listOf(event(1, "received"), event(2, "executing")),
++                failure = java.io.IOException("connection dropped"),
++            )
++            streamScripts += StreamScript(events = listOf(event(3, "verifying"), event(4, "completed")))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++
++        // The first connection has dropped, the lookup says the task is still
++        // running, and the monitor is now waiting out its delay.
++        assertEquals(listOf(request("t-1", null)), transport.taskEventsRequests)
++        assertEquals(listOf<Long?>(1, 2), monitor.events.value.map { it.seq })
++        assertTrue(monitor.isWatching.value) // the foreground service must not stop while we wait
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++
++        clock.advance(999)
++        assertEquals(1, transport.taskEventsRequests.size) // one millisecond short
++
++        clock.advance(1)
++        assertEquals(listOf(request("t-1", null), request("t-1", 2)), transport.taskEventsRequests)
++        assertEquals(listOf<Long?>(1, 2, 3, 4), monitor.events.value.map { it.seq })
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
++        assertEquals(2, transport.getTaskCalls) // one lookup per stream that ended, none extra at the end
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `events the server replays on reconnect are not shown twice`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(
++                events = listOf(event(1, "received"), event(2, "executing")),
++                failure = java.io.IOException("connection dropped"),
++            )
++            // A server that ignores the resume point and replays everything, the
++            // boundary event included.
++            streamScripts += StreamScript(events = listOf(event(1, "received"), event(2, "executing"), event(3, "completed")))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier(), scope = clock.scope, reconnectBackoffMillis = listOf(100))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(100)
++
++        assertEquals(listOf<Long?>(1, 2, 3), monitor.events.value.map { it.seq })
++        assertEquals(listOf(request("t-1", null), request("t-1", 2)), transport.taskEventsRequests) // it did ask to resume
++    }
++
++    @Test
++    fun `when the status lookup fails too, the watch reconnects from the beginning and announces once the task is known to be finished`() {
++        // The network is down for the first attempt: the stream fails before
++        // delivering anything AND the lookup fails. Nothing has been shown, so the
++        // retry starts from the beginning (no resume point).
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(failure = java.io.IOException("network down"))
++            streamScripts += StreamScript(events = listOf(event(1, "executing"), event(2, "completed")))
++            getTaskResults.add(TransportResult.Failure("unreachable"))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(500))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        assertTrue(monitor.isWatching.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++
++        clock.advance(500)
++
++        assertEquals(listOf(request("t-1", null), request("t-1", null)), transport.taskEventsRequests)
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `events that arrived without a seq are never replayed, so the watch ends instead of reconnecting`() {
++        // Nothing to resume from: reconnecting from the start would show these
++        // events a second time, and de-duplicating needs a seq.
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(
++                events = listOf(event(null, "received"), event(null, "executing")),
++                failure = java.io.IOException("connection dropped"),
++            )
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(10_000)
++
++        assertEquals(1, transport.taskEventsRequests.size)
++        assertEquals(2, monitor.events.value.size)
++        assertFalse(monitor.isWatching.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++    }
++
++    @Test
++    fun `a task that finished while the stream was down is announced at once, without reconnecting`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(events = listOf(event(1, "received")), failure = java.io.IOException("connection dropped"))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertFalse(monitor.isWatching.value)
++        clock.advance(60_000)
++        assertEquals(1, transport.taskEventsRequests.size) // not even one reconnect
++        assertEquals(1, notifier.notifiedSnapshots.size) // and no second announcement
++    }
++
++    @Test
++    fun `reconnecting gives up after the configured attempts and the watch ends silently`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            taskEventsError = java.io.IOException("unreachable") // every connection fails at once, delivering nothing
++            repeat(4) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100, 200, 400))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        assertEquals(1, transport.taskEventsRequests.size)
++
++        clock.advance(99)
++        assertEquals(1, transport.taskEventsRequests.size)
++        clock.advance(1) // t = 100: first reconnect, after the first wait
++        assertEquals(2, transport.taskEventsRequests.size)
++
++        clock.advance(199)
++        assertEquals(2, transport.taskEventsRequests.size)
++        clock.advance(1) // t = 300: second reconnect, after the second wait
++        assertEquals(3, transport.taskEventsRequests.size)
++
++        clock.advance(399)
++        assertEquals(3, transport.taskEventsRequests.size)
++        clock.advance(1) // t = 700: third and last reconnect, after the third wait
++        assertEquals(4, transport.taskEventsRequests.size)
++
++        assertEquals(4, transport.getTaskCalls) // one lookup per connection
++        assertFalse(monitor.isWatching.value)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++        assertEquals(TaskStatus.EXECUTING, monitor.snapshot.value?.status)
++
++        clock.advance(60_000)
++        assertEquals(4, transport.taskEventsRequests.size) // budget spent: no fifth connection
++    }
++
++    @Test
++    fun `a reconnect that delivers something new restores the whole budget`() {
++        // Budget of two, waits of 100 ms then 5 s. Each of the first three
++        // connections delivers one new event and then drops. Progress resets the
++        // schedule every time, so every wait is the short one and the budget is
++        // never spent; without the reset the third drop would use the 5 s wait and
++        // the fourth would exhaust the budget.
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            for (seq in 1L..3L) {
++                streamScripts += StreamScript(events = listOf(event(seq, "executing")), failure = java.io.IOException("dropped"))
++            }
++            streamScripts += StreamScript(events = listOf(event(4, "completed")))
++            repeat(3) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(100, 5_000))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(300)
++
++        assertEquals(listOf<Long?>(null, 1, 2, 3), transport.taskEventsRequests.map { it.second })
++        assertEquals(listOf<Long?>(1, 2, 3, 4), monitor.events.value.map { it.seq })
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
++    }
++
++    @Test
++    fun `the cap still bounds reconnecting, and the final lookup still runs`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            taskEventsError = java.io.IOException("unreachable")
++            repeat(3) { getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING))) }
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED))) // what the final lookup finds
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(
++            transport,
++            notifier,
++            scope = clock.scope,
++            maxWatchMillis = 1_000,
++            reconnectBackoffMillis = listOf(400, 400, 400, 400, 400),
++        )
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(1_001)
++
++        assertEquals(3, transport.taskEventsRequests.size) // t = 0, 400, 800 — the wait due to end at 1200 was cut off by the cap
++        assertEquals(4, transport.getTaskCalls) // one per connection, plus the final lookup
++        assertEquals(1, notifier.notifiedSnapshots.size)
++        assertEquals(TaskStatus.COMPLETED, notifier.notifiedSnapshots.single().status)
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `watching a new task while the old one waits to reconnect cancels that reconnect`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
++            taskEventsNeverCompleteForIds += "t-2"
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING, taskId = "t-1")))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
++
++        monitor.watch(snapshot(TaskStatus.EXECUTING, taskId = "t-1")) // drops, is told "still running", now waits
++        monitor.watch(snapshot(TaskStatus.QUEUED, taskId = "t-2"))
++        clock.advance(60_000)
++
++        assertEquals(1, transport.taskEventsRequests.count { it.first == "t-1" }) // never reconnected
++        assertEquals(1, transport.getTaskCalls) // only t-1's single lookup: the superseded watch ran no more
++        assertEquals("t-2", monitor.snapshot.value?.taskId)
++        assertTrue(monitor.events.value.isEmpty())
++        assertTrue(monitor.isWatching.value) // t-2 is being watched
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++    }
++
++    @Test
++    fun `stopWatching while waiting to reconnect cancels the reconnect`() {
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = taskMonitor(transport, notifier, scope = clock.scope, reconnectBackoffMillis = listOf(1_000))
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        assertTrue(monitor.isWatching.value) // waiting to reconnect
++        monitor.stopWatching()
++        assertFalse(monitor.isWatching.value)
++        clock.advance(60_000)
++
++        assertEquals(1, transport.taskEventsRequests.size)
++        assertEquals(1, transport.getTaskCalls)
++        assertTrue(notifier.notifiedSnapshots.isEmpty())
++    }
++
++    @Test
++    fun `with no backoff delays the monitor never reconnects`() {
++        // The empty list is the "reconnecting off" setting that every older test in
++        // this file relies on; this one states it outright.
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++        }
++        val monitor = taskMonitor(transport, FakeTaskNotifier(), scope = clock.scope, reconnectBackoffMillis = emptyList())
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(600_000)
++
++        assertEquals(1, transport.taskEventsRequests.size)
++        assertFalse(monitor.isWatching.value)
++    }
++
++    @Test
++    fun `negative reconnect delays are rejected`() {
++        assertThrows(IllegalArgumentException::class.java) {
++            taskMonitor(FakeSamTransport(), FakeTaskNotifier(), reconnectBackoffMillis = listOf(100, -1))
++        }
++    }
++
++    @Test
++    fun `the production default reconnects, starting with a one second wait`() {
++        // Built without the helper, so no backoff argument is passed: this is the
++        // behavior the app actually gets from AppContainer.
++        val clock = VirtualClock()
++        val transport = FakeSamTransport().apply {
++            streamScripts += StreamScript(events = listOf(event(1, "executing")), failure = java.io.IOException("connection dropped"))
++            streamScripts += StreamScript(events = listOf(event(2, "completed")))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.EXECUTING)))
++            getTaskResults.add(TransportResult.Success(snapshot(TaskStatus.COMPLETED)))
++        }
++        val notifier = FakeTaskNotifier()
++        val monitor = TaskMonitor(transport, notifier, FakeTaskKeepAlive(), clock.scope)
++
++        monitor.watch(snapshot(TaskStatus.QUEUED))
++        clock.advance(999)
++        assertEquals(1, transport.taskEventsRequests.size)
++        clock.advance(1)
++
++        assertEquals(2, transport.taskEventsRequests.size)
++        assertEquals(1, notifier.notifiedSnapshots.size)
++    }
+ }

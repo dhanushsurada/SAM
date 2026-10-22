@@ -41,8 +41,16 @@ interface SamTransport {
 
     /** Server-sent execution events for one task. Terminates when the stream
      *  closes (a terminal-phase event, per PROTOCOL.md) or is cancelled by the
-     *  collector. */
-    fun taskEvents(taskId: String): Flow<TaskEvent>
+     *  collector.
+     *
+     *  [afterSeq] resumes a dropped stream: when non-null, the stream starts
+     *  with the events whose [TaskEvent.seq] is greater than it instead of the
+     *  task's full history; null means "from the beginning". The HTTP
+     *  implementation sends it as the SSE Last-Event-ID header, which the
+     *  repo's server (interfaces/api/server.py) honors — PROTOCOL.md does not
+     *  document that, so treat it as provisional. A transport that cannot
+     *  resume may ignore it (the collector de-duplicates by seq regardless). */
+    fun taskEvents(taskId: String, afterSeq: Long? = null): Flow<TaskEvent>
 
     suspend fun cancelTask(taskId: String): TransportResult<Unit>
 

@@ -96,8 +96,18 @@ class TaskWatchForegroundService : Service() {
     }
 
     companion object {
-        /** TaskMonitor's own cap plus slack, so the monitor's cap is the normal path and this is the backstop. */
-        const val MAX_SERVICE_LIFETIME_MILLIS = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS + 60_000L
+        /**
+         * TaskMonitor's own cap plus slack, so the monitor's cap is the normal path
+         * and this is the backstop. The slack must cover what can still run AFTER
+         * the cap: a blocking status lookup that was already in flight when the cap
+         * fired (its coroutine only notices the cancellation when the call returns)
+         * and then the one final lookup. Each is normally bounded by the HTTP
+         * client's connect and read timeouts (10 s + 15 s = 25 s), so roughly 50 s
+         * when both fail slowly. It was 60 s when only the final lookup could run
+         * after the cap (reconnecting added the in-flight one); 120 s keeps about
+         * the same headroom. Arithmetic, not a measurement.
+         */
+        const val MAX_SERVICE_LIFETIME_MILLIS = TaskMonitor.DEFAULT_MAX_WATCH_MILLIS + 120_000L
 
         fun startIntent(context: Context): Intent = Intent(context, TaskWatchForegroundService::class.java)
     }
