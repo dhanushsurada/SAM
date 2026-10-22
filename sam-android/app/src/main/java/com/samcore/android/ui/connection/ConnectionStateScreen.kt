@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -19,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,22 +30,35 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.samcore.android.data.transport.ConnectionState
 import com.samcore.android.data.transport.SamTransport
+import com.samcore.android.notifications.AndroidConnectTaskExecutor
 import com.samcore.android.ui.simpleViewModelFactory
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
 fun ConnectionStateScreen(
     transport: SamTransport,
+    connectTaskExecutor: AndroidConnectTaskExecutor,
     onOpenTaskStatus: () -> Unit,
     onUnpaired: () -> Unit,
-    viewModel: ConnectionViewModel = viewModel(factory = simpleViewModelFactory { ConnectionViewModel(transport) }),
+    viewModel: ConnectionViewModel = viewModel(factory = simpleViewModelFactory {
+        ConnectionViewModel(transport, connectTaskExecutor)
+    }),
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
     val isChecking by viewModel.isChecking.collectAsState()
     val lastCheckError by viewModel.lastCheckError.collectAsState()
+    val connectTasks by viewModel.connectTasks.collectAsState()
+    val executingTaskId by viewModel.executingTaskId.collectAsState()
+
+    LaunchedEffect(connectionState) {
+        if (connectionState is ConnectionState.Connected) viewModel.checkConnection()
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -71,6 +87,52 @@ fun ConnectionStateScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+        if (connectTasks.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(18.dp))
+            Text("Tasks routed to this phone", style = MaterialTheme.typography.titleSmall)
+            connectTasks.forEach { task ->
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    Text(
+                        text = "${task.action} · ${task.status}${task.lastMessage?.let { " · $it" } ?: ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    val taskTitle = (task.payload["title"] as? JsonPrimitive)?.contentOrNull
+                    val taskMessage = (task.payload["message"] as? JsonPrimitive)?.contentOrNull
+                    if (!taskTitle.isNullOrBlank() || !taskMessage.isNullOrBlank()) {
+                        Text(
+                            text = listOfNotNull(taskTitle?.takeIf { it.isNotBlank() }, taskMessage?.takeIf { it.isNotBlank() })
+                                .joinToString(" — "),
+                            modifier = Modifier.padding(top = 3.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (task.status == "dispatched" || task.status == "queued_offline") {
+                        if (task.action == AndroidConnectTaskExecutor.ACTION_SHOW_NOTIFICATION) {
+                            OutlinedButton(
+                                onClick = { viewModel.executeConnectTask(task) },
+                                enabled = executingTaskId == null,
+                                modifier = Modifier.padding(top = 4.dp),
+                            ) {
+                                Text(if (executingTaskId == task.taskId) "Running…" else "Show notification")
+                            }
+                        } else {
+                            Text(
+                                "This phone does not support this action.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                text = "Tasks run only after you choose an action. Notification content is private on the lock screen.",
+                modifier = Modifier.padding(top = 6.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Spacer(modifier = Modifier.height(32.dp))
         Button(
             onClick = { viewModel.checkConnection() },
@@ -97,6 +159,12 @@ fun ConnectionStateScreen(
         ) {
             Text("Unpair this device", color = MaterialTheme.colorScheme.error)
         }
+        Text(
+            text = "Unpairing removes this phone's saved connection. To revoke its SAM trust record, use the desktop device controls.",
+            modifier = Modifier.padding(top = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

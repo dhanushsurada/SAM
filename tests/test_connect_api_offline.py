@@ -1,20 +1,8 @@
-"""
-OFFLINE test suite for /api/connect/* (interfaces/api/device_auth.py +
-connect_routes.py + connect_schemas.py) — the FastAPI layer on top of the
-connect/ subsystem tests/test_connect_offline.py already covers directly.
+"""Offline FastAPI contract tests for the existing SAM Connect service.
 
-*** Could not be executed in the sandbox this branch was developed in ***
-fastapi, pydantic, uvicorn and httpx are real project dependencies (see
-requirements.txt) but were not installed in that sandbox, and it had no
-network access to install them. tests/test_connect_offline.py — which
-needs only `cryptography` and the stdlib — exercises every piece of logic
-this file wires into HTTP (pairing, trust, revocation, signature
-verification, capability validation, task routing/lifecycle, idempotency,
-offline queueing, timeout sweep, handoff, the event bus) directly, and
-77/77 of those checks pass. This file is written to the same standard and
-the same conventions as tests/test_iqoo_phase1_offline.py's TestClient
-usage, but run it for real — `pip install -r requirements.txt && python3
-tests/test_connect_api_offline.py` — before treating it as passing.
+The paired core-level behavior is covered in tests/test_connect_offline.py;
+this file exercises actual routes, request authentication, and caller access
+rules through FastAPI's TestClient.
 
 Usage:
     HOME=/tmp/sam_connect_api_test python3 tests/test_connect_api_offline.py
@@ -196,6 +184,10 @@ def main():
 
     r = client.get(f"/api/connect/tasks/{task_id}")
     check("GET /tasks/{id} reflects the completed task", r.json()["status"] == "completed")
+    r = remote_client.get(f"/api/connect/tasks/{task_id}")
+    check("remote callers cannot read device task content", r.status_code == 403)
+    r = remote_client.get("/api/connect/events?stream=task:" + task_id)
+    check("remote callers cannot subscribe to task event content", r.status_code == 403)
 
     r = client.get("/api/connect/tasks/no-such-task")
     check("GET /tasks/{id} for an unknown id returns 404", r.status_code == 404)

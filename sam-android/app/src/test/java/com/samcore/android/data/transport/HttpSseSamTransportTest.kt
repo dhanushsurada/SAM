@@ -13,6 +13,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.Signature
+import java.util.Base64
 
 /**
  * Everything here runs against MockWebServer, not a real network — this is
@@ -27,13 +31,17 @@ class HttpSseSamTransportTest {
     private lateinit var server: MockWebServer
     private lateinit var store: FakePairedDeviceStore
     private lateinit var transport: HttpSseSamTransport
+    private lateinit var identity: DeviceIdentity
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
         store = FakePairedDeviceStore()
-        transport = HttpSseSamTransport(store)
+        identity = ConnectIdentityCrypto.generate().copy(deviceId = "dev-1")
+        transport = HttpSseSamTransport(store, identityStore = object : DeviceIdentityStore {
+            override fun loadOrCreate() = identity
+        })
     }
 
     @After
@@ -71,7 +79,7 @@ class HttpSseSamTransportTest {
     fun `pair success persists the device and updates connectionState`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"device_id":"dev-1","device_name":"Pixel 8"}"""),
+                .setBody("""{"device_id":"dev-1","status":"trusted"}"""),
         )
 
         val result = transport.pair(baseUrl(), "123456")
@@ -85,6 +93,11 @@ class HttpSseSamTransportTest {
 
         val state = transport.connectionState.first()
         assertTrue(state is ConnectionState.Connected)
+        val request = server.takeRequest()
+        assertEquals("/api/connect/pairing/redeem", request.path)
+        assertEquals("POST", request.method)
+        assertEquals("dev-1", kotlinx.serialization.json.Json.parseToJsonElement(request.body.readUtf8())
+            .let { (it as kotlinx.serialization.json.JsonObject)["device_id"].toString().trim('"') })
     }
 
     @Test
@@ -120,11 +133,46 @@ class HttpSseSamTransportTest {
     fun `checkConnection success and failure`() = runTest {
         pairSuccessfully()
 
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"updated":true}"""))
         server.enqueue(MockResponse().setResponseCode(200))
         assertTrue(transport.checkConnection() is TransportResult.Success)
 
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"updated":true}"""))
         server.enqueue(MockResponse().setResponseCode(503))
         assertTrue(transport.checkConnection() is TransportResult.Failure)
+    }
+
+    @Test
+    fun `connect heartbeat and capability requests use the documented signature`() = runTest {
+        pairSuccessfully()
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"updated":true}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"device_id":"dev-1","connection_state":"online","pending_tasks":[]}"""))
+        assertTrue(transport.checkConnection() is TransportResult.Success)
+
+        server.takeRequest() // pairing redemption is intentionally unsigned
+        val capabilityRequest = server.takeRequest()
+        val heartbeatRequest = server.takeRequest()
+        assertSignatureValid(capabilityRequest)
+        assertSignatureValid(heartbeatRequest)
+        assertEquals("PUT", capabilityRequest.method)
+        assertEquals("POST", heartbeatRequest.method)
+    }
+
+    @Test
+    fun `acknowledging a routed task signs the canonical request`() = runTest {
+        pairSuccessfully()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(
+            """{"task_id":"task-1","origin":"desktop","target_device_id":"dev-1","action":"notify","payload":{},"status":"started","created_at":"2026-10-22T00:00:00","updated_at":"2026-10-22T00:00:01"}"""
+        ))
+
+        val result = transport.acknowledgeConnectTask("task-1")
+
+        assertTrue(result is TransportResult.Success)
+        val pairRequest = server.takeRequest()
+        assertNull(pairRequest.getHeader("X-SAM-Signature"))
+        val ackRequest = server.takeRequest()
+        assertEquals("/api/connect/tasks/task-1/ack", ackRequest.path)
+        assertSignatureValid(ackRequest)
     }
 
     // --- sendTask() / getTask() / cancelTask() -----------------------------
@@ -321,9 +369,23 @@ class HttpSseSamTransportTest {
     private suspend fun pairSuccessfully() {
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"device_id":"dev-1","device_name":"Pixel 8"}"""),
+                .setBody("""{"device_id":"dev-1","status":"trusted"}"""),
         )
         val result = transport.pair(baseUrl(), "123456")
         check(result is TransportResult.Success) { "test setup: pairing was expected to succeed" }
+    }
+
+    private fun assertSignatureValid(request: okhttp3.mockwebserver.RecordedRequest) {
+        val timestamp = request.getHeader("X-SAM-Timestamp")!!
+        val nonce = request.getHeader("X-SAM-Nonce")!!
+        val signature = Base64.getDecoder().decode(request.getHeader("X-SAM-Signature")!!)
+        val bodyHash = MessageDigest.getInstance("SHA-256").digest(request.body.readByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val canonical = "${request.method}\n${request.requestUrl!!.encodedPath}\n$timestamp\n$nonce\n$bodyHash"
+        val verifier = Signature.getInstance("Ed25519", ConnectIdentityCrypto.provider())
+        verifier.initVerify(identity.keyPair.public)
+        verifier.update(canonical.toByteArray(StandardCharsets.UTF_8))
+        assertTrue(verifier.verify(signature))
+        assertEquals("dev-1", request.getHeader("X-SAM-Device-Id"))
     }
 }

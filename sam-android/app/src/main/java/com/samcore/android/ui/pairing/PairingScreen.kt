@@ -43,7 +43,7 @@ fun PairingScreen(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Both devices need to be on the same WiFi network. Find the address and pairing code in SAM's desktop app.",
+            text = "Both devices need to be on the same trusted Wi-Fi network. Enter the desktop address and one-time pairing token from SAM Connect.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -59,7 +59,7 @@ fun PairingScreen(
         OutlinedTextField(
             value = uiState.pairingCode,
             onValueChange = viewModel::onPairingCodeChange,
-            label = { Text("Pairing code") },
+            label = { Text("One-time pairing token") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -71,6 +71,12 @@ fun PairingScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Connect signs device requests for authentication, but local HTTP does not encrypt task content. Pair only on a network you trust; never expose this endpoint to the public internet.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
         Spacer(modifier = Modifier.height(24.dp))
         Button(
             onClick = { viewModel.pair(onSuccess = onPaired) },

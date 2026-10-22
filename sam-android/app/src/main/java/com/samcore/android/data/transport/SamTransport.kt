@@ -22,14 +22,21 @@ interface SamTransport {
      *  leave it at Connecting. Call once, at app start. */
     suspend fun restore()
 
-    /** Attempt to pair with a SAM Core instance at [baseUrl] using a pairing code
-     *  shown on the desktop app (mirrors the existing Telegram bridge's
-     *  token → trusted-device flow in connect/core/device_registry.py, adapted
-     *  for a directly-entered code instead of a chat command). */
+    /** Redeem the one-time SAM Connect token shown by the desktop app. */
     suspend fun pair(baseUrl: String, pairingCode: String): TransportResult<DeviceInfo>
 
     /** One-shot reachability/health check against the currently paired device. */
     suspend fun checkConnection(): TransportResult<Unit>
+
+    /** Signed Connect heartbeat, including tasks routed to this device. */
+    suspend fun refreshConnectTasks(): TransportResult<List<ConnectDeviceTask>>
+
+    suspend fun acknowledgeConnectTask(taskId: String): TransportResult<ConnectDeviceTask>
+    suspend fun reportConnectTaskProgress(taskId: String, message: String, pct: Int? = null): TransportResult<ConnectDeviceTask>
+    suspend fun reportConnectTaskAction(taskId: String, description: String): TransportResult<ConnectDeviceTask>
+    suspend fun reportConnectTaskVerification(taskId: String, verified: Boolean, detail: String = ""): TransportResult<ConnectDeviceTask>
+    suspend fun completeConnectTask(taskId: String, result: kotlinx.serialization.json.JsonObject? = null): TransportResult<ConnectDeviceTask>
+    suspend fun failConnectTask(taskId: String, error: String): TransportResult<ConnectDeviceTask>
 
     /** Observed connection state — Disconnected until pair() succeeds, then
      *  reflects ongoing reachability. Collected by the connection-state screen. */

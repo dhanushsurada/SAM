@@ -1,6 +1,7 @@
 package com.samcore.android.fakes
 
 import com.samcore.android.data.transport.ConnectionState
+import com.samcore.android.data.transport.ConnectDeviceTask
 import com.samcore.android.data.transport.DeviceInfo
 import com.samcore.android.data.transport.SamTransport
 import com.samcore.android.data.transport.TaskEvent
@@ -38,6 +39,8 @@ class FakeSamTransport : SamTransport {
     var restoreCalled = false
     var pairResult: TransportResult<DeviceInfo> = TransportResult.Failure("not configured")
     var checkConnectionResult: TransportResult<Unit> = TransportResult.Success(Unit)
+    var connectTasksResult: TransportResult<List<ConnectDeviceTask>> = TransportResult.Success(emptyList())
+    var connectTaskUpdateResult: TransportResult<ConnectDeviceTask> = TransportResult.Failure("not configured")
     var sendTaskResult: TransportResult<TaskSnapshot> = TransportResult.Failure("not configured")
     val getTaskResults = ArrayDeque<TransportResult<TaskSnapshot>>() // consumed in order, one per getTask() call
     var cancelTaskResult: TransportResult<Unit> = TransportResult.Success(Unit)
@@ -104,6 +107,14 @@ class FakeSamTransport : SamTransport {
     override suspend fun pair(baseUrl: String, pairingCode: String): TransportResult<DeviceInfo> = pairResult
 
     override suspend fun checkConnection(): TransportResult<Unit> = checkConnectionResult
+
+    override suspend fun refreshConnectTasks(): TransportResult<List<ConnectDeviceTask>> = connectTasksResult
+    override suspend fun acknowledgeConnectTask(taskId: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun reportConnectTaskProgress(taskId: String, message: String, pct: Int?): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun reportConnectTaskAction(taskId: String, description: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun reportConnectTaskVerification(taskId: String, verified: Boolean, detail: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun completeConnectTask(taskId: String, result: kotlinx.serialization.json.JsonObject?): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun failConnectTask(taskId: String, error: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
 
     override suspend fun sendTask(request: TaskRequest): TransportResult<TaskSnapshot> = sendTaskResult
 

@@ -18,6 +18,7 @@ class MainActivity : ComponentActivity() {
 
         val transport = (application as SamApplication).container.samTransport
         val taskMonitor = (application as SamApplication).container.taskMonitor
+        val connectTaskExecutor = (application as SamApplication).container.connectTaskExecutor
 
         setContent {
             SamTheme {
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    SamNavGraph(transport = transport, taskMonitor = taskMonitor)
+                    SamNavGraph(transport = transport, taskMonitor = taskMonitor, connectTaskExecutor = connectTaskExecutor)
                 }
             }
         }

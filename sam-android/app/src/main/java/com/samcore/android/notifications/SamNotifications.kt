@@ -41,6 +41,7 @@ import com.samcore.android.data.transport.TaskStatus
 object SamNotifications {
     const val CHANNEL_ID = "sam_task_updates"
     const val CHANNEL_ID_FOREGROUND = "sam_task_in_progress"
+    const val CHANNEL_ID_ROUTED = "sam_routed_device_tasks"
     private const val NOTIFICATION_ID_BASE = 1000
 
     /** Fixed id for the foreground service's one ongoing notification. */
@@ -67,6 +68,15 @@ object SamNotifications {
             description = "Shown while the app keeps its connection to SAM Core open for a task you sent."
         }
         manager.createNotificationChannel(inProgress)
+
+        val routed = NotificationChannel(
+            CHANNEL_ID_ROUTED,
+            "SAM device actions",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Notifications requested by tasks routed to this device."
+        }
+        manager.createNotificationChannel(routed)
     }
 
     /**
@@ -117,5 +127,27 @@ object SamNotifications {
             .build()
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_BASE + snapshot.taskId.hashCode(), notification)
+    }
+
+    /** Posts a user-requested routed notification, with private lock-screen visibility. */
+    fun notifyRouted(context: Context, taskId: String, title: String, body: String): Boolean {
+        val hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!hasPermission || !NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ROUTED)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title.take(100))
+            .setContentText(body.take(500))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .build()
+        return try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_BASE + taskId.hashCode(), notification)
+            true
+        } catch (_: SecurityException) {
+            // Permission can be revoked between the check above and notify().
+            false
+        }
     }
 }
