@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 MANIFEST_FILE="$SCRIPT_DIR/compatibility/manifest.json"
 COMPATIBILITY_MODULE="$SCRIPT_DIR/runtime/compatibility.py"
+ENVIRONMENT_MANAGER="$SCRIPT_DIR/runtime/environment_manager.py"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "ERROR: setup.sh supports macOS only." >&2
@@ -108,10 +109,9 @@ if ! PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"; then
   PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"
 fi
 
-"$PYTHON" "$COMPATIBILITY_MODULE" check-requirements
-"$PYTHON" "$COMPATIBILITY_MODULE" check-tools node npm rust
-"$PYTHON" "$COMPATIBILITY_MODULE" check-platform --os macos \
-  --version "$(sw_vers -productVersion)" --architecture "$(uname -m)"
+"$PYTHON" "$ENVIRONMENT_MANAGER" preflight
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step setup-preflight complete \
+  --detail "Platform, Python, dependencies, and desktop tools passed compatibility policy"
 
 if ! "$BREW" list "$PORTAUDIO_FORMULA" >/dev/null 2>&1; then
   echo "Installing PortAudio (Homebrew)..."
@@ -130,6 +130,7 @@ fi
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies complete
 
 mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \
   "$HOME/.sam_data/founder_mode/export" "$HOME/.sam_data/skills/compiled"
@@ -164,6 +165,7 @@ if [[ "$OLLAMA_READY" != true ]]; then
   echo "Ollama did not become ready within 60 seconds. Start it and rerun setup.sh." >&2
   exit 1
 fi
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step ollama-ready complete
 
 # Read existing Settings values. The setup script never rewrites settings.yaml
 # and asks before downloading any model (which can require many GB of storage).
@@ -204,6 +206,7 @@ if [[ ! -d "$APP_PATH" ]]; then
   echo "Tauri build completed but expected app was not found: $APP_PATH" >&2
   exit 1
 fi
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step desktop-build complete --detail "$APP_PATH"
 
 # Configuration is deliberately outside the source tree. Refresh checkout
 # paths while preserving the user's configured API endpoint.
