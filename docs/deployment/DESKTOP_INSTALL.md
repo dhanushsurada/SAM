@@ -14,11 +14,20 @@ setup script.
 This developer route is the current distribution decision. A consumer
 installer is deferred until SAM has a relocatable Python/runtime bundle and
 an install/uninstall lifecycle; the existing `.app` build must not be
-advertised as a standalone product. On macOS, setup checks for Apple Command
-Line Tools and offers to install missing Python, Node.js, and Rust packages
-through Homebrew. If Homebrew is absent, setup offers to run its official
+advertised as a standalone product. On macOS, setup reads supported versions
+and required tools from [`compatibility/manifest.json`](../../compatibility/manifest.json).
+It selects Python 3.11 or 3.12 according to that policy and checks installed
+Node.js, npm, and Rust versions before building. If no supported Python is
+available, it explains the supported versions and offers to install Python
+3.11 through Homebrew. If Homebrew is absent, setup offers to run its official
 installer and explains that it may request administrator access. The macOS
 build creates a Tauri `.app` bundle and does not create a DMG.
+
+The macOS developer route requires macOS 14 or later because the supported
+Ollama app distribution requires Sonoma or later. Setup offers the
+`ollama-app` Homebrew cask, waits for Ollama's local API to become ready, and
+asks before downloading configured models. It does not select or install the
+newest Python blindly.
 
 The Tauri bridge reads the configured Python executable, SAM CLI path,
 resource root, process environment path, and API base URL from that per-user

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "python": {
+    "requirements_file": "requirements.txt",
+    "supported_versions": ["3.11", "3.12"],
+    "preferred_versions": ["3.11", "3.12"],
+    "bootstrap_formula": "python@3.11",
+    "bootstrap_executable": "python3.11",
+    "bootstrap_candidates": ["python3.11", "python3.12", "python3"],
+    "executables": {"3.11": "python3.11", "3.12": "python3.12"},
+    "dependency_groups": {
+      "core": ["requests", "pyyaml", "fastapi", "uvicorn", "httpx", "python-multipart"],
+      "voice": ["faster-whisper", "pyaudio", "openwakeword", "soundfile", "sounddevice", "numpy", "kokoro"],
+      "desktop_and_vision": ["pyautogui", "playwright", "pillow"],
+      "memory": ["chromadb"],
+      "integrations": ["python-telegram-bot", "qrcode", "cryptography"]
+    },
+    "notes": "Kokoro 0.9.4 requires Python >=3.10,<3.13. SAM supports maintained Python 3.11 and 3.12 minors from that compatible range."
+  },
+  "platforms": {
+    "macos": {
+      "minimum_version": "14.0",
+      "architectures": ["arm64", "x86_64"],
+      "python_formulas": {
+        "3.11": "python@3.11",
+        "3.12": "python@3.12"
+      },
+      "ollama": {
+        "install_method": "homebrew_cask",
+        "package": "ollama-app",
+        "minimum_macos": "14.0"
+      }
+    }
+  },
+  "tools": {
+    "homebrew": {"required": true},
+    "xcode_command_line_tools": {"required": true},
+    "node": {"minimum_version": "18.0.0", "homebrew_formula": "node"},
+    "npm": {"minimum_version": "9.0.0", "homebrew_formula": "node"},
+    "rust": {"minimum_version": "1.77.2", "homebrew_formula": "rust"},
+    "portaudio": {"required": true, "homebrew_formula": "portaudio"}
+  }
+}

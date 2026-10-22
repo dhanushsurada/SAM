@@ -10,32 +10,30 @@ the real-vs-demo backend boundary, and implementation order.
 
 ## Setup
 
+For a supported macOS developer install, run the repository-level
+`../../setup.sh`; it checks the compatibility manifest, creates the Python
+environment, installs prerequisites with consent, and builds/opens the Tauri
+app. This requires macOS 14+, Python 3.11 or 3.12, Node/npm, Rust, and Apple
+Command Line Tools. It does not create a consumer DMG.
+
+For frontend-only work:
+
 ```bash
 cd interfaces/desktop
-npm install
+npm ci
 npm run dev
 ```
 
-Needs network access for `npm install` — this codebase was authored in a
-sandbox without it, so it's been verified with local `tsc` against a type
-shim rather than a real build. See the next section before you run it.
+The API routes use the configured SAM gateway; `npm run dev` alone does not
+start the backend.
 
 ## About `src/types/react-shim.d.ts`
 
-This file exists only because the code was written somewhere without
-network access to install `@types/react`. It's a minimal, deliberately
-incomplete stand-in that let local `tsc` catch real mistakes (wrong prop
-names, missing required props) during authoring. Once you run `npm install`
-here, you'll have the real type packages — delete `react-shim.d.ts` at that
-point; keeping both around will cause duplicate-declaration errors.
-
-Expect a handful of normal first-run issues after that — a hand-authored
-scaffold that's never seen a real `npm install` typically needs a small
-amount of settling, same as any fresh project would.
-
-(`src/types/tauri-shim.d.ts` is the same idea, scoped to `@tauri-apps/api`
-instead of React — see `src-tauri/NATIVE_SHELL_NOTES.md`. Delete it the
-same way, at the same point.)
+The project now includes real React and Tauri type dependencies in its lockfile.
+Keep the shim declarations only where they model APIs that the installed
+packages do not expose to the type checker; do not delete or retain them based
+on the old “install the real packages first” notes without checking the
+current TypeScript build.
 
 ## What this app is
 
@@ -49,25 +47,22 @@ and now, running natively, there is no browser frame around it at all.
 
 ## Native shell (Agent 1 — `agent/desktop-product`)
 
-A Tauri v2 scaffold in `src-tauri/` wraps this app for macOS: native
+A Tauri v2 shell in `src-tauri/` wraps this app: native
 window, Dock/menu-bar-resident lifecycle, a tray icon, a global-shortcut
-Quick Assistant window (`src/features/quick-assistant/`), and a real
-notification bridge (`src/lib/native.ts`). Written with no `cargo`/`rustc`
-or macOS available to compile or run it — needs a real `cargo check`
-before anything else. Full status, the framework decision and why, the
+Quick Assistant window (`src/features/quick-assistant/`), a notification
+bridge, a startup preference, and a configured Python runtime bridge. The
+native Rust build has not been verified in the current environment because
+`cargo`/`rustc` are unavailable. Full status, the framework decision and why, the
 permissions matrix, and what's still open are all in
 `src-tauri/NATIVE_SHELL_NOTES.md` — read that before extending this layer
 further.
 
 ## What's real vs. demo right now
 
-Two live backends, both served by `interfaces/api/server.py`: the task
-gateway (`/api/iqoo/*`) and the Brain endpoints (`GET /api/models`,
-`POST /api/models/select`). Everything else (Memory, Founder Mode, Skills,
-Diagnostics, Licensing, Settings) is UI built ahead of a backend that
-doesn't exist yet — each is marked DEMO in the interface itself, never
-presented as live. Full breakdown, with the exact endpoints each would need,
-is in `PHASE5_PLAN.md` §F.
+Live backends include the task gateway (`/api/iqoo/*`), Brain/model controls
+(`/api/models`), and local settings read/write (`/api/settings`). Memory,
+Founder Mode, Skills, Diagnostics, and Licensing remain demo interfaces.
+Full breakdown, with the exact remaining endpoints, is in `PHASE5_PLAN.md` §F.
 
 ## Status
 
@@ -97,10 +92,9 @@ done, plus the Brain / desktop-correction pass
   only the vision/Whisper rows are probed (gateway health), Office Kit is
   listed as not implemented
 - **`/memory`, `/founder-mode`, `/skills`, `/diagnostics`, `/licensing`,
-  `/settings`** — demo, each grounded in a real backend shape (Settings'
-  model rows now point to the live Brain page)
-- **`/onboarding`** — standalone wizard; system check is real, everything
-  a browser genuinely can't verify is informational rather than faked
+  `/settings`** — Settings load and save through the local API; the live
+  section shares runtime/model state and manages launch-at-login
+- **`/onboarding`** — persisted first-run wizard with runtime/model controls
 - `/models` no longer exists; it was the demo page the Brain page replaced
 
 Two real bugs found and fixed while building the iQOO integration, and

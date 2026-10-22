@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+MANIFEST_FILE="$SCRIPT_DIR/compatibility/manifest.json"
+COMPATIBILITY_MODULE="$SCRIPT_DIR/runtime/compatibility.py"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "ERROR: setup.sh supports macOS only." >&2
@@ -32,42 +34,88 @@ else
   eval "$("$BREW" shellenv)"
 fi
 
+manifest_value() {
+  /usr/bin/plutil -extract "$1" raw -o - "$MANIFEST_FILE"
+}
+
 if ! xcode-select -p >/dev/null 2>&1; then
   echo "Apple Command Line Tools are required to build the developer app." >&2
   echo "Run: xcode-select --install, complete the installation, then rerun setup.sh." >&2
   exit 1
 fi
 
+PYTHON_FORMULA="$(manifest_value python.bootstrap_formula)"
+PYTHON_BOOTSTRAP_EXECUTABLE="$(manifest_value python.bootstrap_executable)"
+NODE_FORMULA="$(manifest_value tools.node.homebrew_formula)"
+RUST_FORMULA="$(manifest_value tools.rust.homebrew_formula)"
+PORTAUDIO_FORMULA="$(manifest_value tools.portaudio.homebrew_formula)"
+OLLAMA_CASK="$(manifest_value platforms.macos.ollama.package)"
 MISSING_BREW_PACKAGES=()
-command -v python3 >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(python@3.12)
-command -v node >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(node)
-command -v npm >/dev/null 2>&1 || { [[ " ${MISSING_BREW_PACKAGES[*]} " == *" node "* ]] || MISSING_BREW_PACKAGES+=(node); }
-command -v cargo >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=(rust)
+command -v node >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=("$NODE_FORMULA")
+command -v npm >/dev/null 2>&1 || { [[ " ${MISSING_BREW_PACKAGES[*]} " == *" $NODE_FORMULA "* ]] || MISSING_BREW_PACKAGES+=("$NODE_FORMULA"); }
+command -v cargo >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=("$RUST_FORMULA")
+command -v rustc >/dev/null 2>&1 || { [[ " ${MISSING_BREW_PACKAGES[*]} " == *" $RUST_FORMULA "* ]] || MISSING_BREW_PACKAGES+=("$RUST_FORMULA"); }
 if (( ${#MISSING_BREW_PACKAGES[@]} )); then
   echo "SAM's developer setup needs these build prerequisites: ${MISSING_BREW_PACKAGES[*]}"
   read -r -p "Install them now with Homebrew? [y/N] " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
-  "$BREW" install "${MISSING_BREW_PACKAGES[@]}"
+    "$BREW" install "${MISSING_BREW_PACKAGES[@]}"
   else
     echo "Install the listed Homebrew packages and rerun setup.sh." >&2
     exit 1
   fi
 fi
 
-for tool in python3 node npm cargo; do
+for tool in node npm cargo rustc; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "'$tool' is still unavailable after prerequisite setup. Open a new terminal and rerun setup.sh." >&2
     exit 1
   fi
 done
 
-PYTHON=python3
-if command -v python3.12 >/dev/null 2>&1; then PYTHON=python3.12; fi
-if command -v python3.11 >/dev/null 2>&1; then PYTHON=python3.11; fi
+BOOTSTRAP_PYTHON=""
+candidate_index=0
+while candidate="$(/usr/bin/plutil -extract "python.bootstrap_candidates.$candidate_index" raw -o - "$MANIFEST_FILE" 2>/dev/null)"; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    BOOTSTRAP_PYTHON="$(command -v "$candidate")"
+    break
+  fi
+  candidate_index=$((candidate_index + 1))
+done
+if [[ -z "$BOOTSTRAP_PYTHON" ]]; then
+  echo "No Python interpreter is available to read the compatibility policy." >&2
+  read -r -p "Install the preferred supported interpreter ($PYTHON_FORMULA) with Homebrew? [y/N] " answer
+  if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+    echo "Install one of the Python versions listed in compatibility/manifest.json and rerun setup.sh." >&2
+    exit 1
+  fi
+  "$BREW" install "$PYTHON_FORMULA"
+  BOOTSTRAP_PYTHON="$(command -v "$PYTHON_BOOTSTRAP_EXECUTABLE" || true)"
+  if [[ -z "$BOOTSTRAP_PYTHON" ]]; then
+    echo "Homebrew installed $PYTHON_FORMULA, but $PYTHON_BOOTSTRAP_EXECUTABLE is not on PATH. Open a new terminal and rerun setup.sh." >&2
+    exit 1
+  fi
+fi
 
-if ! "$BREW" list portaudio >/dev/null 2>&1; then
+if ! PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"; then
+  echo "The Python interpreter currently on PATH is not compatible with SAM's dependency set." >&2
+  read -r -p "Install the manifest's preferred supported Python ($PYTHON_FORMULA) with Homebrew? [y/N] " answer
+  if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+    echo "Install one of the supported versions shown above, then rerun setup.sh. Existing files and environments were left unchanged." >&2
+    exit 1
+  fi
+  "$BREW" install "$PYTHON_FORMULA"
+  PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"
+fi
+
+"$PYTHON" "$COMPATIBILITY_MODULE" check-requirements
+"$PYTHON" "$COMPATIBILITY_MODULE" check-tools node npm rust
+"$PYTHON" "$COMPATIBILITY_MODULE" check-platform --os macos \
+  --version "$(sw_vers -productVersion)" --architecture "$(uname -m)"
+
+if ! "$BREW" list "$PORTAUDIO_FORMULA" >/dev/null 2>&1; then
   echo "Installing PortAudio (Homebrew)..."
-  "$BREW" install portaudio
+  "$BREW" install "$PORTAUDIO_FORMULA"
 fi
 
 if [[ ! -x .venv/bin/python ]]; then
@@ -76,6 +124,8 @@ if [[ ! -x .venv/bin/python ]]; then
     exit 1
   fi
   "$PYTHON" -m venv .venv
+else
+  "$PYTHON" "$COMPATIBILITY_MODULE" check-python "$SCRIPT_DIR/.venv/bin/python" >/dev/null
 fi
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
@@ -85,11 +135,11 @@ mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \
   "$HOME/.sam_data/founder_mode/export" "$HOME/.sam_data/skills/compiled"
 
 if ! command -v ollama >/dev/null 2>&1; then
-  read -r -p "Ollama is required. Install it now using the official Ollama installer? [y/N] " answer
+  read -r -p "Ollama is required. Install the macOS Ollama app using Homebrew cask '$OLLAMA_CASK'? [y/N] " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
-    curl -fsSL https://ollama.com/install.sh | sh
+    "$BREW" install --cask "$OLLAMA_CASK"
   else
-    echo "Install Ollama from https://ollama.com/download and rerun setup.sh." >&2
+    echo "Install Ollama for macOS from https://ollama.com/download/mac and rerun setup.sh." >&2
     exit 1
   fi
   if ! command -v ollama >/dev/null 2>&1; then
