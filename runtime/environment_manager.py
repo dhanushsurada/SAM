@@ -230,7 +230,8 @@ class EnvironmentCompatibilityManager:
             "diagnostics": self.diagnostics(),
             "dependencies": self.dependency_status(),
             "capabilities": self.capabilities(settings),
-            "setup": {"journey": read_setup_state(), "installation": journal},
+            "setup": {"journey": read_setup_state(), "installation": journal,
+                      "dependency_repair_supported": Path(sys.prefix).resolve() == (self.root / ".venv").resolve()},
         }
 
     def dependency_plan(self, groups: Optional[list[str]] = None) -> dict:
@@ -249,6 +250,39 @@ class EnvironmentCompatibilityManager:
                  if name in selected_names]
         return {"groups": selected, "requirements_file": str(requirements_path),
                 "requirements": lines, "required_for_install": policy.get("required_groups", [])}
+
+    def repair_dependencies(self, groups: list[str]) -> dict:
+        """Repair selected dependency groups in the active SAM environment.
+
+        This is an explicit user action from Diagnostics. Pip receives the
+        manifest's pinned requirement specifiers, never package names from
+        the request. A failed repair is journaled and leaves user data intact.
+        """
+        source_venv = (self.root / ".venv").resolve()
+        if Path(sys.prefix).resolve() != source_venv:
+            raise CompatibilityError("In-app dependency repair is available for source installs only. "
+                                     "This managed runtime is read-only; install a refreshed SAM package "
+                                     "or use the supported source setup route.")
+        plan = self.dependency_plan(groups)
+        if not plan["requirements"]:
+            raise CompatibilityError("The selected dependency groups contain no declared requirements")
+        self.record_setup_step("dependency-repair", "started",
+                               "Installing groups: " + ", ".join(plan["groups"]))
+        try:
+            result = self.runner([sys.executable, "-m", "pip", "install", *plan["requirements"]],
+                                 capture_output=True, text=True, timeout=1800, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.record_setup_step("dependency-repair", "blocked", str(exc))
+            raise CompatibilityError("Dependency repair could not start: {}".format(exc)) from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "pip failed without details").strip()[-4000:]
+            self.record_setup_step("dependency-repair", "blocked", detail)
+            raise CompatibilityError("Dependency repair failed. Existing settings and models were preserved. "
+                                     "Resolve the package or network issue and retry. {}".format(detail))
+        self._discovery_cache = None
+        self.record_setup_step("dependency-repair", "complete",
+                               "Repaired groups: " + ", ".join(plan["groups"]))
+        return {"state": "complete", "groups": plan["groups"], "report": self.report()}
 
     def dependency_status(self) -> dict:
         """Separate install-critical packages from optional capabilities."""
@@ -417,11 +451,19 @@ class EnvironmentCompatibilityManager:
         except (OSError, json.JSONDecodeError):
             raise CompatibilityError("Setup recovery state is unreadable; preserve it and inspect {} before retrying".format(target))
         data.setdefault("schema_version", 1)
-        data.setdefault("steps", {})[step] = {"state": state, "detail": detail}
+        previous = data.setdefault("steps", {}).get(step, {})
+        attempts = int(previous.get("attempts", 0)) + (1 if state == "started" else 0)
+        data["steps"][step] = {"state": state, "detail": detail,
+                               "attempts": attempts or int(previous.get("attempts", 0)),
+                               "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(target.name + ".tmp")
         temporary.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         os.replace(str(temporary), str(target))
+        if step == "python-dependencies" and state == "complete":
+            # Dependency installation has committed successfully; the prior
+            # environment is no longer the rollback target for later runs.
+            (Path(__file__).resolve().parents[1] / ".venv.recovery.json").unlink(missing_ok=True)
         return data
 
     def prepare_virtualenv(self, python: str, target: Path) -> dict:
@@ -448,6 +490,12 @@ class EnvironmentCompatibilityManager:
                 backup = target.with_name(target.name + ".backup-{}-{}".format(stamp, suffix))
                 suffix += 1
             target.rename(backup)
+            marker = target.with_name(target.name + ".recovery.json")
+            if not marker.exists():
+                marker_tmp = marker.with_name(marker.name + ".tmp")
+                marker_tmp.write_text(json.dumps({"target": str(target), "backup": str(backup)}, indent=2) + "\n",
+                                      encoding="utf-8")
+                os.replace(str(marker_tmp), str(marker))
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             result = self.runner([python, "-m", "venv", str(target)], capture_output=True,
@@ -457,12 +505,43 @@ class EnvironmentCompatibilityManager:
                 raise CompatibilityError("Could not create SAM's Python {} environment: {}. The previous environment was preserved at {}. Resolve the reported prerequisite, then rerun setup.".format(version, detail, backup or "no prior environment"))
             check_python(str(executable), self.manifest, self.runner)
         except Exception:
-            # Keep the new incomplete environment for diagnosis and leave the
-            # old one untouched; the next run will preserve the incomplete one.
+            # Preserve the failed candidate for diagnosis, but restore the
+            # last working environment to its original path when possible.
+            if backup and backup.exists():
+                failed = target.with_name(target.name + ".failed-" +
+                                          datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+                if target.exists():
+                    target.rename(failed)
+                backup.rename(target)
+                target.with_name(target.name + ".recovery.json").unlink(missing_ok=True)
             raise
         return {"path": str(target), "python": str(executable), "created": True,
                 "backup": str(backup) if backup else None,
                 "detail": "Created supported Python {} environment.".format(version)}
+
+    @staticmethod
+    def restore_virtualenv(target: Path) -> dict:
+        """Restore the most recent preserved venv after a failed replacement."""
+        target = Path(target).expanduser().resolve()
+        marker = target.with_name(target.name + ".recovery.json")
+        try:
+            recovery = json.loads(marker.read_text(encoding="utf-8"))
+            backup = Path(recovery["backup"]).resolve()
+            if Path(recovery["target"]).resolve() != target or backup.parent != target.parent or not backup.name.startswith(target.name + ".backup-"):
+                raise ValueError("recovery marker paths do not match the requested environment")
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise CompatibilityError("No safe environment rollback is recorded for {}: {}".format(target, exc)) from exc
+        if not backup.exists():
+            raise CompatibilityError("Recorded prior environment is missing: {}".format(backup))
+        failed = None
+        if target.exists():
+            stamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            failed = target.with_name(target.name + ".failed-" + stamp)
+            target.rename(failed)
+        backup.rename(target)
+        marker.unlink(missing_ok=True)
+        return {"restored": str(target), "failed_candidate": str(failed) if failed else None,
+                "detail": "Previous environment restored; failed replacement retained for diagnosis."}
 
 
 def main(argv=None) -> int:
@@ -476,6 +555,8 @@ def main(argv=None) -> int:
     dependencies = commands.add_parser("resolve-dependencies")
     dependencies.add_argument("--group", action="append", dest="groups")
     dependencies.add_argument("--format", choices=("json", "requirements"), default="json")
+    repair = commands.add_parser("repair-dependencies")
+    repair.add_argument("--group", action="append", dest="groups", required=True)
     system_dependencies = commands.add_parser("system-dependencies")
     system_dependencies.add_argument("--group", required=True)
     system_dependencies.add_argument("--format", choices=("json", "packages", "missing"), default="json")
@@ -486,6 +567,8 @@ def main(argv=None) -> int:
     prepare = commands.add_parser("prepare-venv")
     prepare.add_argument("--python", required=True)
     prepare.add_argument("--path", type=Path, required=True)
+    restore = commands.add_parser("restore-venv")
+    restore.add_argument("--path", type=Path, required=True)
     args = parser.parse_args(argv)
     manager = EnvironmentCompatibilityManager()
     if args.command == "discover":
@@ -494,6 +577,8 @@ def main(argv=None) -> int:
         output = manager.capabilities()
     elif args.command == "resolve-dependencies":
         output = manager.dependency_plan(args.groups)
+    elif args.command == "repair-dependencies":
+        output = manager.repair_dependencies(args.groups)
     elif args.command == "system-dependencies":
         output = (manager.system_dependency_status().get(args.group, {})
                   if args.format == "missing" else manager.system_dependency_plan(args.group))
@@ -508,6 +593,8 @@ def main(argv=None) -> int:
             return 1
     elif args.command == "prepare-venv":
         output = manager.prepare_virtualenv(args.python, args.path)
+    elif args.command == "restore-venv":
+        output = manager.restore_virtualenv(args.path)
     else:
         output = manager.record_setup_step(args.name, args.state, args.detail)
     if args.command == "resolve-dependencies" and args.format == "requirements":

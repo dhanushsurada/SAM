@@ -8,6 +8,17 @@ cd "$SCRIPT_DIR"
 MANIFEST_FILE="$SCRIPT_DIR/compatibility/manifest.json"
 COMPATIBILITY_MODULE="$SCRIPT_DIR/runtime/compatibility.py"
 ENVIRONMENT_MANAGER="$SCRIPT_DIR/runtime/environment_manager.py"
+SETUP_STAGE="prerequisites"
+SAM_PYTHON_FOR_JOURNAL=""
+record_setup_failure() {
+  status=$?
+  if [[ -n "$SAM_PYTHON_FOR_JOURNAL" && -x "$SAM_PYTHON_FOR_JOURNAL" ]]; then
+    "$SAM_PYTHON_FOR_JOURNAL" "$ENVIRONMENT_MANAGER" record-step "$SETUP_STAGE" blocked \
+      --detail "Setup stopped with exit code $status; rerun setup.sh to resume safely." >/dev/null 2>&1 || true
+  fi
+  exit "$status"
+}
+trap record_setup_failure ERR
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "ERROR: setup.sh supports macOS only." >&2
@@ -113,6 +124,7 @@ if ! PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"; then
   "$BREW" install "$PYTHON_FORMULA"
   PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"
 fi
+SAM_PYTHON_FOR_JOURNAL="$PYTHON"
 
 INSTALL_GROUPS=(core)
 for group in voice vision memory integrations; do
@@ -122,6 +134,7 @@ done
 PORTAUDIO_FORMULA="$("$BOOTSTRAP_PYTHON" "$ENVIRONMENT_MANAGER" system-dependencies --group voice --format packages)"
 
 "$PYTHON" "$ENVIRONMENT_MANAGER" preflight
+SETUP_STAGE="setup-preflight"
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step setup-preflight complete \
   --detail "Platform, Python, dependencies, and desktop tools passed compatibility policy"
 
@@ -135,10 +148,12 @@ if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
 fi
 
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-environment started
+SETUP_STAGE="python-environment"
 "$PYTHON" "$ENVIRONMENT_MANAGER" prepare-venv --python "$PYTHON" --path "$SCRIPT_DIR/.venv"
 VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-environment complete --detail "$VENV_PYTHON"
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies started
+SETUP_STAGE="python-dependencies"
 "$VENV_PYTHON" -m pip install --upgrade pip
 DEPENDENCY_ARGS=()
 for group in "${INSTALL_GROUPS[@]}"; do
@@ -146,7 +161,12 @@ for group in "${INSTALL_GROUPS[@]}"; do
     [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
   done < <("$VENV_PYTHON" "$ENVIRONMENT_MANAGER" resolve-dependencies --group "$group" --format requirements)
 done
-"$VENV_PYTHON" -m pip install "${DEPENDENCY_ARGS[@]}"
+if ! "$VENV_PYTHON" -m pip install "${DEPENDENCY_ARGS[@]}"; then
+  "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies blocked --detail "Package installation failed; rerun after resolving the reported dependency issue." >/dev/null || true
+  "$PYTHON" "$ENVIRONMENT_MANAGER" restore-venv --path "$SCRIPT_DIR/.venv" || true
+  echo "Dependency installation failed. The prior environment was restored when available; the failed candidate is retained for diagnosis. Rerun setup.sh after resolving the package issue." >&2
+  exit 1
+fi
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
   "$VENV_PYTHON" -m playwright install chromium
 fi
@@ -156,6 +176,7 @@ mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \
   "$HOME/.sam_data/founder_mode/export" "$HOME/.sam_data/skills/compiled"
 
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step ollama-start started
+SETUP_STAGE="ollama-start"
 if ! command -v ollama >/dev/null 2>&1; then
   read -r -p "Ollama is required. Install the macOS Ollama app using Homebrew cask '$OLLAMA_CASK'? [y/N] " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
@@ -202,6 +223,7 @@ while IFS= read -r model_line; do MODELS+=("$model_line"); done <<< "$MODEL_LIST
 FREE_MODEL_GB=$("$VENV_PYTHON" -c 'import shutil; from pathlib import Path; print(round(shutil.disk_usage(Path.home()).free / (1024**3), 1))')
 echo "Available home-volume space before model downloads: ${FREE_MODEL_GB} GB. Ollama reports exact download progress once a model is selected."
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step model-downloads started --detail "Downloads require per-model confirmation"
+SETUP_STAGE="model-downloads"
 LABELS=("Primary model" "Fallback model" "Embedding model" "Vision model")
 for i in "${!MODELS[@]}"; do
   model="${MODELS[$i]}"
@@ -220,6 +242,7 @@ done
 
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step model-downloads complete
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step desktop-build started
+SETUP_STAGE="desktop-build"
 echo "Installing desktop frontend dependencies and building the native app..."
 (
   cd interfaces/desktop
@@ -238,6 +261,7 @@ fi
 # paths while preserving the user's configured API endpoint.
 RUNTIME_CONFIG="$HOME/.sam_data/desktop-runtime.json"
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step runtime-configuration started
+SETUP_STAGE="runtime-configuration"
 if [[ ! -e "$RUNTIME_CONFIG" ]]; then
   API_PORT=$("$VENV_PYTHON" -c 'from config.settings import Settings; print(Settings().api_port)')
   SAM_ROOT="$SCRIPT_DIR" SAM_PYTHON="$SCRIPT_DIR/.venv/bin/python" \

@@ -3,7 +3,7 @@ import { FiServer, FiHardDrive, FiWifi, FiCpu, FiRefreshCw } from "react-icons/f
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill, type SamState } from "@/components/StatusPill";
 import { Button } from "@/components/Button";
-import { getEnvironmentReport, getHealth, type EnvironmentReport } from "@/api/client";
+import { getEnvironmentReport, getHealth, repairEnvironment, type EnvironmentReport } from "@/api/client";
 import type { HealthStatus } from "@/api/types";
 
 interface CheckRow {
@@ -25,6 +25,8 @@ export function DiagnosticsPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [repairing, setRepairing] = useState(false);
+  const [repairMessage, setRepairMessage] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -40,6 +42,20 @@ export function DiagnosticsPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  const repair = async (groups: string[]) => {
+    setRepairing(true);
+    setRepairMessage(null);
+    try {
+      const result = await repairEnvironment(groups);
+      setRepairMessage(`Repaired ${result.groups.join(", ")}.`);
+      await refresh();
+    } catch (reason) {
+      setRepairMessage(reason instanceof Error ? reason.message : "Dependency repair failed.");
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const rows: CheckRow[] = report ? [
     { label: "Operating system", icon: FiCpu, state: "SUCCESS", detail: `${report.environment.os.name} ${report.environment.os.version} · ${report.environment.os.architecture}` },
@@ -89,6 +105,19 @@ export function DiagnosticsPage() {
         <section className="space-y-2 rounded-md border border-line bg-surface p-3">
           <h2 className="text-sm font-medium text-ink">Installation and recovery</h2>
           <p className="text-xs text-mute">Onboarding: {report.setup.journey.state}. Free space: {report.environment.hardware.disk.free_gb ?? "unknown"} GB.</p>
+          <p className="text-xs text-mute">Repair installs manifest-pinned packages into a source install's virtual environment. System prerequisites still need their platform installer.</p>
+          {report.setup.dependency_repair_supported === false && <p className="text-xs text-warn">This managed app runtime cannot be modified in place. Install a refreshed app package to update its dependencies.</p>}
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(report.dependencies).filter(([group]) => group !== "core").map(([group, state]) => (
+              <Button key={group} variant="secondary" size="sm" disabled={repairing || state.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => void repair([group])}>
+                Repair {group}
+              </Button>
+            ))}
+            <Button variant="secondary" size="sm" disabled={repairing || report.dependencies.core?.available || report.setup.dependency_repair_supported === false} loading={repairing} onClick={() => void repair(["core"])}>
+              Repair core
+            </Button>
+          </div>
+          {repairMessage && <p role="status" className="text-xs text-mute">{repairMessage}</p>}
           {Object.entries(report.setup.installation.steps ?? {}).map(([step, status]) => (
             <div key={step} className="flex items-center justify-between gap-2 text-xs">
               <span className="text-ink">{step.replaceAll("_", " ")}</span>
