@@ -70,12 +70,36 @@ then starts the API automatically. Existing API endpoint configuration is
 preserved when a consumer app initializes its bundled paths.
 
 The package uses the current Mac architecture and does not bundle Ollama or
-large language models. Users still need Ollama installed and must select or
-download models through setup/onboarding. Optional Python feature groups are
-not bundled in the initial consumer package. The default app/DMG is unsigned
-and architecture specific; this implementation path has not been validated as
-a release. Consumer distribution currently targets macOS only. Linux backend
-setup and Windows MSI remain source/developer paths.
+large language models. First run guides the user to install the official
+Ollama macOS app, start it or connect to a configured endpoint, then choose a
+model. Downloads require a separate confirmation that explains storage and
+network use; progress, cancellation, and retry are available in onboarding and
+Settings.
+
+The app bundles core Python dependencies and pip as a package-management tool.
+Voice, vision, memory, and integrations are not installed by default. A user
+can choose an optional capability in Diagnostics; its manifest-constrained
+packages are installed under `~/.sam_data/python-packages`, outside the
+read-only app bundle. Capability status reports missing Python packages and
+OS prerequisites separately. The Vision group also installs Chromium into the
+user's Playwright cache. A system prerequisite such as PortAudio still needs
+the documented macOS package-manager route.
+
+Runtime files use stable paths: the app bundle contains the interpreter,
+application source, and core site-packages; `~/.sam_data/desktop-runtime.json`
+stores runtime paths; `~/.sam_data/logs` stores logs; and settings, memory,
+credentials, Ollama models, and optional packages remain in user-owned
+locations. Replacing the app with a newer DMG refreshes bundled resources and
+preserves user data. A damaged runtime config is backed up and reconstructed
+from the current app resources; missing bundle resources produce a repair
+message to reinstall the app.
+
+The default app/DMG is unsigned and architecture specific; this implementation
+path has not been validated as a release. Consumer distribution currently
+targets macOS only. Build arm64 and x86_64 artifacts on matching packaging
+machines; no universal binary or Windows/Linux consumer packages are declared.
+Linux backend setup and Windows MSI remain source/developer paths. Version 1
+uses manual DMG replacement for updates; it has no in-app updater.
 
 For Developer ID signing and notarization, install Xcode Command Line Tools
 and configure `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
@@ -128,8 +152,9 @@ stream; the UI shows progress and errors and setup never starts a download
 without confirmation. Active downloads can be cancelled from Onboarding or
 Settings; closing the gateway stream lets a later Ollama retry reuse partial
 download data. Diagnostics offers explicit dependency-group repair using
-manifest constraints; OS prerequisites still require the platform package
-manager.
+manifest constraints. In a consumer install, packages go to the writable
+per-user capability directory. OS prerequisites still require the platform
+package manager.
 
 Use the platform source setup script again to repair an environment. It does
 not remove prior virtual environments, user settings, credentials, or Ollama
