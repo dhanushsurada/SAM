@@ -13,6 +13,19 @@ SETTINGS_SCHEMA_VERSION = 1
 SCHEMA_KEY = "sam_settings_schema_version"
 
 
+def _migrate_0_to_1(values: dict) -> dict:
+    """Introduce the schema marker; preserve all existing user-owned keys."""
+    migrated = dict(values)
+    migrated[SCHEMA_KEY] = 1
+    return migrated
+
+
+# Add one explicit, reversible-in-concept transformation per old schema when
+# configuration changes. Missing steps fail closed instead of silently
+# labeling an unconverted file as current.
+MIGRATIONS = {0: _migrate_0_to_1}
+
+
 class SettingsMigrationError(RuntimeError):
     pass
 
@@ -52,7 +65,14 @@ def migrate_settings_file(path: Path) -> dict:
             raise SettingsMigrationError("Cannot preserve settings backup {}: {}".format(backup, exc)) from exc
 
     migrated = dict(values)
-    migrated[SCHEMA_KEY] = SETTINGS_SCHEMA_VERSION
+    while current < SETTINGS_SCHEMA_VERSION:
+        migration = MIGRATIONS.get(current)
+        if migration is None:
+            raise SettingsMigrationError(
+                "No safe settings migration is registered from schema {} to {}".format(
+                    current, current + 1))
+        migrated = migration(migrated)
+        current += 1
     temporary = path.with_name(path.name + ".migration.tmp")
     try:
         with temporary.open("w", encoding="utf-8") as stream:

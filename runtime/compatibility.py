@@ -21,7 +21,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "compatibility" / "manifest.json"
 VERSION_RE = re.compile(r"(?:Python\s+|v)?(\d+)\.(\d+)(?:\.(\d+))?")
-REQUIREMENT_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)(?:\[[^]]+\])?\s*(?:[<>=!~].*)?$")
+SPECIFIER_RE = re.compile(r"(===|~=|==|!=|<=|>=|<|>)\s*([A-Za-z0-9.*+_-]+)")
 
 
 class CompatibilityError(RuntimeError):
@@ -52,6 +52,11 @@ def validate_manifest(manifest: dict) -> None:
         raise CompatibilityError("Python executable map is incomplete")
     if not python.get("dependency_groups") or not python.get("requirements_file"):
         raise CompatibilityError("Python dependency groups or requirements_file are missing")
+    groups = python["dependency_groups"]
+    if any(group not in groups for group in python.get("required_groups", [])):
+        raise CompatibilityError("Python required_groups contains an undefined dependency group")
+    if any(group not in groups for group in python.get("default_groups", [])):
+        raise CompatibilityError("Python default_groups contains an undefined dependency group")
     for tool in ("node", "npm", "rust"):
         if not manifest.get("tools", {}).get(tool, {}).get("minimum_version"):
             raise CompatibilityError("Minimum version for required tool {!r} is missing".format(tool))
@@ -138,17 +143,62 @@ def resolve_python(manifest: Optional[dict] = None,
             version = _python_version(executable, runner)
             if version:
                 found.setdefault(version, executable)
+    if platform.system() == "Windows":
+        launcher_name = ((manifest or load_manifest()).get("platforms", {})
+                         .get("windows", {}).get("python_launcher", "py"))
+        launcher = which(launcher_name)
+        if launcher:
+            try:
+                result = runner([launcher, "-0p"], capture_output=True, text=True, timeout=8, check=False)
+                for line in (result.stdout or "").splitlines():
+                    match = re.search(r"(\d+\.\d+).*?(?:\*\s*)?(.+python(?:\.exe)?)\s*$", line, re.I)
+                    if not match or match.group(1) not in supported:
+                        continue
+                    executable = match.group(2).strip()
+                    version = _python_version(executable, runner)
+                    if version:
+                        found.setdefault(version, executable)
+            except (OSError, subprocess.SubprocessError):
+                pass
+    # Versioned Homebrew formulae are often installed outside PATH.
+    brew = which("brew")
+    formulae = (manifest or load_manifest()).get("platforms", {}).get("macos", {}).get("python_formulas", {})
+    for supported_version in preferred:
+        formula = formulae.get(supported_version, "python@" + supported_version)
+        executable_name = policy["executables"].get(supported_version)
+        if not executable_name:
+            continue
+        possible = [Path(prefix) / "opt" / formula / "bin" / executable_name
+                    for prefix in ("/opt/homebrew", "/usr/local")]
+        if brew:
+            try:
+                result = runner([brew, "--prefix", formula], capture_output=True, text=True,
+                                timeout=8, check=False)
+                if result.returncode == 0 and result.stdout.strip():
+                    possible.insert(0, Path(result.stdout.strip()) / "bin" / executable_name)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        for candidate in possible:
+            if candidate.is_file():
+                version = _python_version(str(candidate), runner)
+                if version:
+                    found.setdefault(version, str(candidate))
     for version in preferred:
         if version in supported and version in found:
             return found[version], version
     detected = ", ".join("{} ({})".format(name, version) for version, name in found.items()) or "none"
     formulas = (manifest or load_manifest()).get("platforms", {}).get("macos", {}).get("python_formulas", {})
     formula_list = ", ".join(formulas.get(version, "python@" + version) for version in preferred)
+    system = platform.system()
+    if system == "Windows":
+        install_hint = "Install a supported Python version from python.org and select it with the Windows py launcher."
+    elif system == "Linux":
+        install_hint = "Install a supported version from the apt packages documented in compatibility/manifest.json."
+    else:
+        install_hint = "Install a supported version with Homebrew (for example: brew install {}).".format(formula_list)
     raise CompatibilityError(
-        "No supported Python interpreter was found. Detected: {}. SAM supports Python {}. "
-        "Install a supported version with Homebrew (for example: brew install {}).".format(
-            detected, " or ".join(supported), formula_list
-        )
+        "No supported Python interpreter was found. Detected: {}. SAM supports Python {}. {}".format(
+            detected, " or ".join(supported), install_hint)
     )
 
 
@@ -179,9 +229,11 @@ def check_tools(manifest: Optional[dict] = None,
         executable = which(executable_names[name])
         if not executable:
             formula = policy.get("homebrew_formula")
-            raise CompatibilityError("Required tool {} is missing; install it with Homebrew{}".format(
-                name, " (brew install {})".format(formula) if formula else ""
-            ))
+            if platform.system() == "Darwin" and formula:
+                instruction = "brew install {}".format(formula)
+            else:
+                instruction = "install it using the supported package manager for this platform"
+            raise CompatibilityError("Required tool {} is missing; {}".format(name, instruction))
         version = _reported_version(executable, runner)
         if not version:
             # npm and cargo/rustc may prefix versions with a tool name. The
@@ -199,25 +251,88 @@ def check_tools(manifest: Optional[dict] = None,
             )
 
 
-def check_requirements(manifest: Optional[dict] = None,
-                       requirements_path: Optional[Path] = None) -> None:
-    data = manifest or load_manifest()
-    path = requirements_path or (ROOT / data["python"]["requirements_file"])
-    declared = set()
+def parse_requirements(path: Path) -> Dict[str, dict]:
+    """Read simple pip requirement declarations and their version constraints."""
+    declared: Dict[str, dict] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.split("#", 1)[0].strip()
         if not stripped or stripped.startswith(("-", ".")):
             continue
-        match = REQUIREMENT_RE.match(stripped)
+        match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?\s*(.*)$", stripped)
         if match:
-            declared.add(match.group(1).lower().replace("_", "-"))
+            declared[match.group(1).lower().replace("_", "-")] = {
+                "requirement": stripped, "specifier": match.group(2).strip()
+            }
+    return declared
+
+
+def _version_parts(value: str) -> Tuple[int, ...]:
+    match = re.match(r"^\s*(\d+(?:\.\d+)*)", value)
+    if not match:
+        raise CompatibilityError("Unsupported package version format {!r}".format(value))
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def satisfies_specifier(version: str, specifier: str) -> bool:
+    """Compare installed versions against the operators used in SAM requirements."""
+    for clause in (item.strip() for item in specifier.split(",") if item.strip()):
+        match = SPECIFIER_RE.fullmatch(clause)
+        if not match:
+            raise CompatibilityError("Unsupported dependency version constraint {!r}".format(clause))
+        operator, expected = match.groups()
+        expected_parts = _version_parts(expected.replace(".*", ""))
+        actual_parts = _version_parts(version)
+        width = max(len(actual_parts), len(expected_parts))
+        actual = actual_parts + (0,) * (width - len(actual_parts))
+        target = expected_parts + (0,) * (width - len(expected_parts))
+        if operator in ("==", "==="):
+            passed = version == expected if "*" in expected else actual == target
+            if "*" in expected:
+                passed = version.startswith(expected[:-1])
+        elif operator == "!=":
+            passed = actual != target
+        elif operator == ">=":
+            passed = actual >= target
+        elif operator == "<=":
+            passed = actual <= target
+        elif operator == ">":
+            passed = actual > target
+        elif operator == "<":
+            passed = actual < target
+        else:
+            prefix = expected_parts[:-1] or expected_parts
+            passed = actual >= target and actual[:len(prefix)] == prefix
+        if not passed:
+            return False
+    return True
+
+
+def check_requirements(manifest: Optional[dict] = None,
+                       requirements_path: Optional[Path] = None) -> None:
+    data = manifest or load_manifest()
+    path = requirements_path or (ROOT / data["python"]["requirements_file"])
+    declared = parse_requirements(path)
     missing = []
+    unconstrained = []
     for group in data["python"]["dependency_groups"].values():
         missing.extend(name for name in group if name.lower().replace("_", "-") not in declared)
+        unconstrained.extend(name for name in group
+                             if name.lower().replace("_", "-") in declared
+                             and not declared[name.lower().replace("_", "-")]["specifier"])
     if missing:
         raise CompatibilityError(
             "Compatibility manifest dependencies are absent from {}: {}".format(path, ", ".join(sorted(set(missing))))
         )
+    if unconstrained:
+        raise CompatibilityError(
+            "Compatibility-managed dependencies need explicit version constraints in {}: {}".format(
+                path, ", ".join(sorted(set(unconstrained))))
+        )
+    for name, declaration in declared.items():
+        specifier = declaration["specifier"]
+        for clause in (item.strip() for item in specifier.split(",") if item.strip()):
+            if not SPECIFIER_RE.fullmatch(clause):
+                raise CompatibilityError("Unsupported version constraint for {}: {}".format(name, clause))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

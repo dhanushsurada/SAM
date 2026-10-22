@@ -43,37 +43,57 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 echo -e "${GREEN}[1/8] Checking Python...${NC}"
-if command -v python3.11 >/dev/null 2>&1; then
-    PYTHON=python3.11
-elif command -v python3.12 >/dev/null 2>&1; then
-    PYTHON=python3.12
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON=python3
-else
-    echo "Python3 not found. Installing via apt (requires sudo)..."
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "A bootstrap Python is needed to read SAM's compatibility policy. Installing via apt (requires sudo)..."
     sudo apt-get update
     sudo apt-get install -y python3 python3-venv python3-pip
-    PYTHON=python3
 fi
-PYTHON_VERSION=$($PYTHON --version)
-echo "  Found: $PYTHON_VERSION"
+BOOTSTRAP_PYTHON="$(command -v python3)"
+"$BOOTSTRAP_PYTHON" runtime/compatibility.py check-platform --os linux
+"$BOOTSTRAP_PYTHON" runtime/compatibility.py check-requirements
+PYTHON="$("$BOOTSTRAP_PYTHON" runtime/compatibility.py select-python 2>/dev/null || true)"
+if [[ -z "$PYTHON" ]]; then
+    SUPPORTED_MINOR="$(python3 -c 'import json; print(json.load(open("compatibility/manifest.json"))["python"]["preferred_versions"][0])')"
+    PYTHON_APT_PACKAGES="$(python3 -c 'import json,sys; d=json.load(open("compatibility/manifest.json")); print(" ".join(d["platforms"]["linux"]["python_packages"][sys.argv[1]]))' "$SUPPORTED_MINOR")"
+    echo "No supported Python was found on PATH. SAM requires Python $SUPPORTED_MINOR; install it from the configured apt repository."
+    read -r -p "Install the manifest packages ($PYTHON_APT_PACKAGES) now? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        sudo apt-get update
+        # Word splitting is deliberate: package names come from the checked-in manifest.
+        sudo apt-get install -y $PYTHON_APT_PACKAGES
+        PYTHON="$("$BOOTSTRAP_PYTHON" runtime/compatibility.py select-python)"
+    else
+        echo "Install a supported version from compatibility/manifest.json and rerun setup_linux.sh." >&2
+        exit 1
+    fi
+fi
+echo "  Selected: $PYTHON ($("$PYTHON" --version))"
 
 # venv module isn't always bundled with system python3 on Debian/Ubuntu —
 # unlike macOS/Windows this is a real, distro-specific gap worth checking
 # explicitly rather than letting `python3 -m venv` fail with a cryptic error.
-if ! $PYTHON -c "import venv" >/dev/null 2>&1; then
+if ! "$PYTHON" -c "import venv" >/dev/null 2>&1; then
     echo "  python3-venv not found. Installing (requires sudo)..."
     sudo apt-get update
     sudo apt-get install -y python3-venv
 fi
 
-echo -e "${GREEN}[1.5/8] Checking PortAudio...${NC}"
-if ! dpkg -s portaudio19-dev >/dev/null 2>&1; then
-    echo "  Installing PortAudio dev headers (requires sudo)..."
-    sudo apt-get update
-    sudo apt-get install -y portaudio19-dev
-else
-    echo "  PortAudio already installed"
+INSTALL_GROUPS=(core)
+for group in voice vision memory integrations; do
+    read -r -p "Install optional '$group' dependencies now? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then INSTALL_GROUPS+=("$group"); fi
+done
+
+echo -e "${GREEN}[1.5/8] Checking feature-specific system packages...${NC}"
+if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
+    VOICE_SYSTEM_PACKAGES="$("$BOOTSTRAP_PYTHON" runtime/environment_manager.py system-dependencies --group voice --format packages)"
+    for package in $VOICE_SYSTEM_PACKAGES; do
+        if ! dpkg -s "$package" >/dev/null 2>&1; then
+            echo "  Installing $package (requires sudo)..."
+            sudo apt-get update
+            sudo apt-get install -y "$package"
+        fi
+    done
 fi
 
 echo -e "${GREEN}[2/8] Checking Ollama...${NC}"
@@ -104,12 +124,13 @@ if [[ "$OLLAMA_READY" != true ]]; then echo "Ollama failed to become ready." >&2
 echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
 if [ -d ".venv" ] && [ -x ".venv/bin/python3" ]; then
     echo "  Existing .venv found — reusing it (run 'rm -rf .venv' first for a clean rebuild)"
+    "$PYTHON" runtime/compatibility.py check-python .venv/bin/python >/dev/null
 else
     if [ -d ".venv" ]; then
         echo -e "${RED}  .venv exists but is incomplete. Move it aside and rerun; setup will not delete it.${NC}"
         exit 1
     fi
-    $PYTHON -m venv .venv
+    "$PYTHON" -m venv .venv
 fi
 source .venv/bin/activate
 pip install --upgrade pip --quiet
@@ -117,17 +138,30 @@ pip install --upgrade pip --quiet
 echo -e "${GREEN}[6/8] Installing Python packages...${NC}"
 # Safe to re-run: pip install is idempotent and repairs a partial/broken
 # env (missing or outdated packages) without touching unrelated ones.
-pip install -r requirements.txt --quiet
+DEPENDENCY_ARGS=()
+for group in "${INSTALL_GROUPS[@]}"; do
+    while IFS= read -r requirement; do
+        [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
+    done < <(.venv/bin/python runtime/environment_manager.py resolve-dependencies --group "$group" --format requirements)
+done
+pip install "${DEPENDENCY_ARGS[@]}" --quiet
 
-echo "  Installing Playwright browsers..."
-playwright install chromium
-# Playwright on Linux additionally needs OS-level shared libraries beyond
-# what apt installs above (GTK/NSS/etc.) — `playwright install-deps` covers
-# these but needs sudo and is a genuinely separate step from the Python
-# package. Not run automatically here to avoid an unannounced sudo prompt
-# mid-script; surfaced explicitly instead so it isn't silently skipped.
-echo -e "${YELLOW}  If Chromium fails to launch at runtime, also run:${NC}"
-echo -e "${YELLOW}    sudo .venv/bin/playwright install-deps${NC}"
+if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
+    echo "  Installing Playwright Chromium..."
+    .venv/bin/playwright install chromium
+    MISSING_VISION_LIBS="$(.venv/bin/python runtime/environment_manager.py system-dependencies --group vision --format missing)"
+    if [[ -n "$MISSING_VISION_LIBS" ]]; then
+        echo "  Missing browser libraries detected: ${MISSING_VISION_LIBS//$'\n'/, }"
+        read -r -p "Install Playwright's Debian/Ubuntu prerequisites with sudo now? [y/N] " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            sudo .venv/bin/playwright install-deps chromium
+        else
+            echo -e "${YELLOW}Chromium may not launch until its OS library prerequisites are installed.${NC}"
+        fi
+    else
+        echo "  Playwright shared-library prerequisites are available."
+    fi
+fi
 
 echo -e "${GREEN}[7/8] Initializing ~/.sam_data...${NC}"
 # Same canonical location as macOS/Windows (see config/settings.py's

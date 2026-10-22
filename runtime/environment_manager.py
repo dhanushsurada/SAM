@@ -22,11 +22,13 @@ from typing import Callable, Optional
 try:  # direct script execution and package import are both supported
     from .compatibility import (
         CompatibilityError, check_platform, check_requirements, check_tools,
+        parse_requirements, satisfies_specifier,
         load_manifest, resolve_python,
     )
 except ImportError:  # pragma: no cover - exercised by setup.sh subprocess
     from compatibility import (
         CompatibilityError, check_platform, check_requirements, check_tools,
+        parse_requirements, satisfies_specifier,
         load_manifest, resolve_python,
     )
 
@@ -165,22 +167,16 @@ class EnvironmentCompatibilityManager:
         """Resolve manifest groups to currently declared requirements lines."""
         policy = self.manifest["python"]
         definitions = policy["dependency_groups"]
-        selected = groups or list(definitions)
+        selected = list(groups) if groups is not None else list(policy.get("default_groups", policy.get("required_groups", [])))
         unknown = sorted(set(selected) - set(definitions))
         if unknown:
             raise CompatibilityError("Unknown dependency group(s): {}. Available: {}".format(
                 ", ".join(unknown), ", ".join(definitions)))
         requirements_path = self.root / policy["requirements_file"]
-        lines = []
-        for raw in requirements_path.read_text(encoding="utf-8").splitlines():
-            stripped = raw.split("#", 1)[0].strip()
-            if not stripped or stripped.startswith(("-", ".")):
-                continue
-            import re
-            match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?", stripped)
-            if match and any(match.group(1).lower().replace("_", "-") == name.lower().replace("_", "-")
-                             for group in selected for name in definitions[group]):
-                lines.append(stripped)
+        all_requirements = parse_requirements(requirements_path)
+        selected_names = {name.lower().replace("_", "-") for group in selected for name in definitions[group]}
+        lines = [declaration["requirement"] for name, declaration in all_requirements.items()
+                 if name in selected_names]
         return {"groups": selected, "requirements_file": str(requirements_path),
                 "requirements": lines, "required_for_install": policy.get("required_groups", [])}
 
@@ -188,13 +184,30 @@ class EnvironmentCompatibilityManager:
         """Separate install-critical packages from optional capabilities."""
         report = self.discover()["dependencies"]
         required = set(self.manifest["python"].get("required_groups", []))
+        requirement_specs = parse_requirements(self.root / self.manifest["python"]["requirements_file"])
+        import importlib.metadata
         status = {}
         for group, packages in report.items():
-            missing = [name for name, available in packages.items() if not available]
-            status[group] = {"required": group in required, "available": not missing,
-                             "missing": missing,
-                             "recovery": ("Install the SAM requirements for this group from requirements.txt."
-                                          if missing else "ready")}
+            missing, incompatible = [], []
+            versions = {}
+            for name, available in packages.items():
+                normalized = name.lower().replace("_", "-")
+                try:
+                    version = importlib.metadata.version(normalized)
+                    versions[name] = version
+                except importlib.metadata.PackageNotFoundError:
+                    version = None
+                if not available or version is None:
+                    missing.append(name)
+                elif not satisfies_specifier(version, requirement_specs.get(normalized, {}).get("specifier", "")):
+                    incompatible.append({"name": name, "installed": version,
+                                         "required": requirement_specs.get(normalized, {}).get("specifier", "")})
+            recovery = ("Install the SAM requirements for this group from requirements.txt."
+                        if missing else ("Upgrade packages to satisfy requirements.txt."
+                                         if incompatible else "ready"))
+            status[group] = {"required": group in required, "available": not missing and not incompatible,
+                             "missing": missing, "incompatible": incompatible, "versions": versions,
+                             "recovery": recovery}
         return status
 
     def diagnostics(self, os_name: Optional[str] = None, os_version: Optional[str] = None,
@@ -219,17 +232,84 @@ class EnvironmentCompatibilityManager:
         except (CompatibilityError, OSError) as exc:
             issues.append({"severity": "error", "area": "dependencies", "message": str(exc)})
         for group, state in self.dependency_status().items():
-            if state["missing"]:
+            if state["missing"] or state["incompatible"]:
                 severity = "error" if state["required"] else "info"
                 issues.append({"severity": severity, "area": "dependency:" + group,
-                               "message": "Missing {} package(s): {}. {}".format(
-                                   group, ", ".join(state["missing"]), state["recovery"] )})
+                               "message": "Dependency group {} has missing packages {} and incompatible versions {}. {}".format(
+                                   group, state["missing"], state["incompatible"], state["recovery"] )})
+        for group, state in self.system_dependency_status().items():
+            if state["missing"] or state.get("missing_libraries") or state.get("missing_tools"):
+                missing_items = (state["missing"] + state.get("missing_libraries", [])
+                                 + state.get("missing_tools", []))
+                issues.append({"severity": "info", "area": "system_dependency:" + group,
+                               "message": "{} Missing: {}. {}".format(
+                                   state["message"], ", ".join(missing_items),
+                                   state.get("install_hint", "")).strip()})
         memory = self._memory_gb()
         minimum = self.manifest.get("sam", {}).get("minimum_memory_gb")
         if memory is not None and minimum and memory < minimum:
             issues.append({"severity": "warning", "area": "hardware",
                            "message": "Detected {} GB RAM; SAM recommends {} GB or more. Choose a smaller local model in Settings.".format(memory, minimum)})
         return issues
+
+    def system_dependency_status(self) -> dict:
+        """Describe optional OS prerequisites without making them core blockers."""
+        os_key = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system(), "")
+        groups = {}
+        for group, policies in self.manifest.get("system_dependencies", {}).items():
+            policy = policies.get(os_key, {})
+            manager = policy.get("manager")
+            packages = policy.get("packages", [])
+            missing = []
+            if manager == "brew":
+                brew = self.which("brew")
+                for package in packages:
+                    try:
+                        result = self.runner([brew or "brew", "list", package], capture_output=True,
+                                             text=True, timeout=5, check=False)
+                        if result.returncode != 0:
+                            missing.append(package)
+                    except (OSError, subprocess.SubprocessError):
+                        missing.append(package)
+            elif manager == "apt":
+                for package in packages:
+                    try:
+                        result = self.runner(["dpkg-query", "-W", "-f=${Status}", package],
+                                             capture_output=True, text=True, timeout=5, check=False)
+                        if result.returncode != 0 or "install ok installed" not in result.stdout:
+                            missing.append(package)
+                    except (OSError, subprocess.SubprocessError):
+                        missing.append(package)
+            missing_libraries = []
+            libraries = policy.get("libraries", [])
+            if libraries and platform.system() == "Linux":
+                try:
+                    result = self.runner(["ldconfig", "-p"], capture_output=True, text=True,
+                                         timeout=8, check=False)
+                    available_libraries = result.stdout or ""
+                    missing_libraries = [library for library in libraries
+                                         if library not in available_libraries]
+                except (OSError, subprocess.SubprocessError):
+                    missing_libraries = list(libraries)
+            missing_tools = [tool for tool in policy.get("tools", []) if not self.which(tool)]
+            groups[group] = {"manager": manager, "missing": missing,
+                             "missing_libraries": missing_libraries,
+                             "missing_tools": missing_tools,
+                             "message": policy.get("reason", ""),
+                             "install_hint": (("brew install " if manager == "brew" else "sudo apt-get install ")
+                                              + " ".join(missing)
+                                              if missing and manager in {"brew", "apt"} else "")}
+        return groups
+
+    def system_dependency_plan(self, group: str) -> dict:
+        os_key = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system(), "")
+        definition = self.manifest.get("system_dependencies", {}).get(group)
+        if definition is None:
+            raise CompatibilityError("Unknown system dependency group {!r}".format(group))
+        policy = definition.get(os_key, {})
+        return {"group": group, "platform": os_key, "manager": policy.get("manager"),
+                "packages": policy.get("packages", []), "tools": policy.get("tools", []),
+                "reason": policy.get("reason", "")}
 
     @staticmethod
     def record_setup_step(step: str, state: str, detail: str = "",
@@ -263,6 +343,10 @@ def main(argv=None) -> int:
     commands.add_parser("preflight")
     dependencies = commands.add_parser("resolve-dependencies")
     dependencies.add_argument("--group", action="append", dest="groups")
+    dependencies.add_argument("--format", choices=("json", "requirements"), default="json")
+    system_dependencies = commands.add_parser("system-dependencies")
+    system_dependencies.add_argument("--group", required=True)
+    system_dependencies.add_argument("--format", choices=("json", "packages", "missing"), default="json")
     step = commands.add_parser("record-step")
     step.add_argument("name")
     step.add_argument("state", choices=("started", "complete", "blocked"))
@@ -275,6 +359,9 @@ def main(argv=None) -> int:
         output = manager.capabilities()
     elif args.command == "resolve-dependencies":
         output = manager.dependency_plan(args.groups)
+    elif args.command == "system-dependencies":
+        output = (manager.system_dependency_status().get(args.group, {})
+                  if args.format == "missing" else manager.system_dependency_plan(args.group))
     elif args.command in {"diagnose", "preflight"}:
         output = manager.diagnostics()
         failed = any(issue["severity"] == "error" for issue in output)
@@ -286,7 +373,14 @@ def main(argv=None) -> int:
             return 1
     else:
         output = manager.record_setup_step(args.name, args.state, args.detail)
-    print(json.dumps(output, indent=2))
+    if args.command == "resolve-dependencies" and args.format == "requirements":
+        print("\n".join(output["requirements"]))
+    elif args.command == "system-dependencies" and args.format == "packages":
+        print("\n".join(output["packages"]))
+    elif args.command == "system-dependencies" and args.format == "missing":
+        print("\n".join(output.get("missing", []) + output.get("missing_libraries", []) + output.get("missing_tools", [])))
+    else:
+        print(json.dumps(output, indent=2))
     return 0
 
 

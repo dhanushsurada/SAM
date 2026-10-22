@@ -16,6 +16,11 @@ environment, installs prerequisites with consent, and builds/opens the Tauri
 app. This requires macOS 14+, Python 3.11 or 3.12, Node/npm, Rust, and Apple
 Command Line Tools. It does not create a consumer DMG.
 
+Core Python dependencies are installed by default; voice, vision, memory,
+and integration dependencies are optional prompts. Select voice when
+microphone capture is needed (it may install PortAudio); select vision to
+install Playwright and its Chromium browser.
+
 For frontend-only work:
 
 ```bash

@@ -1,6 +1,8 @@
 # SAM — Python Dependencies
-# Install: pip install -r requirements.txt
-# Then: playwright install chromium
+# Full/manual install: pip install -r requirements.txt (installs every group).
+# Source installers instead resolve core plus the optional groups selected by
+# the user through runtime/environment_manager.py. Install Chromium separately
+# only when the vision group is selected: playwright install chromium.
 
 # ─── Core ──────────────────────────────────────────────────────────────────
 requests>=2.31.0
