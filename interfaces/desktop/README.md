@@ -25,8 +25,23 @@ access, and native build tools on the packaging Mac. It stages a managed Python
 runtime and core dependencies into the app resources and creates an app and
 DMG. The app writes its runtime paths under `~/.sam_data`; uninstalling the
 app removes the application bundle but preserves settings, credentials, and
-models in user data. The current output is unsigned and is not a trusted public
-release until signing and notarization are configured.
+models in user data. The default packaging command emits an unsigned package;
+use the signed release workflow below for public distribution.
+
+For a signed/notarized release, configure the four `APPLE_*` credentials
+documented in `docs/deployment/DESKTOP_INSTALL.md` and run
+`../../scripts/package_macos_signed_release.sh` from the repository root. The
+packaging workflow creates one architecture-specific DMG per build. The
+app-only uninstall helper is `../../scripts/uninstall_macos_consumer.sh`; its
+`--remove-user-data` option requires typing the full data path before deletion.
+Consumer distribution currently targets macOS only. Linux backend setup and
+the Windows MSI are source/developer routes, not relocatable consumer builds.
+
+Diagnostics can repair a selected dependency group in a source install using
+the manifest's version constraints; the managed consumer runtime is read-only
+and receives dependency updates through a refreshed app package. Model downloads can be cancelled from Onboarding or
+Settings; Ollama retains partial pull data for a later retry. Dependency
+repair does not install OS-level prerequisites such as Homebrew packages.
 
 Core Python dependencies are installed by default; voice, vision, memory,
 and integration dependencies are optional prompts. Select voice when
