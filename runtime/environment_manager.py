@@ -314,6 +314,15 @@ class EnvironmentCompatibilityManager:
                              "recovery": recovery}
         return status
 
+    def dependencies_ready(self, groups: Optional[list[str]] = None) -> bool:
+        """Whether every selected group satisfies its declared version specs."""
+        selected = groups or list(self.manifest["python"].get("default_groups", ["core"]))
+        status = self.dependency_status()
+        unknown = sorted(set(selected) - set(status))
+        if unknown:
+            raise CompatibilityError("Unknown dependency group(s): {}".format(", ".join(unknown)))
+        return all(status[group]["available"] for group in selected)
+
     def diagnostics(self, os_name: Optional[str] = None, os_version: Optional[str] = None,
                     architecture: Optional[str] = None) -> list[dict]:
         """Report policy gaps with a concrete recovery instruction per gap."""
@@ -557,6 +566,8 @@ def main(argv=None) -> int:
     dependencies.add_argument("--format", choices=("json", "requirements"), default="json")
     repair = commands.add_parser("repair-dependencies")
     repair.add_argument("--group", action="append", dest="groups", required=True)
+    ready = commands.add_parser("dependencies-ready")
+    ready.add_argument("--group", action="append", dest="groups")
     system_dependencies = commands.add_parser("system-dependencies")
     system_dependencies.add_argument("--group", required=True)
     system_dependencies.add_argument("--format", choices=("json", "packages", "missing"), default="json")
@@ -579,6 +590,8 @@ def main(argv=None) -> int:
         output = manager.dependency_plan(args.groups)
     elif args.command == "repair-dependencies":
         output = manager.repair_dependencies(args.groups)
+    elif args.command == "dependencies-ready":
+        return 0 if manager.dependencies_ready(args.groups) else 1
     elif args.command == "system-dependencies":
         output = (manager.system_dependency_status().get(args.group, {})
                   if args.format == "missing" else manager.system_dependency_plan(args.group))

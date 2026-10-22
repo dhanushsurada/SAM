@@ -154,11 +154,17 @@ for group in "${INSTALL_GROUPS[@]}"; do
 done
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies started
 SETUP_STAGE="python-dependencies"
-if ! pip install "${DEPENDENCY_ARGS[@]}" --quiet; then
-    "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the reported dependency issue." >/dev/null
-    "$BOOTSTRAP_PYTHON" runtime/environment_manager.py restore-venv --path "$PWD/.venv" >/dev/null || true
-    echo "The previous Python environment was restored when available; the failed candidate was retained. Rerun after resolving the package issue." >&2
-    exit 1
+READY_ARGS=()
+for group in "${INSTALL_GROUPS[@]}"; do READY_ARGS+=(--group "$group"); done
+if .venv/bin/python runtime/environment_manager.py dependencies-ready "${READY_ARGS[@]}" >/dev/null 2>&1; then
+    echo "Selected dependency groups already satisfy the compatibility manifest; resuming after that stage."
+else
+    if ! pip install "${DEPENDENCY_ARGS[@]}" --quiet; then
+        "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the reported dependency issue." >/dev/null
+        "$BOOTSTRAP_PYTHON" runtime/environment_manager.py restore-venv --path "$PWD/.venv" >/dev/null || true
+        echo "The previous Python environment was restored when available; the failed candidate was retained. Rerun after resolving the package issue." >&2
+        exit 1
+    fi
 fi
 
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then

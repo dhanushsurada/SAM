@@ -161,11 +161,17 @@ for group in "${INSTALL_GROUPS[@]}"; do
     [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
   done < <("$VENV_PYTHON" "$ENVIRONMENT_MANAGER" resolve-dependencies --group "$group" --format requirements)
 done
-if ! "$VENV_PYTHON" -m pip install "${DEPENDENCY_ARGS[@]}"; then
-  "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies blocked --detail "Package installation failed; rerun after resolving the reported dependency issue." >/dev/null || true
-  "$PYTHON" "$ENVIRONMENT_MANAGER" restore-venv --path "$SCRIPT_DIR/.venv" || true
-  echo "Dependency installation failed. The prior environment was restored when available; the failed candidate is retained for diagnosis. Rerun setup.sh after resolving the package issue." >&2
-  exit 1
+READY_ARGS=()
+for group in "${INSTALL_GROUPS[@]}"; do READY_ARGS+=(--group "$group"); done
+if "$VENV_PYTHON" "$ENVIRONMENT_MANAGER" dependencies-ready "${READY_ARGS[@]}" >/dev/null 2>&1; then
+  echo "Selected dependency groups already satisfy the compatibility manifest; resuming after that stage."
+else
+  if ! "$VENV_PYTHON" -m pip install "${DEPENDENCY_ARGS[@]}"; then
+    "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies blocked --detail "Package installation failed; rerun after resolving the reported dependency issue." >/dev/null || true
+    "$PYTHON" "$ENVIRONMENT_MANAGER" restore-venv --path "$SCRIPT_DIR/.venv" || true
+    echo "Dependency installation failed. The prior environment was restored when available; the failed candidate is retained for diagnosis. Rerun setup.sh after resolving the package issue." >&2
+    exit 1
+  fi
 fi
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
   "$VENV_PYTHON" -m playwright install chromium

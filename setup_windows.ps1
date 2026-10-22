@@ -68,11 +68,18 @@ foreach ($group in $installGroups) {
     if ($LASTEXITCODE -ne 0) { throw "Could not resolve dependency group '$group'." }
     $dependencyArgs += @($resolved | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
-& $venvPython -m pip install @dependencyArgs
-if ($LASTEXITCODE -ne 0) {
-    & $pythonExe $manager record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the package issue." | Out-Null
-    & $pythonExe $manager restore-venv --path (Join-Path $scriptDir ".venv") | Out-Null
-    throw "Dependency installation failed. The previous environment was restored when available and the failed candidate retained; rerun after resolving the package issue."
+$readyArgs = @()
+foreach ($group in $installGroups) { $readyArgs += @("--group", $group) }
+& $venvPython $manager dependencies-ready @readyArgs *> $null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Selected dependency groups already satisfy the compatibility manifest; resuming after that stage."
+} else {
+    & $venvPython -m pip install @dependencyArgs
+    if ($LASTEXITCODE -ne 0) {
+        & $pythonExe $manager record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the package issue." | Out-Null
+        & $pythonExe $manager restore-venv --path (Join-Path $scriptDir ".venv") | Out-Null
+        throw "Dependency installation failed. The previous environment was restored when available and the failed candidate retained; rerun after resolving the package issue."
+    }
 }
 if ($installGroups -contains "vision") { & $venvPython -m playwright install chromium }
 & $pythonExe $manager record-step python-dependencies complete
