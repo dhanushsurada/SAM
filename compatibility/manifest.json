@@ -14,11 +14,11 @@
     "bootstrap_candidates": ["python3.11", "python3.12", "python3"],
     "executables": {"3.11": "python3.11", "3.12": "python3.12"},
     "dependency_groups": {
-      "core": ["requests", "pyyaml", "fastapi", "uvicorn", "httpx", "python-multipart"],
+      "core": ["requests", "pyyaml", "fastapi", "uvicorn", "httpx", "python-multipart", "cryptography"],
       "voice": ["faster-whisper", "pyaudio", "openwakeword", "soundfile", "sounddevice", "numpy", "kokoro"],
       "vision": ["pyautogui", "playwright", "pillow"],
       "memory": ["chromadb"],
-      "integrations": ["python-telegram-bot", "qrcode", "cryptography"]
+      "integrations": ["python-telegram-bot", "qrcode"]
     },
     "default_groups": ["core"],
     "required_groups": ["core"],
@@ -54,10 +54,12 @@
     },
     "linux": {
       "architectures": ["x86_64", "arm64"],
+      "distributions": ["debian", "ubuntu"],
       "python_packages": {"3.11": ["python3.11", "python3.11-venv"], "3.12": ["python3.12", "python3.12-venv"]}
     },
     "windows": {
       "architectures": ["x86_64", "arm64"],
+      "minimum_version": "10",
       "python_launcher": "py"
     }
   },

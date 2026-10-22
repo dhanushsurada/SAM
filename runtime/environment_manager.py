@@ -14,6 +14,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import datetime
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,14 +23,14 @@ from typing import Callable, Optional
 try:  # direct script execution and package import are both supported
     from .compatibility import (
         CompatibilityError, check_platform, check_requirements, check_tools,
-        parse_requirements, satisfies_specifier,
-        load_manifest, resolve_python,
+        parse_requirements, satisfies_specifier, check_python,
+        load_manifest, resolve_python, available_python_interpreters,
     )
 except ImportError:  # pragma: no cover - exercised by setup.sh subprocess
     from compatibility import (
         CompatibilityError, check_platform, check_requirements, check_tools,
-        parse_requirements, satisfies_specifier,
-        load_manifest, resolve_python,
+        parse_requirements, satisfies_specifier, check_python,
+        load_manifest, resolve_python, available_python_interpreters,
     )
 
 
@@ -45,11 +46,16 @@ class EnvironmentCompatibilityManager:
         self.which = which
         self.runner = runner
         self.opener = opener
+        self._discovery_cache = None
 
     def discover(self) -> dict:
         """Return a read-only snapshot of OS, hardware, tools, and packages."""
+        if self._discovery_cache is not None:
+            return self._discovery_cache
         versions = {}
         python_policy = self.manifest["python"]
+        for version, path in available_python_interpreters(self.manifest, self.which, self.runner).items():
+            versions[version] = {"path": path, "version": version}
         executable_candidates = list(dict.fromkeys(
             list(python_policy["executables"].values()) + python_policy["bootstrap_candidates"]
         ))
@@ -67,10 +73,11 @@ class EnvironmentCompatibilityManager:
 
         tools = {}
         for name, policy in self.manifest.get("tools", {}).items():
-            executable = {"rust": "rustc"}.get(name, name)
+            executable = {"rust": "rustc", "homebrew": "brew",
+                          "xcode_command_line_tools": "xcode-select"}.get(name, name)
             path = self.which(executable)
             entry = {"installed": bool(path), "path": path, "minimum_version": policy.get("minimum_version")}
-            if path:
+            if path and name != "xcode_command_line_tools":
                 try:
                     result = self.runner([path, "--version"], capture_output=True,
                                          text=True, timeout=5, check=False)
@@ -87,16 +94,37 @@ class EnvironmentCompatibilityManager:
                 package: self._module_available(import_names.get(package, package.replace("-", "_")))
                 for package in requirements
             }
-        return {
+        try:
+            selected_python = {"path": resolve_python(self.manifest, which=self.which,
+                                                       runner=self.runner)[0], "supported": True}
+        except CompatibilityError as exc:
+            selected_python = {"path": None, "supported": False, "detail": str(exc)}
+        try:
+            disk = shutil.disk_usage(self.root)
+            disk_info = {"total_gb": round(disk.total / (1024 ** 3), 2),
+                         "free_gb": round(disk.free / (1024 ** 3), 2)}
+        except OSError as exc:
+            disk_info = {"total_gb": None, "free_gb": None, "detail": str(exc)}
+        os_version = platform.mac_ver()[0] if platform.system() == "Darwin" else platform.release()
+        if platform.system() == "Linux" and hasattr(platform, "freedesktop_os_release"):
+            try:
+                release = platform.freedesktop_os_release()
+                os_version = "{} {}".format(release.get("ID", "Linux"), release.get("VERSION_ID", platform.release()))
+            except (OSError, AttributeError):
+                pass
+        self._discovery_cache = {
             "sam": {"version_policy": self.manifest.get("sam", {}).get("version_policy", "unspecified")},
-            "os": {"name": platform.system(), "version": platform.mac_ver()[0] or platform.release(),
+            "os": {"name": platform.system(), "version": os_version,
                    "release": platform.release(), "architecture": platform.machine()},
             "python": {"current": platform.python_version(), "executable": sys.executable,
-                       "available": versions, "supported": python_policy["supported_versions"]},
-            "hardware": {"memory_gb": self._memory_gb(), "cpu_count": os.cpu_count()},
+                       "available": versions, "supported": python_policy["supported_versions"],
+                       "selected": selected_python},
+            "hardware": {"memory_gb": self._memory_gb(), "cpu_count": os.cpu_count(),
+                         "disk": disk_info},
             "tools": tools,
             "dependencies": package_groups,
         }
+        return self._discovery_cache
 
     @staticmethod
     def _module_available(name: str) -> bool:
@@ -151,16 +179,58 @@ class EnvironmentCompatibilityManager:
                 if model:
                     ollama["configured_models"][key] = {"name": model, "available": model in names}
         except (OSError, ValueError, urllib.error.URLError, TimeoutError) as exc:
-            ollama["detail"] = "Ollama is unavailable: {}".format(exc)
+            # Endpoint URLs may contain credentials. Diagnostics expose a
+            # safe state, never the exception string or configured URL.
+            ollama["detail"] = "Ollama is unavailable at the configured endpoint."
 
         audio_modules = self.manifest.get("capabilities", {}).get("audio_capture", {}).get("python_modules", [])
         browser_modules = self.manifest.get("capabilities", {}).get("browser_automation", {}).get("python_modules", [])
+        dependency_status = self.dependency_status()
+        system_status = self.system_dependency_status()
+        feature_groups = {}
+        for group in ("voice", "vision", "memory", "integrations"):
+            package_state = dependency_status.get(group, {"available": True, "missing": [], "incompatible": []})
+            system_state = system_status.get(group, {"missing": [], "missing_libraries": [], "missing_tools": []})
+            missing_os = system_state.get("missing", []) + system_state.get("missing_libraries", []) + system_state.get("missing_tools", [])
+            feature_groups[group] = {
+                "available": package_state["available"] and not missing_os,
+                "missing_packages": package_state.get("missing", []),
+                "incompatible_packages": package_state.get("incompatible", []),
+                "missing_system_prerequisites": missing_os,
+                "reason": ("Install the optional '{}' dependency group and its listed prerequisites.".format(group)
+                           if package_state.get("missing") or package_state.get("incompatible") or missing_os else "ready"),
+            }
+        ollama_installed = bool(self.which("ollama"))
+        configured_model = settings.get("primary_model")
+        configured_available = bool(configured_model and configured_model in ollama["models"])
+        ollama.update(installed=ollama_installed,
+                      configured_model=configured_model,
+                      configured_model_available=configured_available,
+                      state="READY" if ollama["available"] and configured_available else ("DEGRADED" if ollama["available"] else "STOPPED"))
         return {
             "ollama": ollama,
             "audio_capture": {"available": any(self._module_available(item) for item in audio_modules),
                               "modules": {item: self._module_available(item) for item in audio_modules}},
             "browser_automation": {"available": all(self._module_available(item) for item in browser_modules),
                                   "modules": {item: self._module_available(item) for item in browser_modules}},
+            "features": feature_groups,
+        }
+
+    def report(self, settings: Optional[dict] = None) -> dict:
+        """Produce a credential-safe status payload for local UI diagnostics."""
+        from runtime.setup_state import read_setup_state
+
+        journal_path = Path.home() / ".sam_data" / "environment_setup.json"
+        try:
+            journal = json.loads(journal_path.read_text(encoding="utf-8")) if journal_path.exists() else {"steps": {}}
+        except (OSError, json.JSONDecodeError):
+            journal = {"steps": {}, "state": "unreadable"}
+        return {
+            "environment": self.discover(),
+            "diagnostics": self.diagnostics(),
+            "dependencies": self.dependency_status(),
+            "capabilities": self.capabilities(settings),
+            "setup": {"journey": read_setup_state(), "installation": journal},
         }
 
     def dependency_plan(self, groups: Optional[list[str]] = None) -> dict:
@@ -224,7 +294,27 @@ class EnvironmentCompatibilityManager:
         except CompatibilityError as exc:
             issues.append({"severity": "error", "area": "python", "message": str(exc)})
         try:
-            check_tools(self.manifest, which=self.which, runner=self.runner)
+            tool_names = ("node", "npm", "rust") if platform.system() in {"Darwin", "Windows"} else ()
+            if tool_names:
+                check_tools(self.manifest, names=tool_names, which=self.which, runner=self.runner)
+            if platform.system() == "Darwin":
+                for executable, label, args in (
+                    ("brew", "Homebrew", ["--version"]),
+                    ("xcode-select", "Apple Command Line Tools", ["-p"]),
+                ):
+                    path = self.which(executable)
+                    if not path:
+                        issues.append({"severity": "error", "area": "tools",
+                                       "message": "{} is missing; install it before building the macOS desktop app.".format(label)})
+                    elif executable == "xcode-select":
+                        try:
+                            result = self.runner([path, *args], capture_output=True, text=True, timeout=5, check=False)
+                            if result.returncode:
+                                issues.append({"severity": "error", "area": "tools",
+                                               "message": "Apple Command Line Tools are not configured. Run xcode-select --install and complete the prompt."})
+                        except (OSError, subprocess.SubprocessError):
+                            issues.append({"severity": "error", "area": "tools",
+                                           "message": "Could not query Apple Command Line Tools; run xcode-select --install."})
         except CompatibilityError as exc:
             issues.append({"severity": "error", "area": "tools", "message": str(exc)})
         try:
@@ -332,6 +422,46 @@ class EnvironmentCompatibilityManager:
         os.replace(str(temporary), str(target))
         return data
 
+    def prepare_virtualenv(self, python: str, target: Path) -> dict:
+        """Create a compatible venv, preserving any unusable prior environment."""
+        target = Path(target).expanduser().resolve()
+        version = check_python(python, self.manifest, self.runner)
+        executable = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        reusable = False
+        if executable.is_file():
+            try:
+                check_python(str(executable), self.manifest, self.runner)
+                reusable = True
+            except CompatibilityError:
+                reusable = False
+        if reusable:
+            return {"path": str(target), "python": str(executable), "created": False,
+                    "detail": "Existing supported virtual environment preserved."}
+        backup = None
+        if target.exists():
+            stamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            backup = target.with_name(target.name + ".backup-" + stamp)
+            suffix = 1
+            while backup.exists():
+                backup = target.with_name(target.name + ".backup-{}-{}".format(stamp, suffix))
+                suffix += 1
+            target.rename(backup)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = self.runner([python, "-m", "venv", str(target)], capture_output=True,
+                                 text=True, timeout=300, check=False)
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "venv creation failed").strip()
+                raise CompatibilityError("Could not create SAM's Python {} environment: {}. The previous environment was preserved at {}. Resolve the reported prerequisite, then rerun setup.".format(version, detail, backup or "no prior environment"))
+            check_python(str(executable), self.manifest, self.runner)
+        except Exception:
+            # Keep the new incomplete environment for diagnosis and leave the
+            # old one untouched; the next run will preserve the incomplete one.
+            raise
+        return {"path": str(target), "python": str(executable), "created": True,
+                "backup": str(backup) if backup else None,
+                "detail": "Created supported Python {} environment.".format(version)}
+
 
 def main(argv=None) -> int:
     import argparse
@@ -351,6 +481,9 @@ def main(argv=None) -> int:
     step.add_argument("name")
     step.add_argument("state", choices=("started", "complete", "blocked"))
     step.add_argument("--detail", default="")
+    prepare = commands.add_parser("prepare-venv")
+    prepare.add_argument("--python", required=True)
+    prepare.add_argument("--path", type=Path, required=True)
     args = parser.parse_args(argv)
     manager = EnvironmentCompatibilityManager()
     if args.command == "discover":
@@ -371,6 +504,8 @@ def main(argv=None) -> int:
         if args.command == "preflight" and failed:
             print(json.dumps(output, indent=2))
             return 1
+    elif args.command == "prepare-venv":
+        output = manager.prepare_virtualenv(args.python, args.path)
     else:
         output = manager.record_setup_step(args.name, args.state, args.detail)
     if args.command == "resolve-dependencies" and args.format == "requirements":
