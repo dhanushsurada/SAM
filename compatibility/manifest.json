@@ -32,7 +32,6 @@
       "python-telegram-bot": "telegram",
       "pyautogui": "pyautogui",
       "pillow": "PIL",
-      "python-telegram-bot": "telegram",
       "chromadb": "chromadb",
       "qrcode": "qrcode"
     },
