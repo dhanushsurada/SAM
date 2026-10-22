@@ -1,5 +1,10 @@
 {
   "schema_version": 1,
+  "sam": {
+    "version_policy": "current-source-checkout",
+    "settings_schema_version": 1,
+    "minimum_memory_gb": 8
+  },
   "python": {
     "requirements_file": "requirements.txt",
     "supported_versions": ["3.11", "3.12"],
@@ -14,6 +19,22 @@
       "desktop_and_vision": ["pyautogui", "playwright", "pillow"],
       "memory": ["chromadb"],
       "integrations": ["python-telegram-bot", "qrcode", "cryptography"]
+    },
+    "required_groups": ["core", "desktop_and_vision"],
+    "import_names": {
+      "pyyaml": "yaml",
+      "python-multipart": "multipart",
+      "faster-whisper": "faster_whisper",
+      "openwakeword": "openwakeword",
+      "pyaudio": "pyaudio",
+      "soundfile": "soundfile",
+      "sounddevice": "sounddevice",
+      "python-telegram-bot": "telegram",
+      "pyautogui": "pyautogui",
+      "pillow": "PIL",
+      "python-telegram-bot": "telegram",
+      "chromadb": "chromadb",
+      "qrcode": "qrcode"
     },
     "notes": "Kokoro 0.9.4 requires Python >=3.10,<3.13. SAM supports maintained Python 3.11 and 3.12 minors from that compatible range."
   },
@@ -39,5 +60,10 @@
     "npm": {"minimum_version": "9.0.0", "homebrew_formula": "node"},
     "rust": {"minimum_version": "1.77.2", "homebrew_formula": "rust"},
     "portaudio": {"required": true, "homebrew_formula": "portaudio"}
+  },
+  "capabilities": {
+    "ollama": {"endpoint": "http://127.0.0.1:11434/api/tags", "required_for_brain": true},
+    "audio_capture": {"python_modules": ["sounddevice", "pyaudio"], "tools": ["ffmpeg"]},
+    "browser_automation": {"python_modules": ["playwright"]}
   }
 }

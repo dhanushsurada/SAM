@@ -10,6 +10,7 @@ import platform
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+from runtime.config_migrations import SCHEMA_KEY, SETTINGS_SCHEMA_VERSION, migrate_settings_file
 
 CONFIG_PATH = Path(__file__).parent / "settings.yaml"
 BASE_DIR = Path(__file__).parent.parent
@@ -191,8 +192,11 @@ class Settings:
         user_config = SAM_DATA_DIR / "settings.yaml"
         config_file = user_config if user_config.exists() else CONFIG_PATH
         if config_file.exists():
-            with open(config_file) as f:
-                data = yaml.safe_load(f) or {}
+            if config_file == user_config:
+                data = migrate_settings_file(config_file)
+            else:
+                with open(config_file) as f:
+                    data = yaml.safe_load(f) or {}
             for key, value in data.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
@@ -240,6 +244,7 @@ class Settings:
 
     def save(self):
         data = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        data[SCHEMA_KEY] = SETTINGS_SCHEMA_VERSION
         with open(SAM_DATA_DIR / "settings.yaml", "w") as f:
             yaml.dump(data, f, default_flow_style=False)
 
@@ -309,6 +314,7 @@ class Settings:
             with open(source) as f:
                 data = yaml.safe_load(f) or {}
         data.update(changes)
+        data[SCHEMA_KEY] = SETTINGS_SCHEMA_VERSION
         SAM_DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.name + ".tmp")
         with open(tmp, "w") as f:
