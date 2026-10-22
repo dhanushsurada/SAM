@@ -7,6 +7,7 @@ import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
 import { isNative } from "@/lib/native";
+import { getEnvironmentReport, type EnvironmentReport } from "@/api/client";
 
 const STEPS = ["Welcome", "System check", "Model & voice", "Permissions", "Configuration", "Ready"] as const;
 
@@ -18,11 +19,20 @@ export function OnboardingPage() {
   const native = isNative();
   useRuntimePolling();
   const [modelName, setModelName] = useState("");
+  const [environment, setEnvironment] = useState<EnvironmentReport | null>(null);
+  const [environmentError, setEnvironmentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!native) return;
     void runtime.refreshModels();
   }, [native, runtime.refreshModels]);
+  useEffect(() => {
+    if (!native || step !== 1) return;
+    let active = true;
+    getEnvironmentReport().then((report) => { if (active) { setEnvironment(report); setEnvironmentError(null); } })
+      .catch((error: unknown) => { if (active) setEnvironmentError(error instanceof Error ? error.message : "Environment status is unavailable."); });
+    return () => { active = false; };
+  }, [native, step]);
   useEffect(() => {
     if (!native) return;
     if (step !== 2 || (runtime.models && !runtime.modelsError)) return;
@@ -76,6 +86,13 @@ export function OnboardingPage() {
                 <ModeBadge mode="live" />
               </div>
               <p className="text-sm text-mute">Checking whether the configured SAM gateway is reachable.</p>
+              {environmentError && <p role="alert" className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-xs text-danger">Environment details could not be loaded: {environmentError}</p>}
+              {environment && <div className="space-y-1 rounded-md border border-line bg-void p-2 text-xs">
+                <p className="text-mute">{environment.environment.os.name} {environment.environment.os.version} · Python {environment.environment.python.current} · {environment.environment.hardware.disk.free_gb ?? "?"} GB free</p>
+                {!environment.environment.python.selected.supported && <p className="text-danger">A supported Python interpreter is unavailable. {environment.environment.python.selected.detail}</p>}
+                {environment.diagnostics.filter((issue) => issue.severity === "error").map((issue, index) => <p key={index} className="text-danger">{issue.message}</p>)}
+                {Object.entries(environment.capabilities.features).filter(([, capability]) => !capability.available).map(([name, capability]) => <p key={name} className="text-mute">{name} is unavailable: {capability.reason}</p>)}
+              </div>}
               {healthError && (
                 <p className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-xs text-danger">
                   Can't reach the local SAM API yet. The installed desktop app starts it automatically; check its runtime configuration or retry the API from Settings.
@@ -110,6 +127,9 @@ export function OnboardingPage() {
               <h2 className="text-base font-medium">Model & voice</h2>
               {!native && <p className="text-xs text-mute">Runtime controls are available in the installed SAM desktop app.</p>}
               <p className="text-sm text-mute">Ollama and the installed models are read from SAM's shared runtime state. Downloads may be several GB; review the model name before starting one.</p>
+              {environment && <p className={`text-xs ${environment.environment.hardware.disk.free_gb !== null && environment.environment.hardware.disk.free_gb < 15 ? "text-warn" : "text-mute"}`}>
+                {environment.environment.hardware.disk.free_gb ?? "Unknown"} GB free on the home volume. Model size varies; Ollama reports byte progress after you start a download. Downloads are always started by your explicit action.
+              </p>}
               {runtime.snapshot?.ollama && <p className="text-xs text-mute">Ollama: {runtime.snapshot.ollama.state} — {runtime.snapshot.ollama.detail}</p>}
               {runtime.snapshot?.ollama.state !== "READY" && <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>}
               <div className="flex gap-2">

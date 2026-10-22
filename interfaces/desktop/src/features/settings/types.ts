@@ -47,7 +47,7 @@ export const SETTINGS_SCHEMA: SettingSection[] = [
     // control for the same setting here would compete with it.
     note: {
       tone: "warn",
-      text: "The Brain (primary and fallback model) is chosen on the Brain page, where it takes effect. The rest of this section is a demo preview.",
+      text: "The Brain (primary and fallback model) is chosen on the Brain page. These runtime preferences are saved to your local SAM settings.",
     },
     fields: [
       { key: "ollama_host", label: "Ollama host", type: "text", default: "http://localhost:11434" },
@@ -63,10 +63,10 @@ export const SETTINGS_SCHEMA: SettingSection[] = [
       { key: "wake_word", label: "Wake word", type: "text", default: "hey sam" },
       { key: "wake_word_threshold", label: "Wake word threshold", type: "number", default: 0.5 },
       { key: "whisper_model", label: "Whisper model", type: "text", default: "base.en" },
-      { key: "whisper_device", label: "Whisper device", type: "select", default: "auto", options: ["auto", "cpu", "cuda"] },
+      { key: "whisper_device", label: "Whisper device", type: "select", default: "auto", options: ["auto", "cpu", "cuda", "mps"] },
       { key: "recording_timeout", label: "Recording timeout (s)", type: "number", default: 8.0 },
       { key: "silence_threshold", label: "Silence threshold", type: "number", default: 0.01 },
-      { key: "tts_engine", label: "TTS engine", type: "select", default: "kokoro", options: ["kokoro", "piper"] },
+      { key: "tts_engine", label: "TTS engine", type: "select", default: "kokoro", options: ["kokoro", "piper", "system"] },
       { key: "kokoro_voice", label: "Kokoro voice", type: "text", default: "af_bella" },
       { key: "piper_model", label: "Piper model (fallback)", type: "text", default: "en_US-lessac-medium" },
       { key: "speech_rate", label: "Speech rate", type: "number", default: 1.0 },

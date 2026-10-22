@@ -66,6 +66,7 @@ from interfaces.api.connect_routes import (
     stop_background_tasks as _stop_connect_background_tasks,
     require_local_caller,
 )
+from runtime.environment_manager import EnvironmentCompatibilityManager
 
 logger = logging.getLogger("SAM.iQOO.Server")
 
@@ -150,6 +151,18 @@ async def update_settings(request: Request):
         raise HTTPException(status_code=422, detail=f"Settings are read-only or unknown: {', '.join(sorted(unknown))}")
 
     settings = _settings_instance()
+    numeric_bounds = {
+        "model_context_length": (256, 131072), "temperature": (0, 2),
+        "max_tokens": (1, 32768), "wake_word_threshold": (0, 1),
+        "recording_timeout": (0.5, 300), "silence_threshold": (0, 1),
+        "speech_rate": (0.25, 4), "screenshot_quality": (1, 100),
+        "memory_top_k": (1, 100), "founder_mode_min_confidence_to_show": (0, 1),
+    }
+    allowed_values = {
+        "tts_engine": {"kokoro", "piper", "system"},
+        "whisper_device": {"auto", "cpu", "cuda", "mps"},
+        "log_level": {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"},
+    }
     for key, value in changes.items():
         current = getattr(settings, key)
         if key in SETTINGS_SECRET_FIELDS and value == "":
@@ -165,15 +178,25 @@ async def update_settings(request: Request):
         elif isinstance(current, int):
             if isinstance(value, bool) or not isinstance(value, int):
                 raise HTTPException(status_code=422, detail=f"{key} must be an integer")
+            if key in numeric_bounds and not numeric_bounds[key][0] <= value <= numeric_bounds[key][1]:
+                raise HTTPException(status_code=422, detail=f"{key} must be between {numeric_bounds[key][0]} and {numeric_bounds[key][1]}")
         elif isinstance(current, float):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise HTTPException(status_code=422, detail=f"{key} must be a finite number")
             changes[key] = float(value)
+            if key in numeric_bounds and not numeric_bounds[key][0] <= changes[key] <= numeric_bounds[key][1]:
+                raise HTTPException(status_code=422, detail=f"{key} must be between {numeric_bounds[key][0]} and {numeric_bounds[key][1]}")
         elif current is None:
             if value is not None and not isinstance(value, str):
                 raise HTTPException(status_code=422, detail=f"{key} must be text or null")
         elif not isinstance(value, str):
             raise HTTPException(status_code=422, detail=f"{key} must be text")
+        if key in allowed_values and value not in allowed_values[key]:
+            raise HTTPException(status_code=422, detail=f"{key} must be one of: {', '.join(sorted(allowed_values[key]))}")
+        if isinstance(value, str) and len(value) > 2048:
+            raise HTTPException(status_code=422, detail=f"{key} exceeds the maximum length of 2048 characters")
+        if key == "ollama_host" and (not value.startswith(("http://", "https://")) or any(ch.isspace() for ch in value)):
+            raise HTTPException(status_code=422, detail="ollama_host must be an http(s) URL without whitespace")
 
     applied = {key: value for key, value in changes.items()
                if key not in SETTINGS_SECRET_FIELDS or value != ""}
@@ -187,6 +210,19 @@ async def update_settings(request: Request):
     for key, value in applied.items():
         setattr(settings, key, value)
     return read_settings()
+
+
+@app.get("/api/environment", dependencies=[Depends(require_local_caller)])
+def environment_report():
+    """Credential-safe environment, setup, dependency, and capability view."""
+    settings = _settings_instance()
+    return EnvironmentCompatibilityManager().report({
+        "ollama_host": settings.ollama_host,
+        "primary_model": settings.primary_model,
+        "fallback_model": settings.fallback_model,
+        "embedding_model": settings.embedding_model,
+        "vision_model": settings.vision_model,
+    })
 
 
 @app.on_event("startup")

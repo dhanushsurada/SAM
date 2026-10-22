@@ -112,6 +112,26 @@ export function updateSettings(
   );
 }
 
+export interface EnvironmentReport {
+  environment: {
+    os: { name: string; version: string; architecture: string };
+    python: { current: string; executable: string; supported: string[]; selected: { path: string | null; supported: boolean; detail?: string } };
+    hardware: { memory_gb: number | null; cpu_count: number | null; disk: { free_gb: number | null; total_gb: number | null } };
+    tools: Record<string, { installed: boolean; path: string | null; version?: string; minimum_version?: string }>;
+  };
+  diagnostics: Array<{ severity: string; area: string; message: string }>;
+  dependencies: Record<string, { required: boolean; available: boolean; missing: string[]; incompatible: Array<{ name: string; installed: string; required: string }> }>;
+  capabilities: {
+    ollama: { installed: boolean; available: boolean; state: string; detail: string; models: string[]; configured_model: string | null; configured_model_available: boolean };
+    features: Record<string, { available: boolean; missing_packages: string[]; incompatible_packages: unknown[]; missing_system_prerequisites: string[]; reason: string }>;
+  };
+  setup: { journey: { state: string; selected_model: string | null }; installation: { steps?: Record<string, { state: string; detail?: string }>; state?: string } };
+}
+
+export function getEnvironmentReport(): Promise<EnvironmentReport> {
+  return request<EnvironmentReport>("/environment", undefined, CORE_BASE);
+}
+
 /**
  * Native EventSource against /tasks/{id}/events. Deliberately not
  * hand-rolling reconnect logic: server.py's SSE framing sends `id: {seq}`
