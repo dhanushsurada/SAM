@@ -5,24 +5,65 @@ $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
 Set-Location $scriptDir
 
-foreach ($tool in @("python", "node", "npm", "cargo")) {
+foreach ($tool in @("node", "npm", "cargo")) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-        throw "Missing $tool. Install Python 3, Node.js, and the Rust toolchain, then rerun setup_windows.ps1."
+        throw "Missing $tool. Install Node.js and the Rust toolchain, then rerun setup_windows.ps1."
     }
 }
 
-$pythonExe = (Get-Command python).Source
+$launcher = Get-Command py -ErrorAction SilentlyContinue
+$bootstrap = Get-Command python -ErrorAction SilentlyContinue
+if ($launcher) {
+    $bootstrapPython = (& py -3 -c "import sys; print(sys.executable)").Trim()
+} elseif ($bootstrap) {
+    $bootstrapPython = $bootstrap.Source
+} else {
+    throw "No Python bootstrap or Windows py launcher is available. Install a version supported in compatibility/manifest.json and rerun."
+}
+$pythonExe = (& $bootstrapPython (Join-Path $scriptDir "runtime\compatibility.py") select-python).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $pythonExe) {
+    throw "SAM requires one of the supported Python versions in compatibility/manifest.json. Install one of those versions, then rerun."
+}
+& $pythonExe (Join-Path $scriptDir "runtime\compatibility.py") check-platform --os windows
+if ($LASTEXITCODE -ne 0) { throw "This Windows version or architecture is outside SAM's compatibility policy." }
+& $pythonExe (Join-Path $scriptDir "runtime\compatibility.py") check-requirements
+if ($LASTEXITCODE -ne 0) { throw "Dependency declarations do not satisfy SAM's compatibility policy." }
+& $pythonExe (Join-Path $scriptDir "runtime\compatibility.py") check-tools node npm rust
+if ($LASTEXITCODE -ne 0) { throw "Desktop build tools do not satisfy SAM's compatibility policy." }
+
+$installGroups = @("core")
+foreach ($group in @("voice", "vision", "memory", "integrations")) {
+    $answer = Read-Host "Install optional '$group' dependencies now? [y/N]"
+    if ($answer -match '^[Yy]$') { $installGroups += $group }
+}
+if ($installGroups -contains "voice") {
+    $voicePrerequisites = & $pythonExe (Join-Path $scriptDir "runtime\environment_manager.py") system-dependencies --group voice | ConvertFrom-Json
+    foreach ($tool in $voicePrerequisites.tools) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            Write-Warning "Optional voice capability needs '$tool'. Install it separately to enable media decoding."
+        }
+    }
+}
+
 $venvPython = Join-Path $scriptDir ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
     if (Test-Path (Join-Path $scriptDir ".venv")) {
         throw "An incomplete .venv exists. Move it aside yourself; setup will not delete it."
     }
     & $pythonExe -m venv (Join-Path $scriptDir ".venv")
+} else {
+    & $pythonExe (Join-Path $scriptDir "runtime\compatibility.py") check-python $venvPython | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "The existing .venv uses an unsupported Python version. Preserve it and move it aside before creating a supported environment." }
 }
 & $venvPython -m pip install --upgrade pip
-& $venvPython -m pip install -r (Join-Path $scriptDir "requirements.txt")
-& $venvPython -m pip install pyttsx3 pywinauto
-& $venvPython -m playwright install chromium
+$dependencyArgs = @()
+foreach ($group in $installGroups) {
+    $resolved = & $venvPython (Join-Path $scriptDir "runtime\environment_manager.py") resolve-dependencies --group $group --format requirements
+    if ($LASTEXITCODE -ne 0) { throw "Could not resolve dependency group '$group'." }
+    $dependencyArgs += @($resolved | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+& $venvPython -m pip install @dependencyArgs
+if ($installGroups -contains "vision") { & $venvPython -m playwright install chromium }
 
 $samData = Join-Path $env:USERPROFILE ".sam_data"
 New-Item -ItemType Directory -Force -Path "$samData\logs", "$samData\memory\chroma", "$samData\founder_mode\export", "$samData\skills\compiled" | Out-Null

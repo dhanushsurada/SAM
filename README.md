@@ -42,13 +42,16 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The macOS setup supports Python 3.11 and 3.12, preferring 3.11 to stay
-inside the compatibility range of the declared dependencies. It reads
-`compatibility/manifest.json`, checks the desktop toolchain and dependency
-manifest, offers to install missing prerequisites through Homebrew, then
-builds and launches a Tauri `.app` from this checkout. Ollama is installed
-with the macOS Homebrew cask when needed. Setup reviews configured model
-downloads with you before pulling them; it preserves existing model choices.
+Installers select Python 3.11 or 3.12 according to
+`compatibility/manifest.json`, including versioned Homebrew interpreters
+outside the current PATH. Core dependencies are installed by default; setup
+offers voice, vision, memory, and integrations as optional groups. Declared
+package versions are checked against `requirements.txt`, and feature-specific
+system prerequisites are requested only when that feature is selected. The
+macOS setup checks its desktop toolchain, then builds and launches a Tauri
+`.app` from this checkout. Ollama is installed with the macOS Homebrew cask
+when needed. Setup reviews configured model downloads with you before
+pulling them; it preserves existing model choices.
 This is a developer setup, not a standalone DMG installer. See
 [`docs/deployment/DESKTOP_INSTALL.md`](docs/deployment/DESKTOP_INSTALL.md).
 

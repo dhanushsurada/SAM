@@ -35,6 +35,9 @@ else
   eval "$("$BREW" shellenv)"
 fi
 
+# Homebrew is sometimes installed but absent from the inherited PATH.
+eval "$("$BREW" shellenv)"
+
 manifest_value() {
   /usr/bin/plutil -extract "$1" raw -o - "$MANIFEST_FILE"
 }
@@ -49,7 +52,7 @@ PYTHON_FORMULA="$(manifest_value python.bootstrap_formula)"
 PYTHON_BOOTSTRAP_EXECUTABLE="$(manifest_value python.bootstrap_executable)"
 NODE_FORMULA="$(manifest_value tools.node.homebrew_formula)"
 RUST_FORMULA="$(manifest_value tools.rust.homebrew_formula)"
-PORTAUDIO_FORMULA="$(manifest_value tools.portaudio.homebrew_formula)"
+PORTAUDIO_FORMULA=""
 OLLAMA_CASK="$(manifest_value platforms.macos.ollama.package)"
 MISSING_BREW_PACKAGES=()
 command -v node >/dev/null 2>&1 || MISSING_BREW_PACKAGES+=("$NODE_FORMULA")
@@ -91,6 +94,8 @@ if [[ -z "$BOOTSTRAP_PYTHON" ]]; then
     exit 1
   fi
   "$BREW" install "$PYTHON_FORMULA"
+  PYTHON_FORMULA_PREFIX="$("$BREW" --prefix "$PYTHON_FORMULA")"
+  export PATH="$PYTHON_FORMULA_PREFIX/bin:$PYTHON_FORMULA_PREFIX/libexec/bin:$PATH"
   BOOTSTRAP_PYTHON="$(command -v "$PYTHON_BOOTSTRAP_EXECUTABLE" || true)"
   if [[ -z "$BOOTSTRAP_PYTHON" ]]; then
     echo "Homebrew installed $PYTHON_FORMULA, but $PYTHON_BOOTSTRAP_EXECUTABLE is not on PATH. Open a new terminal and rerun setup.sh." >&2
@@ -109,13 +114,24 @@ if ! PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"; then
   PYTHON="$("$BOOTSTRAP_PYTHON" "$COMPATIBILITY_MODULE" select-python)"
 fi
 
+INSTALL_GROUPS=(core)
+for group in voice vision memory integrations; do
+  read -r -p "Install optional '$group' dependencies now? [y/N] " answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then INSTALL_GROUPS+=("$group"); fi
+done
+PORTAUDIO_FORMULA="$("$BOOTSTRAP_PYTHON" "$ENVIRONMENT_MANAGER" system-dependencies --group voice --format packages)"
+
 "$PYTHON" "$ENVIRONMENT_MANAGER" preflight
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step setup-preflight complete \
   --detail "Platform, Python, dependencies, and desktop tools passed compatibility policy"
 
-if ! "$BREW" list "$PORTAUDIO_FORMULA" >/dev/null 2>&1; then
-  echo "Installing PortAudio (Homebrew)..."
-  "$BREW" install "$PORTAUDIO_FORMULA"
+if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
+  for package in $PORTAUDIO_FORMULA; do
+    if ! "$BREW" list "$package" >/dev/null 2>&1; then
+      echo "Installing $package (Homebrew)..."
+      "$BREW" install "$package"
+    fi
+  done
 fi
 
 if [[ ! -x .venv/bin/python ]]; then
@@ -128,8 +144,16 @@ else
   "$PYTHON" "$COMPATIBILITY_MODULE" check-python "$SCRIPT_DIR/.venv/bin/python" >/dev/null
 fi
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m playwright install chromium
+DEPENDENCY_ARGS=()
+for group in "${INSTALL_GROUPS[@]}"; do
+  while IFS= read -r requirement; do
+    [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
+  done < <(.venv/bin/python "$ENVIRONMENT_MANAGER" resolve-dependencies --group "$group" --format requirements)
+done
+.venv/bin/python -m pip install "${DEPENDENCY_ARGS[@]}"
+if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
+  .venv/bin/python -m playwright install chromium
+fi
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies complete
 
 mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \

@@ -16,11 +16,12 @@
     "dependency_groups": {
       "core": ["requests", "pyyaml", "fastapi", "uvicorn", "httpx", "python-multipart"],
       "voice": ["faster-whisper", "pyaudio", "openwakeword", "soundfile", "sounddevice", "numpy", "kokoro"],
-      "desktop_and_vision": ["pyautogui", "playwright", "pillow"],
+      "vision": ["pyautogui", "playwright", "pillow"],
       "memory": ["chromadb"],
       "integrations": ["python-telegram-bot", "qrcode", "cryptography"]
     },
-    "required_groups": ["core", "desktop_and_vision"],
+    "default_groups": ["core"],
+    "required_groups": ["core"],
     "import_names": {
       "pyyaml": "yaml",
       "python-multipart": "multipart",
@@ -50,6 +51,31 @@
         "package": "ollama-app",
         "minimum_macos": "14.0"
       }
+    },
+    "linux": {
+      "architectures": ["x86_64", "arm64"],
+      "python_packages": {"3.11": ["python3.11", "python3.11-venv"], "3.12": ["python3.12", "python3.12-venv"]}
+    },
+    "windows": {
+      "architectures": ["x86_64", "arm64"],
+      "python_launcher": "py"
+    }
+  },
+  "system_dependencies": {
+    "voice": {
+      "macos": {"packages": ["portaudio", "ffmpeg"], "manager": "brew", "tools": ["ffmpeg"], "reason": "PortAudio supports microphone capture; FFmpeg enables media decoding."},
+      "linux": {"packages": ["portaudio19-dev", "ffmpeg"], "manager": "apt", "tools": ["ffmpeg"], "reason": "PortAudio headers support microphone capture; FFmpeg enables media decoding."},
+      "windows": {"packages": [], "manager": null, "tools": ["ffmpeg"], "reason": "PyAudio wheels provide the Windows PortAudio runtime when available; install FFmpeg separately if media decoding is needed."}
+    },
+    "vision": {
+      "macos": {"packages": [], "manager": null, "reason": "Playwright installs its browser separately."},
+      "linux": {
+        "packages": [],
+        "libraries": ["libasound.so.2", "libatk-1.0.so.0", "libatk-bridge-2.0.so.0", "libatspi.so.0", "libcairo.so.2", "libcups.so.2", "libdbus-1.so.3", "libdrm.so.2", "libgbm.so.1", "libgdk-3.so.0", "libglib-2.0.so.0", "libgtk-3.so.0", "libnspr4.so", "libnss3.so", "libpango-1.0.so.0", "libX11.so.6", "libX11-xcb.so.1", "libxcb.so.1", "libXcomposite.so.1", "libXdamage.so.1", "libXext.so.6", "libXfixes.so.3", "libXrandr.so.2", "libxkbcommon.so.0", "libxshmfence.so.1", "libXtst.so.6", "libfontconfig.so.1"],
+        "manager": "playwright",
+        "reason": "Playwright Chromium uses OS shared libraries; the installer can add missing Debian/Ubuntu prerequisites with playwright install-deps chromium."
+      },
+      "windows": {"packages": [], "manager": null, "reason": "Playwright installs its browser separately."}
     }
   },
   "tools": {
@@ -57,8 +83,7 @@
     "xcode_command_line_tools": {"required": true},
     "node": {"minimum_version": "18.0.0", "homebrew_formula": "node"},
     "npm": {"minimum_version": "9.0.0", "homebrew_formula": "node"},
-    "rust": {"minimum_version": "1.77.2", "homebrew_formula": "rust"},
-    "portaudio": {"required": true, "homebrew_formula": "portaudio"}
+    "rust": {"minimum_version": "1.77.2", "homebrew_formula": "rust"}
   },
   "capabilities": {
     "ollama": {"endpoint": "http://127.0.0.1:11434/api/tags", "required_for_brain": true},
