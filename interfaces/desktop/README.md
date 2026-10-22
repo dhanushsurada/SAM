@@ -37,11 +37,15 @@ app-only uninstall helper is `../../scripts/uninstall_macos_consumer.sh`; its
 Consumer distribution currently targets macOS only. Linux backend setup and
 the Windows MSI are source/developer routes, not relocatable consumer builds.
 
-Diagnostics can repair a selected dependency group in a source install using
-the manifest's version constraints; the managed consumer runtime is read-only
-and receives dependency updates through a refreshed app package. Model downloads can be cancelled from Onboarding or
-Settings; Ollama retains partial pull data for a later retry. Dependency
-repair does not install OS-level prerequisites such as Homebrew packages.
+Diagnostics can install a selected dependency group using the manifest's
+version constraints. In a source install packages go to its virtual
+environment; in a consumer install they go to
+`~/.sam_data/python-packages`, outside the app bundle. The app bundles pip for
+this operation and asks before installing optional packages. Model downloads
+can be cancelled from Onboarding or Settings; Ollama retains partial pull
+data for a later retry. Dependency setup also prepares Playwright Chromium for
+the Vision group. OS prerequisites such as PortAudio still use the documented
+platform package-manager route.
 
 Core Python dependencies are installed by default; voice, vision, memory,
 and integration dependencies are optional prompts. Select voice when
