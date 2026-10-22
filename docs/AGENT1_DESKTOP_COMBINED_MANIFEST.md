@@ -37,6 +37,13 @@ state. The `/api/settings` endpoint persists editable preferences locally,
 while credentials are redacted and incognito remains session-only.
 Permissions has not been converted into a runtime-backed settings surface.
 
+Later installation work adds `/api/environment`, live Diagnostics and
+onboarding compatibility details, safe virtual-environment backup/recreation,
+and a separate macOS consumer packaging command. The consumer command stages
+a managed Python runtime and core dependencies into Tauri resources; it is
+packaging code only and remains unbuilt/unverified until run on a target Mac.
+See `docs/deployment/DESKTOP_INSTALL.md` for current installation policy.
+
 ## Verification (re-run fresh this round, not carried over)
 
 | Layer | Result |
@@ -59,7 +66,9 @@ Rust build still needs validation on a machine with Cargo and Rust installed.
 
 ## Still open
 
-The current desktop still needs native Rust build/launch verification.
+The current desktop still needs native Rust build/launch and consumer DMG
+verification. Public distribution also requires Developer ID signing and
+notarization, which are not configured here.
 Android/Connect, JEV responsibility boundaries, task-state synchronization,
 and remaining Core features are tracked in their current workstream documents;
 this historical delivery report does not redefine them.

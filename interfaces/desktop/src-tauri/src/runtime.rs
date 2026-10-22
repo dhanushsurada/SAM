@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ─── Installed runtime configuration ───────────────────────────────────
 // setup.sh writes this user-controlled config outside the source checkout.
@@ -44,11 +44,56 @@ struct RuntimeConfig {
     environment_path: Option<String>,
 }
 
-fn runtime_config() -> Result<RuntimeConfig, String> {
+fn runtime_config_path() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .ok_or_else(|| "User home is unavailable; run the platform setup script to configure SAM Desktop".to_string())?;
-    let path = home.join(RUNTIME_CONFIG);
+    Ok(home.join(RUNTIME_CONFIG))
+}
+
+/// Consumer bundles carry the application source and Python runtime below
+/// the Tauri resource directory. On first launch, seed the normal per-user
+/// runtime config atomically; developer installs keep their setup-written
+/// checkout configuration and user-selected API endpoint.
+pub fn initialize_packaged_runtime(app: &AppHandle) -> Result<(), String> {
+    let path = runtime_config_path()?;
+    let resources = app.path().resource_dir().map_err(|e| format!("Cannot locate SAM bundle resources: {e}"))?;
+    let root = resources.join("sam-runtime");
+    let source = root.join("source");
+    let python_root = root.join("python");
+    let python = python_root.join("bin").join("python3");
+    #[cfg(target_os = "windows")]
+    let python = python_root.join("python.exe");
+    let site_packages = root.join("site-packages");
+    let cli = source.join("sam_cli.py");
+    if !cli.exists() || !python.exists() || !site_packages.exists() {
+        return Ok(()); // source-based developer setup writes this file itself
+    }
+    let preserved_api = std::fs::read_to_string(&path).ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|config| config.get("api_base_url").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| "http://127.0.0.1:8420".to_string());
+    let mut search_paths = vec![python_root.join("bin").into_os_string()];
+    if let Some(existing) = std::env::var_os("PATH") { search_paths.extend(std::env::split_paths(&existing)); }
+    let environment_path = std::env::join_paths(search_paths).map_err(|e| e.to_string())?;
+    let config = serde_json::json!({
+        "app_root": source,
+        "resources_dir": site_packages,
+        "sam_cli": cli,
+        "python": python,
+        "api_base_url": preserved_api,
+        "environment_path": environment_path.to_string_lossy(),
+    });
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|e| format!("Cannot save SAM runtime config: {e}"))?;
+    Ok(())
+}
+
+fn runtime_config() -> Result<RuntimeConfig, String> {
+    let path = runtime_config_path()?;
     let raw = std::fs::read_to_string(&path).map_err(|e| format!(
         "SAM Desktop runtime configuration is missing at {}: {e}. Run the platform setup script first.",
         path.display()
@@ -92,7 +137,9 @@ fn run_sam_cli(args: &[&str]) -> Result<Value, String> {
     cmd.args(args);
     cmd.arg("--json");
     cmd.current_dir(&config.app_root);
-    cmd.env("PYTHONPATH", &config.resources_dir);
+    let python_path = std::env::join_paths([config.app_root.as_path(), config.resources_dir.as_path()])
+        .map_err(|e| format!("Invalid SAM Python resource paths: {e}"))?;
+    cmd.env("PYTHONPATH", python_path);
     if let Some(path) = &config.environment_path {
         cmd.env("PATH", path);
     }
