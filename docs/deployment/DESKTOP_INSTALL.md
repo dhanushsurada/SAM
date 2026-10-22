@@ -11,6 +11,15 @@ the paths recorded in `~/.sam_data/desktop-runtime.json` (or the equivalent
 user home on Windows). Moving or deleting the checkout requires rerunning the
 setup script.
 
+This developer route is the current distribution decision. A consumer
+installer is deferred until SAM has a relocatable Python/runtime bundle and
+an install/uninstall lifecycle; the existing `.app` build must not be
+advertised as a standalone product. On macOS, setup checks for Apple Command
+Line Tools and offers to install missing Python, Node.js, and Rust packages
+through Homebrew. If Homebrew is absent, setup offers to run its official
+installer and explains that it may request administrator access. The macOS
+build creates a Tauri `.app` bundle and does not create a DMG.
+
 The Tauri bridge reads the configured Python executable, SAM CLI path,
 resource root, process environment path, and API base URL from that per-user
 runtime file. It does not derive these values from `CARGO_MANIFEST_DIR` or
@@ -18,6 +27,14 @@ the current working directory. The frontend uses Vite's `/api` proxy in
 browser development and the configured native endpoint inside the packaged
 Tauri shell. The API explicitly permits the Tauri webview origins needed for
 that connection.
+
+On first native launch, the app starts its API and sends a fresh install to
+the persisted onboarding journey. The chosen Brain model is stored in SAM's
+settings, onboarding progress in `~/.sam_data/setup_state.json`, and editable
+desktop settings through the local-only `/api/settings` endpoint into
+`~/.sam_data/settings.yaml`. The settings endpoint excludes derived paths and
+never returns stored credentials. “Open SAM at login” is managed by the
+Tauri autostart plugin; the app remains the sole owner of backend startup.
 
 The Tauri app owns starting the SAM API process. macOS setup no longer
 registers a competing launchd backend job; an existing legacy agent is

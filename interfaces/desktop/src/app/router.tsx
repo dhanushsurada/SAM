@@ -1,5 +1,5 @@
-import type { JSX } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { useEffect, type JSX, type ReactNode } from "react";
+import { createBrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "@/layouts/AppShell";
 import { FeatureStubPage } from "@/features/FeatureStubPage";
 import { DesignSystemPage } from "@/features/dev/DesignSystemPage";
@@ -18,6 +18,20 @@ import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
 import { PermissionsPage } from "@/features/permissions/PermissionsPage";
 import { ROUTES } from "./routes";
+import { useRuntime } from "@/stores/runtime";
+import { isNative } from "@/lib/native";
+
+function FirstRunRedirect({ children }: { children: ReactNode }) {
+  const { setupState } = useRuntime();
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (isNative() && setupState?.state === "first_run" && location.pathname !== "/onboarding") {
+      navigate("/onboarding", { replace: true });
+    }
+  }, [setupState, location.pathname, navigate]);
+  return children;
+}
 
 // Routes that have a built page component, per PHASE5_PLAN.md §H — real
 // data or demo data, either way, rather than the shared placeholder stub.
@@ -43,13 +57,11 @@ const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
 
 export const router = createBrowserRouter([
   // Standalone, outside AppShell on purpose — no sidebar/topbar chrome for
-  // a first-run wizard. No auto-redirect into this route: that would need
-  // a persisted "has onboarded" flag, and getting that wrong (looping,
-  // trapping a returning user) is worse than just leaving it reachable
-  // from Sidebar for now.
+  // a first-run wizard. The native app redirects fresh installs here using
+  // the persisted setup journey; browser previews remain directly navigable.
   { path: "/onboarding", element: <OnboardingPage /> },
   {
-    element: <AppShell />,
+    element: <FirstRunRedirect><AppShell /></FirstRunRedirect>,
     children: [
       ...ROUTES.map((route) => {
         const Page = BUILT_PAGES[route.path];

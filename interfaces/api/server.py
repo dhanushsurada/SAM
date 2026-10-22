@@ -34,6 +34,7 @@ Serves:
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -41,6 +42,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from config.settings import Settings, validate_assistant_name
 
 from core.model_manager import (
     ModelIncompatibleError, ModelManagerError, ModelMetadataError,
@@ -85,7 +87,7 @@ app.add_middleware(
         "http://localhost:5173", "http://127.0.0.1:5173",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Last-Event-ID", "X-SAM-Device", "X-SAM-Timestamp", "X-SAM-Nonce", "X-SAM-Signature"],
 )
 app.include_router(connect_router)  # agent/cross-device: /api/connect/*
@@ -98,6 +100,93 @@ def get_gateway() -> TaskGateway:
     if _gateway is None:
         _gateway = TaskGateway()
     return _gateway
+
+
+# Only fields represented by the desktop's editable settings form may be
+# changed through this local-only endpoint. Paths and detected hardware are
+# derived by SAM and intentionally remain read-only.
+SETTINGS_EDITABLE_FIELDS = {
+    "assistant_name", "user_name", "ollama_host", "model_context_length",
+    "temperature", "max_tokens", "wake_word", "wake_word_threshold",
+    "whisper_model", "whisper_device", "recording_timeout",
+    "silence_threshold", "tts_engine", "kokoro_voice", "piper_model",
+    "speech_rate", "vision_model", "screenshot_quality", "memory_top_k",
+    "embedding_model", "founder_mode_enabled", "founder_mode_llm_capture",
+    "founder_mode_classifier_model", "founder_mode_min_confidence_to_show",
+    "planner_model", "reflection_model", "allow_risky_terminal_commands",
+    "telegram_bot_token", "telegram_bot_username", "incognito", "log_level",
+    "license_enforcement_enabled",
+}
+SETTINGS_READ_ONLY_FIELDS = {"api_host", "api_port"}
+SETTINGS_SECRET_FIELDS = {"telegram_bot_token"}
+SETTINGS_SESSION_ONLY_FIELDS = {"incognito"}
+
+
+def _settings_instance() -> Settings:
+    return _gateway.settings if _gateway is not None else Settings()
+
+
+@app.get("/api/settings", dependencies=[Depends(require_local_caller)])
+def read_settings():
+    settings = _settings_instance()
+    values = {key: getattr(settings, key) for key in SETTINGS_EDITABLE_FIELDS | SETTINGS_READ_ONLY_FIELDS}
+    # Never return stored credentials to the webview. An empty value means
+    # "leave the existing secret unchanged" unless the user enters a new one.
+    for key in SETTINGS_SECRET_FIELDS:
+        values[key] = ""
+    return values
+
+
+@app.patch("/api/settings", dependencies=[Depends(require_local_caller)])
+async def update_settings(request: Request):
+    try:
+        changes = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object") from exc
+    if not isinstance(changes, dict) or not changes:
+        raise HTTPException(status_code=422, detail="Provide at least one setting to update")
+    unknown = set(changes) - SETTINGS_EDITABLE_FIELDS
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Settings are read-only or unknown: {', '.join(sorted(unknown))}")
+
+    settings = _settings_instance()
+    for key, value in changes.items():
+        current = getattr(settings, key)
+        if key in SETTINGS_SECRET_FIELDS and value == "":
+            continue
+        if key == "assistant_name":
+            try:
+                validate_assistant_name(value)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        elif isinstance(current, bool):
+            if not isinstance(value, bool):
+                raise HTTPException(status_code=422, detail=f"{key} must be a boolean")
+        elif isinstance(current, int):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise HTTPException(status_code=422, detail=f"{key} must be an integer")
+        elif isinstance(current, float):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise HTTPException(status_code=422, detail=f"{key} must be a finite number")
+            changes[key] = float(value)
+        elif current is None:
+            if value is not None and not isinstance(value, str):
+                raise HTTPException(status_code=422, detail=f"{key} must be text or null")
+        elif not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{key} must be text")
+
+    applied = {key: value for key, value in changes.items()
+               if key not in SETTINGS_SECRET_FIELDS or value != ""}
+    persisted = {key: value for key, value in applied.items()
+                 if key not in SETTINGS_SESSION_ONLY_FIELDS}
+    try:
+        if persisted:
+            Settings.persist_overrides(persisted)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save settings: {exc}") from exc
+    for key, value in applied.items():
+        setattr(settings, key, value)
+    return read_settings()
 
 
 @app.on_event("startup")

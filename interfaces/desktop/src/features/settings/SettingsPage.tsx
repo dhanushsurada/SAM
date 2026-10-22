@@ -5,7 +5,8 @@ import { Switch } from "@/components/Switch";
 import { SETTINGS_SCHEMA, type SettingField } from "./types";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
 import { Button } from "@/components/Button";
-import { isNative } from "@/lib/native";
+import { isNative, launchAtLoginEnabled, setLaunchAtLogin } from "@/lib/native";
+import { getSettings, updateSettings } from "@/api/client";
 
 type FormState = Record<string, string | number | boolean>;
 
@@ -38,6 +39,18 @@ function Field({
       <div className={ROW}>
         <span className="text-sm text-mute">{field.label}</span>
         <span className="truncate font-mono-data text-xs text-unverified">{String(value)}</span>
+      </div>
+    );
+  }
+
+  if (field.type === "readonly") {
+    return (
+      <div className={ROW}>
+        <div>
+          <p className="text-sm text-mute">{field.label}</p>
+          {field.description && <p className="text-xs text-mute">{field.description}</p>}
+        </div>
+        <span className="font-mono-data text-xs text-unverified">{String(value)}</span>
       </div>
     );
   }
@@ -93,25 +106,79 @@ function Field({
 
 export function SettingsPage() {
   const [values, setValues] = useState<FormState>(initialState);
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [launchAtLogin, setLaunchAtLoginValue] = useState<boolean | null>(null);
+  const [launchAtLoginError, setLaunchAtLoginError] = useState<string | null>(null);
   const [pullName, setPullName] = useState("");
   const runtime = useRuntime();
   useRuntimePolling();
+
+  useEffect(() => {
+    let current = true;
+    void getSettings().then((stored) => {
+      if (!current) return;
+      setValues((previous) => ({ ...previous, ...Object.fromEntries(
+        Object.entries(stored).map(([key, value]) => [key, value ?? ""])
+      ) }));
+      setSettingsMessage(null);
+    }).catch(() => {
+      if (current) setSettingsMessage("Saved settings could not be loaded. Check that SAM is running.");
+    }).finally(() => { if (current) setSettingsLoading(false); });
+    return () => { current = false; };
+  }, []);
 
   useEffect(() => {
     if (!isNative()) return;
     void runtime.refreshModels();
   }, [runtime.refreshModels]);
 
-  const setField = (key: string, value: string | number | boolean) =>
+  useEffect(() => {
+    if (!isNative()) return;
+    void launchAtLoginEnabled().then(setLaunchAtLoginValue).catch((error) => {
+      setLaunchAtLoginError(error instanceof Error ? error.message : "Could not read startup preference.");
+    });
+  }, []);
+
+  const setField = (key: string, value: string | number | boolean) => {
     setValues((prev) => ({ ...prev, [key]: value }));
+    setDirty((prev) => new Set(prev).add(key));
+    setSettingsMessage(null);
+  };
+
+  const saveSettings = async () => {
+    if (dirty.size === 0) return;
+    setSettingsSaving(true);
+    try {
+      const changed = Object.fromEntries([...dirty].map((key) => [key, values[key]]));
+      await updateSettings(changed);
+      setDirty(new Set());
+      setSettingsMessage("Settings saved. Incognito applies to this session only.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? `Could not save settings: ${error.message}` : "Could not save settings.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader
         title="Settings"
-        mode="demo"
-        description="Every field and default here comes straight from config/settings.py. Editable locally for preview — nothing here is saved anywhere: Settings.save() writes a local YAML file directly, which a browser has no endpoint to reach yet."
+        mode="live"
+        description="Settings are saved to this device and shared with SAM's runtime. Password fields are never shown after saving."
       />
+
+      <Card as="section" className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-ink">{settingsLoading ? "Loading saved settings…" : dirty.size ? `${dirty.size} unsaved change${dirty.size === 1 ? "" : "s"}` : "Settings are up to date"}</p>
+          {settingsMessage && <p role="status" className="mt-1 text-xs text-mute">{settingsMessage}</p>}
+          <p className="mt-1 text-xs text-mute">Leave a password field blank to keep its saved value. API host and port are read-only here; incognito is session-only.</p>
+        </div>
+        <Button variant="primary" size="sm" disabled={settingsLoading || settingsSaving || dirty.size === 0} onClick={() => void saveSettings()} loading={settingsSaving}>Save settings</Button>
+      </Card>
 
       {isNative() && <Card as="section" className="space-y-3">
         <div>
@@ -124,6 +191,24 @@ export function SettingsPage() {
           <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>
           <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>
           <Button variant="ghost" size="sm" onClick={() => { void runtime.refresh(); void runtime.refreshModels(); }}>Refresh status</Button>
+        </div>
+        <div className="flex items-center justify-between border-t border-line pt-3">
+          <div>
+            <p className="text-sm text-ink">Open SAM at login</p>
+            <p className="text-xs text-mute">SAM will start its backend when the desktop app opens.</p>
+            {launchAtLoginError && <p className="text-xs text-danger">{launchAtLoginError}</p>}
+          </div>
+          <Switch
+            checked={launchAtLogin ?? false}
+            disabled={launchAtLogin === null}
+            onChange={(enabled) => {
+              setLaunchAtLoginError(null);
+              void setLaunchAtLogin(enabled).then(setLaunchAtLoginValue).catch((error) => {
+                setLaunchAtLoginError(error instanceof Error ? error.message : "Could not update startup preference.");
+              });
+            }}
+            label="Open SAM at login"
+          />
         </div>
         {runtime.models && <>
           <p className="text-xs text-mute">Selected: {runtime.models.selected_model} · Active: {runtime.models.active_model ?? "none"}</p>

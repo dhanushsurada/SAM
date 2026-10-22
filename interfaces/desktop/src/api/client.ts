@@ -95,6 +95,23 @@ export function selectModel(model: string): Promise<BrainStatus> {
   );
 }
 
+/** Read/write the persisted local SAM settings used by the settings form.
+ * The API redacts credentials on read; a blank credential is omitted by the
+ * form unless the user explicitly edits it. */
+export function getSettings(): Promise<Record<string, string | number | boolean | null>> {
+  return request<Record<string, string | number | boolean | null>>("/settings", undefined, CORE_BASE);
+}
+
+export function updateSettings(
+  changes: Record<string, string | number | boolean | null>
+): Promise<Record<string, string | number | boolean | null>> {
+  return request<Record<string, string | number | boolean | null>>(
+    "/settings",
+    { method: "PATCH", body: JSON.stringify(changes) },
+    CORE_BASE
+  );
+}
+
 /**
  * Native EventSource against /tasks/{id}/events. Deliberately not
  * hand-rolling reconnect logic: server.py's SSE framing sends `id: {seq}`
