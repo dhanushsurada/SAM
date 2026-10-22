@@ -1,9 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { iqooService } from "@/services/iqoo";
 import { ApiError } from "@/api/client";
 import type { TaskRecord, TaskCreateRequest, HealthStatus, ExecutionEvent } from "@/api/types";
 import { useTaskEvents } from "@/features/iqoo/useTaskEvents";
+import { TERMINAL_PHASES } from "@/api/types";
+
+const SESSION_STORAGE_KEY = "sam.desktop.task-session.v1";
+const MAX_RESTORED_TASKS = 50;
 
 /** The gateway publishes a task's final result/error text AS its terminal
  * event's message (gateway.py). Copy it onto the record so a task that has
@@ -56,6 +60,7 @@ const TaskSessionContext = createContext<TaskSessionValue | null>(null);
  */
 export function TaskSessionProvider({ children }: { children: ReactNode }) {
   const [sessionTasks, setSessionTasks] = useState<TaskRecord[]>([]);
+  const [sessionRestored, setSessionRestored] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -69,6 +74,73 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
 
   const { events, streamError } = useTaskEvents(selectedTaskId);
   const selectedTask = sessionTasks.find((t) => t.task_id === selectedTaskId) ?? null;
+  const pollInFlight = useRef(false);
+
+  // Persist identifiers only. Task contents and attachments remain in SAM's
+  // local task store and are reloaded from the API after an app restart.
+  useEffect(() => {
+    let active = true;
+    const restore = async () => {
+      let saved: { taskIds?: unknown; selectedTaskId?: unknown } = {};
+      try {
+        const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch {
+        // A malformed browser preference is ignored; task records stay in Core.
+      }
+      const ids = Array.isArray(saved.taskIds)
+        ? saved.taskIds.filter((id): id is string => typeof id === "string").slice(-MAX_RESTORED_TASKS)
+        : [];
+      const records = await Promise.all(ids.map(async (id) => {
+        try { return await iqooService.getTask(id); } catch { return null; }
+      }));
+      if (!active) return;
+      const restored = records.filter((task): task is TaskRecord => task !== null);
+      setSessionTasks(restored);
+      const wanted = typeof saved.selectedTaskId === "string" ? saved.selectedTaskId : null;
+      setSelectedTaskId(wanted && restored.some((task) => task.task_id === wanted)
+        ? wanted : restored[0]?.task_id ?? null);
+      setSessionRestored(true);
+    };
+    void restore();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionRestored) return;
+    try {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        taskIds: sessionTasks.slice(-MAX_RESTORED_TASKS).map((task) => task.task_id),
+        selectedTaskId,
+      }));
+    } catch {
+      // Storage can be disabled or full; live task sync continues in memory.
+    }
+  }, [sessionRestored, sessionTasks, selectedTaskId]);
+
+  // Refresh every active task from Core. SSE is fast for the selected task;
+  // this authoritative poll keeps background task rows in sync too and
+  // repairs missed events after reconnects or route changes.
+  useEffect(() => {
+    const refreshActiveTasks = async () => {
+      if (pollInFlight.current) return;
+      const activeTasks = sessionTasks.filter((task) => !TERMINAL_PHASES.has(task.status as never));
+      if (!activeTasks.length) return;
+      pollInFlight.current = true;
+      try {
+        const updated = await Promise.all(activeTasks.map(async (task) => {
+          try { return await iqooService.getTask(task.task_id); } catch { return null; }
+        }));
+        const byId = new Map(updated.filter((task): task is TaskRecord => task !== null)
+          .map((task) => [task.task_id, task]));
+        if (byId.size) setSessionTasks((current) => current.map((task) => byId.get(task.task_id) ?? task));
+      } finally {
+        pollInFlight.current = false;
+      }
+    };
+    const interval = setInterval(() => void refreshActiveTasks(), 5000);
+    return () => clearInterval(interval);
+  }, [sessionTasks]);
 
   useEffect(() => {
     if (!selectedTaskId || events.length === 0) return;

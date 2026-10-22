@@ -4,6 +4,7 @@ import { AppShell } from "@/layouts/AppShell";
 import { FeatureStubPage } from "@/features/FeatureStubPage";
 import { DesignSystemPage } from "@/features/dev/DesignSystemPage";
 import { IqooPage } from "@/features/iqoo/IqooPage";
+import { ConnectPage } from "@/features/connect/ConnectPage";
 import { CommandCenterPage } from "@/features/command-center/CommandCenterPage";
 import { ChatPage } from "@/features/chat/ChatPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
@@ -42,6 +43,7 @@ function FirstRunRedirect({ children }: { children: ReactNode }) {
 const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/": CommandCenterPage,
   "/iqoo": IqooPage,
+  "/connect": ConnectPage,
   "/chat": ChatPage,
   "/tasks": TasksPage,
   "/brain": BrainPage,

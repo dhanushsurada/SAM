@@ -18,6 +18,7 @@ import androidx.navigation.compose.rememberNavController
 import com.samcore.android.data.transport.ConnectionState
 import com.samcore.android.data.transport.SamTransport
 import com.samcore.android.notifications.TaskMonitor
+import com.samcore.android.notifications.AndroidConnectTaskExecutor
 import com.samcore.android.ui.connection.ConnectionStateScreen
 import com.samcore.android.ui.onboarding.OnboardingScreen
 import com.samcore.android.ui.pairing.PairingScreen
@@ -37,7 +38,8 @@ private object Routes {
  * service and voice entry are deliberately not part of this graph yet.
  */
 @Composable
-fun SamNavGraph(transport: SamTransport, taskMonitor: TaskMonitor) {
+fun SamNavGraph(transport: SamTransport, taskMonitor: TaskMonitor,
+                connectTaskExecutor: AndroidConnectTaskExecutor) {
     val navController = rememberNavController()
     val connectionState by transport.connectionState.collectAsState(initial = ConnectionState.Connecting)
 
@@ -75,6 +77,7 @@ fun SamNavGraph(transport: SamTransport, taskMonitor: TaskMonitor) {
         composable(Routes.CONNECTION) {
             ConnectionStateScreen(
                 transport = transport,
+                connectTaskExecutor = connectTaskExecutor,
                 onOpenTaskStatus = { navController.navigate(Routes.TASK_STATUS) },
                 onUnpaired = { navigateAndClear(navController, Routes.ONBOARDING) },
             )

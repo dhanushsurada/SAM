@@ -253,7 +253,7 @@ device itself makes).
 | PUT | `/devices/{device_id}/capabilities` | device | `{device_id}` = external_id; 403 if it doesn't match the caller |
 | POST | `/devices/{device_id}/heartbeat` | device | Returns `connection_state` + full pending-task snapshot (§9) |
 | POST | `/tasks` | local | Desktop/Core → device. 404 unknown device, 422 missing capability |
-| GET | `/tasks/{task_id}` | — | 404 if unknown |
+| GET | `/tasks/{task_id}` | local | Desktop task-state refresh; device clients use signed heartbeat/task updates |
 | POST | `/tasks/{task_id}/ack` | device | 403 wrong device, 409 already terminal |
 | POST | `/tasks/{task_id}/progress` | device | `{"message": "...", "pct": 0-100}` |
 | POST | `/tasks/{task_id}/action` | device | `{"description": "..."}` |
@@ -262,7 +262,7 @@ device itself makes).
 | POST | `/tasks/{task_id}/fail` | device | `{"error": "..."}` |
 | POST | `/tasks/{task_id}/cancel` | local | Returns `{"cancelled": false}` (not an error) if already terminal |
 | POST | `/tasks/{task_id}/handoff` | local | §10. `{"new_target_device_id": "...", "reason": "..."}` |
-| GET | `/events?stream=<name>` | — | SSE, §7 |
+| GET | `/events?stream=<name>` | local | Desktop SSE, §7; device clients use signed heartbeat/task updates |
 
 ### Error → status mapping
 

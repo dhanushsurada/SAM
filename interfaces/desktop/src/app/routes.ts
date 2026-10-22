@@ -97,6 +97,14 @@ export const ROUTES: RouteMeta[] = [
     description: "Phone to PC workflow: the gateway a phone sends tasks to, its health, and the demo controls.",
   },
   {
+    path: "/connect",
+    label: "Device Connect",
+    icon: FiSmartphone,
+    group: "workspaces",
+    plannedStep: "Agent 3 + Android",
+    description: "Pair and manage trusted devices and route supported device tasks.",
+  },
+  {
     path: "/memory",
     label: "Memory",
     icon: FiDatabase,

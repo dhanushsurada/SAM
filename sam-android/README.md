@@ -10,6 +10,16 @@ what's in this project folder.
 
 ## Status, in one line
 
+> **Current integration update (October 2026):** Pairing redeems the
+> `/api/connect/pairing/redeem` token and signs Connect device requests with
+> Ed25519. The private key is encrypted using an Android Keystore AES key.
+> Android reports only implemented capabilities and can retrieve and report
+> lifecycle updates for routed Connect tasks. The supported routed action is
+> `show_notification`, and the user must tap to run it. Phone-submitted work still uses `/api/iqoo`. The
+> Gradle build and Android device behavior remain unverified until current
+> build and manual checks succeed; earlier notes below describe previous
+> slices and are superseded where they conflict with this update.
+
 **Type-checked against a hand-built harness, and `TaskMonitor`'s logic has been
 executed on a real coroutines runtime — but the project has still never been
 built with Gradle, never run through JUnit, and never run on a device or
@@ -38,25 +48,21 @@ these does and doesn't prove.
 
 ## Opening this project
 
-1. Android Studio (Koala/2024.1+) → Open → select this folder.
-2. Studio will offer to generate the Gradle wrapper jar — accept it. `gradle/wrapper/gradle-wrapper.properties`
-   is included (pinned to Gradle 8.9) but `gradle-wrapper.jar` itself is a binary this
-   environment couldn't fetch. If Studio doesn't offer, run `gradle wrapper` once with
-   any locally-installed Gradle 8.x (not the `apt`-packaged Gradle 4.4.1 — too old for AGP 8.x).
-3. Let Gradle sync. This needs real network access to `google()` and `mavenCentral()`.
-4. Run `./gradlew test` — unit tests exist now (`app/src/test/`) and have never been executed;
-   this should be the very first thing run, before installing anything.
-5. Run on a device or emulator running Android 8.0 (API 26) or newer for the manual flows
-   listed in the build report's device-validation checklist.
+1. Open this folder in Android Studio or run `./gradlew test`.
+2. Gradle needs the Android SDK plus access to Google Maven and Maven Central.
+3. Pair against SAM Connect on a trusted local network, then exercise pairing,
+   capability refresh, task submission, reconnect, and notifications on Android
+   8 (API 26) or newer.
 
 ## What's implemented
 
 - Project/module setup: Gradle Kotlin DSL, version catalog (`gradle/libs.versions.toml`), Compose enabled.
 - Theme (`ui/theme/`): colors sampled directly from `SAM_LOGO.png` (`#FD6902` / white), dark-only per PDR §7 — light mode not implemented.
 - `data/transport/SamTransport.kt`: the interface everything else is built against.
-- `data/transport/HttpSseSamTransport.kt`: v0 implementation. Task/health/event endpoints shaped after the real `docs/iqoo/PROTOCOL.md` in the main repo; **the pairing endpoint (`POST /api/connect/pair`) is an invented placeholder** — no existing HTTP pairing endpoint was found during reconnaissance. See the class doc comment. Uses a separate client for the SSE connection with a **finite 60 s read timeout** (a default 10 s client timeout would have killed long-idle task streams; an infinite one — what the hardening pass used — would let a half-open connection hold the foreground service open until `TaskMonitor`'s cap). The 60 s figure is a **provisional assumption** derived from the repo server's ~1 s heartbeat (`interfaces/api/server.py`), not from a documented contract: Agent 3's contract has to state a heartbeat interval well under it. Explicit timeouts for everything else too. `taskEvents(taskId, afterSeq)` can resume a dropped stream: it sends the SSE `Last-Event-ID` header, which `interfaces/api/server.py` honors (replays only events with a higher `seq`) but `docs/iqoo/PROTOCOL.md` does not mention — provisional until Agent 3's contract says. Each event's `TaskEvent.seq` is filled in from the SSE `id:` line. `getTask`/`sendTask` now report a body they cannot decode (invalid JSON, or a status the app's `TaskStatus` does not list — the repo's task store also accepts `testing`) as a failed `TransportResult` instead of letting the exception escape.
+- `data/transport/HttpSseSamTransport.kt`: Connect token redemption at `/api/connect/pairing/redeem`, Ed25519-signed device requests, capability reporting, heartbeat and routed-task lifecycle calls, plus the existing `/api/iqoo` task submit/status/SSE path. The signature covers `METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(body)` exactly as the server requires. The finite 60 s SSE timeout and reconnect cursor behavior apply to iQOO task streams. Routed Connect action execution is user-triggered and limited to `show_notification`.
+- `data/local/AndroidEncryptedIdentityStore.kt`: stable device UUID and Ed25519 keypair; the private key is encrypted with a non-exportable AES key in Android Keystore. `bcprov-jdk18on` supplies Ed25519 for the app's API 26+ range. App backup is disabled.
 - `data/local/PairedDeviceStore.kt` (interface) / `DevicePrefsStore.kt` (real DataStore-backed implementation): local persistence of the paired device. Split into an interface specifically so `HttpSseSamTransport` is unit-testable without a real Android `Context`.
-- `notifications/TaskNotifier.kt` (interface) / `SamNotifications.kt` (real implementation): same reasoning, for `TaskMonitor`.
+- `notifications/TaskNotifier.kt` (interface) / `SamNotifications.kt` (real implementation): task completion notification handling and private Connect notification actions.
 - Four screens + ViewModels: Onboarding, Pairing, Connection & device state, Task status (with live SSE event list).
 - Navigation (`ui/navigation/SamNavGraph.kt`): loading → {onboarding | connection} → pairing → connection → task status.
 - Task-completion notifications (`notifications/`): a notification channel, a runtime `POST_NOTIFICATIONS` request made at the point it's relevant (sending a task) rather than at launch, and an app-scoped `TaskMonitor` that keeps watching a task's events even if the user backs out of the task-status screen — so the notification can still fire. It survives navigating between screens within one app session; whether it survives the app being backgrounded is what the foreground service (next item) is for — **unverified on any device**. The terminal-status check (only notify when the task is actually done) lives in `TaskMonitor`, not guessed from SSE `phase` strings — see `TaskMonitorTest`.
@@ -66,7 +72,7 @@ these does and doesn't prove.
 - Manifest permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (now actually requested and used, not just declared), `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC` (the latter is required from Android 14 for a `dataSync` service; targetSdk is 35).
 - A network security config permitting cleartext HTTP app-wide, scoped to this app's single-purpose use case and documented why (see the file itself) — the initial CIDR-based draft was wrong and was corrected after checking Android's own docs.
 - `android:allowBackup="false"` in the manifest (paired-device info shouldn't ride along in a phone backup/restore to a different device) — this was already in place, confirmed still here during this pass. No logging anywhere in the app, so nothing to check for leaking the pairing code or address into logs.
-- **Unit tests** (`app/src/test/`, 53 `@Test` methods): `HttpSseSamTransport` (19 — pairing, connection state, task CRUD, SSE framing incl. heartbeat lines, the finite SSE timeout, the `Last-Event-ID` header and `seq` from the `id:` line, undecodable task bodies, unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (34 — event collection, the terminal-only notification gate, watch cancellation, keep-alive request, `isWatching` in every way a watch can end, the cap in virtual time, stale work from a replaced/stopped watch, and 13 reconnect tests on a hand-driven virtual clock that assert the wait schedule to the millisecond). Type-checked against the harness; **never executed by JUnit** — see the build report. (The earlier reports' "11 / 17 tests" was a miscount; the Phase 3 files had 14 + 21 = 35.) The `TaskMonitor` behaviours were additionally executed as plain-`main` scenarios on a real coroutines runtime — see the build report's Phase 3 and Phase 4 addenda for what that does and doesn't establish.
+- **Unit tests** (`app/src/test/`, 55 `@Test` methods): `HttpSseSamTransport` (21 — Connect pairing, canonical request signatures, heartbeat/capability reporting, task CRUD, SSE framing and reconnect cursor behavior, malformed task responses, and unpair — against `MockWebServer`, not a real network) and `TaskMonitor` (34 — event collection, the terminal-only notification gate, watch cancellation, keep-alive request, `isWatching` in every way a watch can end, the cap in virtual time, stale work from a replaced/stopped watch, and 13 reconnect tests on a hand-driven virtual clock that assert the wait schedule to the millisecond). The project Gradle/JUnit tests remain **unexecuted**; see the build report for earlier harness-only results and their limits.
 
 ## Known gaps in the foreground-service and reconnect work (also in the build report)
 
@@ -86,7 +92,7 @@ these does and doesn't prove.
 - Light theme.
 - Edge-to-edge inset handling per-screen (`enableEdgeToEdge()` is called in `MainActivity`, but individual screens don't yet apply `WindowInsets` padding — content may sit under system bars on some devices).
 - A real launcher icon (also reused as the notification's small icon) — the adaptive icon uses the real sampled SAM orange with a simple placeholder mark, not a traced version of the actual logo. Swap via Android Studio's Image Asset Studio.
-- Token expiry/refresh and server-side revocation — "Unpair" only forgets local state; there's no endpoint to tell SAM Core to stop trusting this device, any more than there's a confirmed pairing endpoint.
+- Server-side revocation from the phone — "Unpair" only forgets local state. Use Device Connect in the desktop app to revoke the server trust record.
 - ViewModel-level tests, and ones needing Robolectric/instrumentation — out of scope for "focused tests that don't need a physical device."
 
 ## What wasn't possible here

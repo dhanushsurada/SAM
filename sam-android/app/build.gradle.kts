@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.bouncycastle.provider)
 
     // Test-only — see app/src/test/. Verified coordinates, not run here (no
     // JVM/dependency access in this environment — see the build report).

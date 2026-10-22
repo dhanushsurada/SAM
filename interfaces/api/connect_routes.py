@@ -363,7 +363,8 @@ def create_device_task(req: DeviceTaskCreateRequest):
     return asdict(task)
 
 
-@router.get("/tasks/{task_id}", response_model=DeviceTaskRecord)
+@router.get("/tasks/{task_id}", response_model=DeviceTaskRecord,
+            dependencies=[Depends(require_local_caller)])
 def get_device_task(task_id: str):
     try:
         task = get_task_router().get(task_id)
@@ -502,12 +503,14 @@ async def _connect_event_stream(stream: str, after_seq: int, request: Optional[R
                 return
 
 
-@router.get("/events")
+@router.get("/events", dependencies=[Depends(require_local_caller)])
 async def stream_connect_events(stream: str, request: Request):
     """`stream` is any of the stream names connect/core/events.py's module
     docstring defines: "device", "device:<external_id>", "task:<task_id>",
     or "voice". Reconnect-safe via the standard Last-Event-ID header, same
-    convention as GET /api/iqoo/tasks/{id}/events."""
+    convention as GET /api/iqoo/tasks/{id}/events. Connect event streams
+    carry task and device context, so this desktop management stream is
+    loopback-only; device clients use their signed heartbeat/task routes."""
     last_event_id = request.headers.get("last-event-id")
     after_seq = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
     return StreamingResponse(

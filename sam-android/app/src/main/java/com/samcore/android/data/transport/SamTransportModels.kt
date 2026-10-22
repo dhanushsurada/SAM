@@ -3,6 +3,8 @@ package com.samcore.android.data.transport
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 
 /**
  * Shapes in this file are a v0 working assumption, not a frozen contract.
@@ -21,8 +23,73 @@ import kotlinx.serialization.Transient
 data class DeviceInfo(
     @SerialName("device_id") val deviceId: String,
     @SerialName("device_name") val deviceName: String,
-    val channel: String = "android", // mirrors device_registry.py's channel column (today: "telegram")
+    val channel: String = "direct",
 )
+
+@Serializable
+data class DeviceCapability(val available: Boolean, val permission: String)
+
+@Serializable
+data class PairingRedeemRequest(
+    val token: String,
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("device_name") val deviceName: String,
+    val platform: String = "android",
+    @SerialName("public_key") val publicKey: String,
+    val capabilities: Map<String, DeviceCapability>,
+    @SerialName("protocol_version") val protocolVersion: String = "1.0",
+)
+
+@Serializable
+data class PairingRedeemResponse(
+    @SerialName("device_id") val deviceId: String,
+    val status: String,
+)
+
+@Serializable
+data class ConnectHeartbeat(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("connection_state") val connectionState: String,
+    @SerialName("pending_tasks") val pendingTasks: List<ConnectDeviceTask> = emptyList(),
+)
+
+@Serializable
+data class CapabilitiesUpdateRequest(val capabilities: Map<String, DeviceCapability>)
+
+@Serializable
+data class ConnectDeviceTask(
+    @SerialName("task_id") val taskId: String,
+    val origin: String,
+    @SerialName("target_device_id") val targetDeviceId: String,
+    val action: String,
+    val payload: JsonObject = buildJsonObject {},
+    @SerialName("required_capability") val requiredCapability: String? = null,
+    val status: String,
+    val result: JsonObject? = null,
+    val error: String? = null,
+    @SerialName("last_message") val lastMessage: String? = null,
+    @SerialName("last_pct") val lastPct: Int? = null,
+    @SerialName("context_ref") val contextRef: String? = null,
+    @SerialName("handoff_state") val handoffState: JsonObject? = null,
+    @SerialName("handoff_of") val handoffOf: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String,
+)
+
+@Serializable
+data class ConnectTaskProgress(val message: String, val pct: Int? = null)
+
+@Serializable
+data class ConnectTaskAction(val description: String)
+
+@Serializable
+data class ConnectTaskVerification(val verified: Boolean, val detail: String = "")
+
+@Serializable
+data class ConnectTaskComplete(val result: JsonObject? = null)
+
+@Serializable
+data class ConnectTaskFailure(val error: String)
 
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()

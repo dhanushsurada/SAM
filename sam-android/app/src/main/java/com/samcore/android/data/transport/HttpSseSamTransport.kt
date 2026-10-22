@@ -20,23 +20,17 @@ import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.Signature
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /**
- * v0 SamTransport implementation. Task/event/health calls are shaped after
- * docs/iqoo/PROTOCOL.md in the main repo — real, tested endpoints, just built
- * for a different (now-excluded) track. The pair() endpoint below is NOT
- * grounded the same way: no existing HTTP pairing endpoint was found during
- * reconnaissance (today's real pairing is a Telegram bot command flow, see
- * interfaces/telegram/pair_new_device.py — not an HTTP call at all). The
- * shape here — POST a code, get a device_id back — is a placeholder guess for
- * Agent 3 to replace, not a contract to build further app logic on top of.
- *
- * Everything below implements SamTransport (SamTransport.kt) — no other file
- * in the app touches OkHttp directly. Depends on PairedDeviceStore (an
- * interface), not the concrete DataStore-backed DevicePrefsStore, so this
- * class can be unit-tested (HttpSseSamTransportTest) against MockWebServer +
- * an in-memory fake store without needing a real Android Context.
+ * SAM Connect pairing and authenticated device operations use the contract in
+ * docs/architecture/CROSS_DEVICE_PROTOCOL.md. Phone-submitted work remains on
+ * the existing /api/iqoo/* gateway; those routes are a separate Core-owned
+ * flow. All HTTP details stay behind SamTransport for testability.
  */
 class HttpSseSamTransport(
     private val prefsStore: PairedDeviceStore,
@@ -46,6 +40,8 @@ class HttpSseSamTransport(
         .readTimeout(15, TimeUnit.SECONDS) // regular calls only — see sseClient below
         .build(),
     sseReadTimeoutSeconds: Long = SSE_READ_TIMEOUT_SECONDS,
+    private val identityStore: DeviceIdentityStore = EphemeralDeviceIdentityStore(),
+    private val capabilitiesProvider: () -> Map<String, DeviceCapability> = { emptyMap() },
 ) : SamTransport {
 
     // The event stream needs its own, longer read timeout than regular calls:
@@ -103,26 +99,37 @@ class HttpSseSamTransport(
         }
     }
 
-    // --- Pairing (PLACEHOLDER SHAPE — see class doc) -----------------------
+    // --- Pairing: POST /api/connect/pairing/redeem -------------------------
 
     override suspend fun pair(baseUrl: String, pairingCode: String): TransportResult<DeviceInfo> =
         withContext(Dispatchers.IO) {
             val normalizedBase = baseUrl.trimEnd('/')
-            val body = json.encodeToString(mapOf("pairing_code" to pairingCode))
-                .toRequestBody(jsonMedia)
-            val request = Request.Builder()
-                .url("$normalizedBase/api/connect/pair") // PLACEHOLDER path — confirm with Agent 3
-                .post(body)
-                .build()
             try {
+                val identity = identityStore.loadOrCreate()
+                val payload = PairingRedeemRequest(
+                    token = pairingCode.trim(),
+                    deviceId = identity.deviceId,
+                    deviceName = android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android device",
+                    publicKey = ConnectIdentityCrypto.publicKeyPem(identity.keyPair),
+                    capabilities = reportedCapabilities(),
+                )
+                val body = json.encodeToString(payload).toByteArray(StandardCharsets.UTF_8)
+                val request = Request.Builder()
+                    .url("$normalizedBase/api/connect/pairing/redeem")
+                    .post(body.toRequestBody(jsonMedia))
+                    .build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         return@withContext TransportResult.Failure(
-                            "Pairing failed: HTTP ${response.code}"
+                            "Pairing failed: ${httpFailure(response)}"
                         )
                     }
                     val text = response.body?.string().orEmpty()
-                    val device = json.decodeFromString(DeviceInfo.serializer(), text)
+                    val redeemed = json.decodeFromString(PairingRedeemResponse.serializer(), text)
+                    if (redeemed.deviceId != identity.deviceId || redeemed.status != "trusted") {
+                        return@withContext TransportResult.Failure("SAM returned an unexpected pairing identity or status.")
+                    }
+                    val device = DeviceInfo(identity.deviceId, payload.deviceName)
                     currentBaseUrl = normalizedBase
                     prefsStore.save(normalizedBase, device)
                     _connectionState.value = ConnectionState.Connected(normalizedBase, device)
@@ -141,24 +148,97 @@ class HttpSseSamTransport(
         _connectionState.value = ConnectionState.Disconnected
     }
 
-    // --- Health (grounded — GET /api/iqoo/health in PROTOCOL.md) -----------
+    // --- Connect authentication and reachability -------------------------
 
-    override suspend fun checkConnection(): TransportResult<Unit> = withContext(Dispatchers.IO) {
-        val base = currentBaseUrl ?: return@withContext TransportResult.Failure("Not paired")
-        val request = Request.Builder().url("$base/api/iqoo/health").get().build()
-        try {
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    TransportResult.Success(Unit)
-                } else {
-                    TransportResult.Failure("Health check failed: HTTP ${response.code}")
-                }
-            }
-        } catch (e: IOException) {
-            _connectionState.value = ConnectionState.Error("Unreachable: ${e.message}")
-            TransportResult.Failure("Unreachable: ${e.message}", e)
-        }
+    override suspend fun checkConnection(): TransportResult<Unit> = when (val result = refreshConnectTasks()) {
+        is TransportResult.Success -> TransportResult.Success(Unit)
+        is TransportResult.Failure -> result
     }
+
+    override suspend fun refreshConnectTasks(): TransportResult<List<ConnectDeviceTask>> =
+        withContext(Dispatchers.IO) {
+            val base = currentBaseUrl ?: return@withContext TransportResult.Failure("Not paired")
+            val paired = prefsStore.pairedDevice.first()
+                ?: return@withContext TransportResult.Failure("Not paired")
+            try {
+                val capabilitiesBody = json.encodeToString(
+                    CapabilitiesUpdateRequest(reportedCapabilities())
+                ).toByteArray(StandardCharsets.UTF_8)
+                val capabilitiesRequest = signedRequest(
+                    base, "/api/connect/devices/${paired.device.deviceId}/capabilities", "PUT", capabilitiesBody
+                )
+                client.newCall(capabilitiesRequest).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        if (response.code == 401) {
+                            _connectionState.value = ConnectionState.Error("Device trust expired or revoked: ${httpFailure(response)}")
+                        }
+                        return@withContext TransportResult.Failure(
+                            "Capability update failed: ${httpFailure(response)}"
+                        )
+                    }
+                }
+                val request = signedRequest(base, "/api/connect/devices/${paired.device.deviceId}/heartbeat", "POST")
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val detail = httpFailure(response)
+                        if (response.code == 401) _connectionState.value = ConnectionState.Error("Device trust expired or revoked: $detail")
+                        return@withContext TransportResult.Failure("SAM Connect check failed: $detail")
+                    }
+                    val heartbeat = json.decodeFromString(
+                        ConnectHeartbeat.serializer(), response.body?.string().orEmpty()
+                    )
+                    if (heartbeat.deviceId != paired.device.deviceId) {
+                        return@withContext TransportResult.Failure("SAM returned a heartbeat for a different device.")
+                    }
+                    TransportResult.Success(heartbeat.pendingTasks)
+                }
+            } catch (e: IOException) {
+                _connectionState.value = ConnectionState.Error("Unreachable: ${e.message}")
+                TransportResult.Failure("Unreachable: ${e.message}", e)
+            } catch (e: SerializationException) {
+                TransportResult.Failure("Unexpected Connect response: ${e.message}", e)
+            } catch (e: Exception) {
+                TransportResult.Failure("Connect request failed: ${e.message}", e)
+            }
+        }
+
+    override suspend fun acknowledgeConnectTask(taskId: String) = postConnectTask(taskId, "ack", null)
+
+    override suspend fun reportConnectTaskProgress(taskId: String, message: String, pct: Int?) =
+        postConnectTask(taskId, "progress", json.encodeToString(ConnectTaskProgress(message, pct)))
+
+    override suspend fun reportConnectTaskAction(taskId: String, description: String) =
+        postConnectTask(taskId, "action", json.encodeToString(ConnectTaskAction(description)))
+
+    override suspend fun reportConnectTaskVerification(taskId: String, verified: Boolean, detail: String) =
+        postConnectTask(taskId, "verification", json.encodeToString(ConnectTaskVerification(verified, detail)))
+
+    override suspend fun completeConnectTask(taskId: String, result: kotlinx.serialization.json.JsonObject?) =
+        postConnectTask(taskId, "complete", json.encodeToString(ConnectTaskComplete(result)))
+
+    override suspend fun failConnectTask(taskId: String, error: String) =
+        postConnectTask(taskId, "fail", json.encodeToString(ConnectTaskFailure(error)))
+
+    private suspend fun postConnectTask(taskId: String, action: String, jsonBody: String?): TransportResult<ConnectDeviceTask> =
+        withContext(Dispatchers.IO) {
+            val base = currentBaseUrl ?: return@withContext TransportResult.Failure("Not paired")
+            val payload = jsonBody?.toByteArray(StandardCharsets.UTF_8) ?: byteArrayOf()
+            try {
+                val request = signedRequest(base, "/api/connect/tasks/$taskId/$action", "POST", payload)
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext TransportResult.Failure("Connect task update failed: ${httpFailure(response)}")
+                    }
+                    TransportResult.Success(json.decodeFromString(
+                        ConnectDeviceTask.serializer(), response.body?.string().orEmpty()
+                    ))
+                }
+            } catch (e: IOException) {
+                TransportResult.Failure("Could not reach SAM Core: ${e.message}", e)
+            } catch (e: Exception) {
+                TransportResult.Failure("Unexpected Connect task response: ${e.message}", e)
+            }
+        }
 
     // --- Tasks (grounded — POST/GET /api/iqoo/tasks in PROTOCOL.md) --------
 
@@ -269,5 +349,44 @@ class HttpSseSamTransport(
     companion object {
         /** See the comment on [sseClient] — provisional, derived from the repo's server, not from PROTOCOL.md. */
         const val SSE_READ_TIMEOUT_SECONDS = 60L
+    }
+
+    private fun signedRequest(base: String, path: String, method: String, body: ByteArray = byteArrayOf()): Request {
+        val identity = identityStore.loadOrCreate()
+        val timestamp = (System.currentTimeMillis() / 1000L).toString()
+        val nonce = ConnectIdentityCrypto.randomNonce()
+        val bodyHash = MessageDigest.getInstance("SHA-256").digest(body)
+            .joinToString("") { "%02x".format(it) }
+        val canonical = "${method.uppercase()}\n$path\n$timestamp\n$nonce\n$bodyHash"
+        val signer = Signature.getInstance("Ed25519", ConnectIdentityCrypto.provider())
+        signer.initSign(identity.keyPair.private)
+        signer.update(canonical.toByteArray(StandardCharsets.UTF_8))
+        val signature = Base64.getEncoder().encodeToString(signer.sign())
+        val builder = Request.Builder()
+            .url(base + path)
+            .header("X-SAM-Device-Id", identity.deviceId)
+            .header("X-SAM-Timestamp", timestamp)
+            .header("X-SAM-Nonce", nonce)
+            .header("X-SAM-Signature", signature)
+        val requestBody = body.toRequestBody(jsonMedia)
+        when (method.uppercase()) {
+            "GET" -> builder.get()
+            "PUT" -> builder.put(requestBody)
+            "POST" -> builder.post(requestBody)
+            else -> error("Unsupported signed Connect method: $method")
+        }
+        return builder.build()
+    }
+
+    private fun reportedCapabilities(): Map<String, DeviceCapability> = capabilitiesProvider()
+
+    private fun httpFailure(response: okhttp3.Response): String {
+        val body = response.body?.string().orEmpty()
+        val detail = try {
+            json.parseToJsonElement(body).let { element ->
+                (element as? kotlinx.serialization.json.JsonObject)?.get("detail")?.toString()?.trim('"')
+            }
+        } catch (_: Exception) { null }
+        return detail?.takeIf { it.isNotBlank() } ?: "HTTP ${response.code}"
     }
 }

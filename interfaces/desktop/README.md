@@ -88,6 +88,7 @@ done, plus the Brain / desktop-correction pass
   - `/brain` — installed models discovered from Ollama, active model,
     compatibility, and a selector that changes the real runtime Brain
   - `/iqoo` — the phone-to-PC workspace: gateway health and demo controls
+  - `/connect` — trusted device pairing and revocation, notification-task routing, and task status via SAM Connect
 - **`/hands`** — what SAM's Hands can do, read from the ReAct action table;
   only the vision/Whisper rows are probed (gateway health), Office Kit is
   listed as not implemented

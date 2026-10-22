@@ -2,11 +2,14 @@ package com.samcore.android
 
 import android.content.Context
 import com.samcore.android.data.local.DevicePrefsStore
+import com.samcore.android.data.local.AndroidCapabilityReporter
+import com.samcore.android.data.local.AndroidEncryptedIdentityStore
 import com.samcore.android.data.transport.HttpSseSamTransport
 import com.samcore.android.data.transport.SamTransport
 import com.samcore.android.notifications.AndroidTaskKeepAlive
 import com.samcore.android.notifications.AndroidTaskNotifier
 import com.samcore.android.notifications.TaskMonitor
+import com.samcore.android.notifications.AndroidConnectTaskExecutor
 
 /**
  * Deliberately not Hilt/Dagger for this first slice — one transport
@@ -17,7 +20,13 @@ import com.samcore.android.notifications.TaskMonitor
  */
 class AppContainer(context: Context) {
     private val devicePrefsStore = DevicePrefsStore(context.applicationContext)
-    val samTransport: SamTransport = HttpSseSamTransport(devicePrefsStore)
+    private val identityStore = AndroidEncryptedIdentityStore(context.applicationContext)
+    private val capabilities = AndroidCapabilityReporter(context.applicationContext)
+    val samTransport: SamTransport = HttpSseSamTransport(
+        devicePrefsStore,
+        identityStore = identityStore,
+        capabilitiesProvider = capabilities::snapshot,
+    )
 
     // Application-scoped (not tied to any ViewModel) so a watched task keeps
     // being observed — and can still trigger a completion notification —
@@ -30,4 +39,5 @@ class AppContainer(context: Context) {
         AndroidTaskNotifier(context),
         AndroidTaskKeepAlive(context),
     )
+    val connectTaskExecutor = AndroidConnectTaskExecutor(context, samTransport)
 }
