@@ -59,9 +59,12 @@ For a macOS consumer bundle, a packaging machine can run `npm ci` in
 `interfaces/desktop`, then `npm run package:macos-consumer`. This stages a
 managed Python runtime and the core SAM dependencies into the Tauri resources
 and produces an app plus DMG. Packaging requires `uv`, network access, and the
-native build/signing tools for the target Mac architecture. The generated
-package is currently unsigned; do not distribute it as a trusted release
-until Developer ID signing and notarization are configured.
+native build tools for the target Mac architecture. The output is architecture
+specific. For a Developer ID signed and notarized release, configure
+`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`,
+then run `scripts/package_macos_signed_release.sh`. The app-only uninstaller is
+`scripts/uninstall_macos_consumer.sh`; deleting user data requires its explicit
+`--remove-user-data` option and a typed confirmation.
 
 ---
 

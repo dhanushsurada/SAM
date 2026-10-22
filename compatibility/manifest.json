@@ -5,6 +5,19 @@
     "settings_schema_version": 1,
     "minimum_memory_gb": 8
   },
+  "distribution": {
+    "consumer_platforms": ["macos"],
+    "macos": {
+      "package_format": "dmg",
+      "architectures": ["arm64", "x86_64"],
+      "builds_per_architecture": true,
+      "runtime_managed_by_bundle": true,
+      "ollama_bundled": false,
+      "models_bundled": false,
+      "optional_dependency_groups_bundled": []
+    },
+    "source_developer_platforms": ["macos", "linux", "windows"]
+  },
   "python": {
     "requirements_file": "requirements.txt",
     "supported_versions": ["3.11", "3.12"],

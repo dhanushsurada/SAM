@@ -90,10 +90,16 @@ def main() -> int:
             "optional_capabilities": "Install through SAM setup when capability package management is available.",
         }
         (stage / "bundle.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        backup = None
         if OUT.exists():
             backup = OUT.with_name("sam-runtime.previous-{}".format(time.strftime("%Y%m%d%H%M%S")))
             OUT.rename(backup)
-        stage.rename(OUT)
+        try:
+            stage.rename(OUT)
+        except Exception:
+            if backup and backup.exists() and not OUT.exists():
+                backup.rename(OUT)
+            raise
     print("Staged macOS consumer resources at {}".format(OUT))
     return 0
 
