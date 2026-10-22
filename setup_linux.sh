@@ -97,6 +97,7 @@ if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
 fi
 
 echo -e "${GREEN}[2/8] Checking Ollama...${NC}"
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step ollama-start started
 if ! command -v ollama &> /dev/null; then
     read -r -p "Ollama is required for local models. Install it now using the official installer? [y/N] " answer
     if [[ "$answer" =~ ^[Yy]$ ]]; then
@@ -120,18 +121,12 @@ for _ in {1..60}; do
     sleep 1
 done
 if [[ "$OLLAMA_READY" != true ]]; then echo "Ollama failed to become ready." >&2; exit 1; fi
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step ollama-start complete
 
 echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
-if [ -d ".venv" ] && [ -x ".venv/bin/python3" ]; then
-    echo "  Existing .venv found — reusing it (run 'rm -rf .venv' first for a clean rebuild)"
-    "$PYTHON" runtime/compatibility.py check-python .venv/bin/python >/dev/null
-else
-    if [ -d ".venv" ]; then
-        echo -e "${RED}  .venv exists but is incomplete. Move it aside and rerun; setup will not delete it.${NC}"
-        exit 1
-    fi
-    "$PYTHON" -m venv .venv
-fi
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-environment started
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py prepare-venv --python "$PYTHON" --path "$PWD/.venv"
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-environment complete --detail "$PWD/.venv/bin/python"
 source .venv/bin/activate
 pip install --upgrade pip --quiet
 
@@ -144,6 +139,7 @@ for group in "${INSTALL_GROUPS[@]}"; do
         [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
     done < <(.venv/bin/python runtime/environment_manager.py resolve-dependencies --group "$group" --format requirements)
 done
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies started
 pip install "${DEPENDENCY_ARGS[@]}" --quiet
 
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
@@ -162,6 +158,7 @@ if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
         echo "  Playwright shared-library prerequisites are available."
     fi
 fi
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies complete
 
 echo -e "${GREEN}[7/8] Initializing ~/.sam_data...${NC}"
 # Same canonical location as macOS/Windows (see config/settings.py's
@@ -179,12 +176,16 @@ s = Settings()
 for item in (s.primary_model, s.fallback_model, s.embedding_model, s.vision_model): print(item or "")
 PY
 )
+FREE_MODEL_GB=$(.venv/bin/python -c 'import shutil; from pathlib import Path; print(round(shutil.disk_usage(Path.home()).free / (1024**3), 1))')
+echo "Available home-volume space before model downloads: ${FREE_MODEL_GB} GB. Ollama reports exact progress after a model is selected."
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step model-downloads started --detail "Downloads require per-model confirmation"
 while IFS= read -r model; do
     [[ -n "$model" ]] || continue
     if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "$model"; then echo "Already installed: $model"; continue; fi
     read -r -p "Download '$model'? This may require several GB. [y/N] " answer
     if [[ "$answer" =~ ^[Yy]$ ]]; then ollama pull "$model"; else echo "Skipped $model."; fi
 done <<< "$MODEL_LIST"
+"$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step model-downloads complete
 
 echo -e "${GREEN}Startup behavior${NC}"
 echo -e "${YELLOW}  Not configured in this version — start SAM manually (see below).${NC}"

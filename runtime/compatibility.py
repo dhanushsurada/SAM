@@ -86,13 +86,22 @@ def check_platform(manifest: dict, os_name: Optional[str] = None,
                 key, arch, ", ".join(policy.get("architectures", []))
             )
         )
+    if key == "linux" and policy.get("distributions"):
+        try:
+            distribution = platform.freedesktop_os_release().get("ID", "").lower()
+        except (AttributeError, OSError):
+            distribution = ""
+        if distribution and distribution not in policy["distributions"]:
+            raise CompatibilityError("SAM's Linux installer supports {} only; detected {}. Use the Debian/Ubuntu installation route or install the backend manually.".format(
+                ", ".join(policy["distributions"]), distribution))
     minimum = policy.get("minimum_version")
-    current_version = os_version or platform.mac_ver()[0]
-    if minimum and _version_tuple(current_version) < _version_tuple(minimum):
+    current_version = os_version or (platform.mac_ver()[0] if key == "macos" else platform.release())
+    if minimum and current_version and _version_tuple(current_version) < _version_tuple(minimum):
+        label = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}.get(key, key)
         raise CompatibilityError(
-            "SAM's macOS installer requires macOS {} or later for its Ollama app dependency; "
-            "this machine is running {}. Install a supported macOS version or use the documented manual setup.".format(
-                minimum, current_version or "an unknown version"
+            "SAM's {} installation policy requires version {} or later; this machine reports {}. "
+            "Upgrade to a supported release or use the documented manual setup.".format(
+                label, minimum, current_version or "an unknown version"
             )
         )
 
@@ -200,6 +209,54 @@ def resolve_python(manifest: Optional[dict] = None,
         "No supported Python interpreter was found. Detected: {}. SAM supports Python {}. {}".format(
             detected, " or ".join(supported), install_hint)
     )
+
+
+def available_python_interpreters(manifest: Optional[dict] = None,
+                                  which: Callable[[str], Optional[str]] = shutil.which,
+                                  runner: Callable = subprocess.run) -> Dict[str, str]:
+    """Locate supported interpreters, including standard Homebrew prefixes."""
+    data = manifest or load_manifest()
+    policy = data["python"]
+    candidates: Dict[str, str] = {}
+    for version in policy["supported_versions"]:
+        name = policy["executables"].get(version)
+        if name and (path := which(name)):
+            if _python_version(path, runner) == version:
+                candidates[version] = path
+    if platform.system() == "Windows":
+        launcher_name = data.get("platforms", {}).get("windows", {}).get("python_launcher", "py")
+        launcher = which(launcher_name)
+        if launcher:
+            try:
+                result = runner([launcher, "-0p"], capture_output=True, text=True, timeout=8, check=False)
+                for line in (result.stdout or "").splitlines():
+                    match = re.search(r"(\d+\.\d+).*?(?:\*\s*)?(.+python(?:\.exe)?)\s*$", line, re.I)
+                    if match and match.group(1) in policy["supported_versions"]:
+                        path = match.group(2).strip()
+                        if _python_version(path, runner) == match.group(1):
+                            candidates.setdefault(match.group(1), path)
+            except (OSError, subprocess.SubprocessError):
+                pass
+    if platform.system() == "Darwin":
+        brew = which("brew")
+        formulae = data.get("platforms", {}).get("macos", {}).get("python_formulas", {})
+        for version in policy["supported_versions"]:
+            executable = policy["executables"].get(version)
+            formula = formulae.get(version, "python@" + version)
+            paths = [Path(prefix) / "opt" / formula / "bin" / executable
+                     for prefix in ("/opt/homebrew", "/usr/local")]
+            if brew:
+                try:
+                    result = runner([brew, "--prefix", formula], capture_output=True,
+                                    text=True, timeout=8, check=False)
+                    if result.returncode == 0 and result.stdout.strip():
+                        paths.insert(0, Path(result.stdout.strip()) / "bin" / executable)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            for path in paths:
+                if path.is_file() and _python_version(str(path), runner) == version:
+                    candidates.setdefault(version, str(path))
+    return candidates
 
 
 def check_python(executable: str, manifest: Optional[dict] = None,

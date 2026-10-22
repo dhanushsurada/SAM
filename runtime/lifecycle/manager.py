@@ -109,6 +109,34 @@ class SAMRuntime:
     def start(self, name: str) -> StartResult:
         spec = self._spec(name)
 
+        # Optional processes fail with a precise setup instruction instead
+        # of crashing through an import error while core/API services remain
+        # independently startable.
+        if name == "voice":
+            try:
+                from runtime.environment_manager import EnvironmentCompatibilityManager
+                capability = EnvironmentCompatibilityManager().capabilities().get("features", {}).get("voice", {})
+                if not capability.get("available", True):
+                    missing = capability.get("missing_packages", []) + capability.get("missing_system_prerequisites", [])
+                    message = "Voice capability is disabled; install its optional dependencies and prerequisites: {}".format(", ".join(missing) or capability.get("reason", "unavailable"))
+                    write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
+                    return StartResult(name=name, ok=False, message=message)
+            except Exception as exc:
+                message = "Could not determine whether voice prerequisites are available: {}".format(exc)
+                write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
+                return StartResult(name=name, ok=False, message=message)
+        if name == "telegram":
+            try:
+                from importlib.util import find_spec
+                if find_spec("telegram") is None:
+                    message = "Telegram integration is unavailable; rerun setup with the optional integrations dependency group."
+                    write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
+                    return StartResult(name=name, ok=False, message=message)
+            except (ImportError, ValueError):
+                message = "Telegram integration is unavailable; install the optional integrations dependency group."
+                write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
+                return StartResult(name=name, ok=False, message=message)
+
         if self.is_running(name):
             state = read_state(name, self.data_dir)
             return StartResult(

@@ -46,16 +46,13 @@ if ($installGroups -contains "voice") {
 }
 
 $venvPython = Join-Path $scriptDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPython)) {
-    if (Test-Path (Join-Path $scriptDir ".venv")) {
-        throw "An incomplete .venv exists. Move it aside yourself; setup will not delete it."
-    }
-    & $pythonExe -m venv (Join-Path $scriptDir ".venv")
-} else {
-    & $pythonExe (Join-Path $scriptDir "runtime\compatibility.py") check-python $venvPython | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "The existing .venv uses an unsupported Python version. Preserve it and move it aside before creating a supported environment." }
-}
+$manager = Join-Path $scriptDir "runtime\environment_manager.py"
+& $pythonExe $manager record-step python-environment started
+& $pythonExe $manager prepare-venv --python $pythonExe --path (Join-Path $scriptDir ".venv") | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not prepare a compatible Python environment. The previous environment was preserved; resolve the reported issue and rerun." }
+& $pythonExe $manager record-step python-environment complete --detail $venvPython
 & $venvPython -m pip install --upgrade pip
+& $pythonExe $manager record-step python-dependencies started
 $dependencyArgs = @()
 foreach ($group in $installGroups) {
     $resolved = & $venvPython (Join-Path $scriptDir "runtime\environment_manager.py") resolve-dependencies --group $group --format requirements
@@ -63,11 +60,14 @@ foreach ($group in $installGroups) {
     $dependencyArgs += @($resolved | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 & $venvPython -m pip install @dependencyArgs
+if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed. Rerun setup_windows.ps1 to resume; existing settings and model files are preserved." }
 if ($installGroups -contains "vision") { & $venvPython -m playwright install chromium }
+& $pythonExe $manager record-step python-dependencies complete
 
 $samData = Join-Path $env:USERPROFILE ".sam_data"
 New-Item -ItemType Directory -Force -Path "$samData\logs", "$samData\memory\chroma", "$samData\founder_mode\export", "$samData\skills\compiled" | Out-Null
 
+& $pythonExe $manager record-step ollama-start started
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if (-not $ollama) {
     $answer = Read-Host "Ollama is required for local models. Install it using the official installer now? [y/N]"
@@ -87,8 +87,13 @@ for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
     try { Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 2 | Out-Null; $ready = $true } catch {}
 }
 if (-not $ready) { throw "Ollama did not become ready within 60 seconds." }
+& $pythonExe $manager record-step ollama-start complete
 
 $models = & $venvPython -c "from config.settings import Settings; s=Settings(); print('\n'.join(x or '' for x in (s.primary_model,s.fallback_model,s.embedding_model,s.vision_model)))"
+$driveName = $env:USERPROFILE.Substring(0, 1)
+$freeModelGb = [math]::Round((Get-PSDrive -Name $driveName).Free / 1GB, 1)
+Write-Host "Available home-volume space before model downloads: $freeModelGb GB. Ollama reports exact progress after you select a model."
+& $pythonExe $manager record-step model-downloads started --detail "Downloads require per-model confirmation"
 foreach ($model in $models) {
     if ([string]::IsNullOrWhiteSpace($model)) { continue }
     $installedNames = @(& $ollama.Source list 2>$null | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] })
@@ -97,6 +102,7 @@ foreach ($model in $models) {
     if ($answer -match '^[Yy]$') { & $ollama.Source pull $model; if ($LASTEXITCODE -ne 0) { throw "Model download failed: $model" } }
     else { Write-Host "Skipped $model; downloads can be started later in SAM Settings." }
 }
+& $pythonExe $manager record-step model-downloads complete
 
 Push-Location (Join-Path $scriptDir "interfaces\desktop")
 try {
@@ -120,7 +126,10 @@ $existing["sam_cli"] = Join-Path $scriptDir "sam_cli.py"
 $existing["python"] = $venvPython
 if (-not $existing.ContainsKey("api_base_url")) { $existing["api_base_url"] = "http://127.0.0.1:$apiPort" }
 $runtimeJson = $existing | ConvertTo-Json -Depth 5
-[System.IO.File]::WriteAllText($runtimeConfig, $runtimeJson, [System.Text.UTF8Encoding]::new($false))
+$temporaryConfig = "$runtimeConfig.tmp"
+[System.IO.File]::WriteAllText($temporaryConfig, $runtimeJson, [System.Text.UTF8Encoding]::new($false))
+if (Test-Path $runtimeConfig) { [System.IO.File]::Replace($temporaryConfig, $runtimeConfig, $null) }
+else { [System.IO.File]::Move($temporaryConfig, $runtimeConfig) }
 
 $legacyTask = Get-ScheduledTask -TaskName "SAM-Assistant" -ErrorAction SilentlyContinue
 if ($legacyTask) {

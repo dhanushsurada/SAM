@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv.backup-*/
 venv/
 env/
 
@@ -42,3 +43,6 @@ logs/*.log.*
 dist/
 build/
 *.egg-info/
+interfaces/desktop/src-tauri/resources/sam-runtime/*
+!interfaces/desktop/src-tauri/resources/sam-runtime/README.md
+interfaces/desktop/src-tauri/resources/sam-runtime.previous-*/

@@ -134,31 +134,28 @@ if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
   done
 fi
 
-if [[ ! -x .venv/bin/python ]]; then
-  if [[ -e .venv ]]; then
-    echo "An incomplete .venv exists. Move it aside yourself and rerun; setup will not delete it." >&2
-    exit 1
-  fi
-  "$PYTHON" -m venv .venv
-else
-  "$PYTHON" "$COMPATIBILITY_MODULE" check-python "$SCRIPT_DIR/.venv/bin/python" >/dev/null
-fi
-.venv/bin/python -m pip install --upgrade pip
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-environment started
+"$PYTHON" "$ENVIRONMENT_MANAGER" prepare-venv --python "$PYTHON" --path "$SCRIPT_DIR/.venv"
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-environment complete --detail "$VENV_PYTHON"
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies started
+"$VENV_PYTHON" -m pip install --upgrade pip
 DEPENDENCY_ARGS=()
 for group in "${INSTALL_GROUPS[@]}"; do
   while IFS= read -r requirement; do
     [[ -n "$requirement" ]] && DEPENDENCY_ARGS+=("$requirement")
-  done < <(.venv/bin/python "$ENVIRONMENT_MANAGER" resolve-dependencies --group "$group" --format requirements)
+  done < <("$VENV_PYTHON" "$ENVIRONMENT_MANAGER" resolve-dependencies --group "$group" --format requirements)
 done
-.venv/bin/python -m pip install "${DEPENDENCY_ARGS[@]}"
+"$VENV_PYTHON" -m pip install "${DEPENDENCY_ARGS[@]}"
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
-  .venv/bin/python -m playwright install chromium
+  "$VENV_PYTHON" -m playwright install chromium
 fi
 "$PYTHON" "$ENVIRONMENT_MANAGER" record-step python-dependencies complete
 
 mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \
   "$HOME/.sam_data/founder_mode/export" "$HOME/.sam_data/skills/compiled"
 
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step ollama-start started
 if ! command -v ollama >/dev/null 2>&1; then
   read -r -p "Ollama is required. Install the macOS Ollama app using Homebrew cask '$OLLAMA_CASK'? [y/N] " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
@@ -189,11 +186,11 @@ if [[ "$OLLAMA_READY" != true ]]; then
   echo "Ollama did not become ready within 60 seconds. Start it and rerun setup.sh." >&2
   exit 1
 fi
-"$PYTHON" "$ENVIRONMENT_MANAGER" record-step ollama-ready complete
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step ollama-start complete
 
 # Read existing Settings values. The setup script never rewrites settings.yaml
 # and asks before downloading any model (which can require many GB of storage).
-MODEL_LIST=$(.venv/bin/python - <<'PY'
+MODEL_LIST=$("$VENV_PYTHON" - <<'PY'
 from config.settings import Settings
 s = Settings()
 for item in (s.primary_model, s.fallback_model, s.embedding_model, s.vision_model):
@@ -202,6 +199,9 @@ PY
 )
 MODELS=()
 while IFS= read -r model_line; do MODELS+=("$model_line"); done <<< "$MODEL_LIST"
+FREE_MODEL_GB=$("$VENV_PYTHON" -c 'import shutil; from pathlib import Path; print(round(shutil.disk_usage(Path.home()).free / (1024**3), 1))')
+echo "Available home-volume space before model downloads: ${FREE_MODEL_GB} GB. Ollama reports exact download progress once a model is selected."
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step model-downloads started --detail "Downloads require per-model confirmation"
 LABELS=("Primary model" "Fallback model" "Embedding model" "Vision model")
 for i in "${!MODELS[@]}"; do
   model="${MODELS[$i]}"
@@ -218,6 +218,8 @@ for i in "${!MODELS[@]}"; do
   fi
 done
 
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step model-downloads complete
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step desktop-build started
 echo "Installing desktop frontend dependencies and building the native app..."
 (
   cd interfaces/desktop
@@ -235,11 +237,12 @@ fi
 # Configuration is deliberately outside the source tree. Refresh checkout
 # paths while preserving the user's configured API endpoint.
 RUNTIME_CONFIG="$HOME/.sam_data/desktop-runtime.json"
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step runtime-configuration started
 if [[ ! -e "$RUNTIME_CONFIG" ]]; then
-  API_PORT=$(.venv/bin/python -c 'from config.settings import Settings; print(Settings().api_port)')
+  API_PORT=$("$VENV_PYTHON" -c 'from config.settings import Settings; print(Settings().api_port)')
   SAM_ROOT="$SCRIPT_DIR" SAM_PYTHON="$SCRIPT_DIR/.venv/bin/python" \
   SAM_CLI="$SCRIPT_DIR/sam_cli.py" SAM_API="http://127.0.0.1:$API_PORT" \
-    .venv/bin/python - <<'PY'
+    "$VENV_PYTHON" - <<'PY'
 import json, os
 from pathlib import Path
 path = Path.home() / ".sam_data" / "desktop-runtime.json"
@@ -251,13 +254,15 @@ config = {
     "api_base_url": os.environ["SAM_API"],
     "environment_path": os.environ.get("PATH", ""),
 }
-path.write_text(json.dumps(config, indent=2) + "\n")
+temporary = path.with_suffix(path.suffix + ".tmp")
+temporary.write_text(json.dumps(config, indent=2) + "\n")
+os.replace(temporary, path)
 PY
 else
   SAM_ROOT="$SCRIPT_DIR" SAM_PYTHON="$SCRIPT_DIR/.venv/bin/python" \
   SAM_CLI="$SCRIPT_DIR/sam_cli.py" \
   SAM_PATH="$PATH" \
-    .venv/bin/python - <<'PY'
+    "$VENV_PYTHON" - <<'PY'
 import json, os
 from pathlib import Path
 path = Path.home() / ".sam_data" / "desktop-runtime.json"
@@ -270,10 +275,13 @@ existing.update({
     "environment_path": os.environ["SAM_PATH"],
 })
 existing.setdefault("api_base_url", "http://127.0.0.1:8420")
-path.write_text(json.dumps(existing, indent=2) + "\n")
+temporary = path.with_suffix(path.suffix + ".tmp")
+temporary.write_text(json.dumps(existing, indent=2) + "\n")
+os.replace(temporary, path)
 PY
   echo "Updated runtime paths and preserved API endpoint: $RUNTIME_CONFIG"
 fi
+"$PYTHON" "$ENVIRONMENT_MANAGER" record-step runtime-configuration complete --detail "$RUNTIME_CONFIG"
 
 # Migrate the legacy backend launch agent only after the replacement app and
 # runtime configuration are ready. Preserve the plist as a disabled backup.
