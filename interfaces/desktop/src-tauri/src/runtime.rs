@@ -45,22 +45,34 @@ impl Drop for ModelPullGuard {
 // setup.sh writes this user-controlled config outside the source checkout.
 // Runtime paths never depend on CARGO_MANIFEST_DIR or the app's cwd.
 const RUNTIME_CONFIG: &str = ".sam_data/desktop-runtime.json";
+const USER_PACKAGES: &str = ".sam_data/python-packages";
+const USER_LOGS: &str = ".sam_data/logs";
 
 #[derive(Debug, Deserialize)]
 struct RuntimeConfig {
+    #[serde(default)]
+    runtime_schema_version: u32,
     app_root: PathBuf,
     resources_dir: PathBuf,
     sam_cli: PathBuf,
     python: PathBuf,
     api_base_url: String,
     environment_path: Option<String>,
+    #[serde(default)]
+    user_packages_dir: Option<PathBuf>,
+    #[serde(default)]
+    logs_dir: Option<PathBuf>,
+}
+
+fn user_path(relative: &str) -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "User home is unavailable".to_string())?;
+    Ok(home.join(relative))
 }
 
 fn runtime_config_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "User home is unavailable; run the platform setup script to configure SAM Desktop".to_string())?;
-    Ok(home.join(RUNTIME_CONFIG))
+    user_path(RUNTIME_CONFIG)
 }
 
 /// Consumer bundles carry the application source and Python runtime below
@@ -79,39 +91,107 @@ pub fn initialize_packaged_runtime(app: &AppHandle) -> Result<(), String> {
     let site_packages = root.join("site-packages");
     let cli = source.join("sam_cli.py");
     if !cli.exists() || !python.exists() || !site_packages.exists() {
-        return Ok(()); // source-based developer setup writes this file itself
+        if path.exists() && runtime_config().is_ok() {
+            return Ok(()); // source-based developer setup owns its runtime config
+        }
+        if path.exists() {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().as_secs();
+            let backup = path.with_file_name(format!("desktop-runtime.invalid-{stamp}.json"));
+            std::fs::rename(&path, &backup).map_err(|e| format!(
+                "SAM runtime configuration is invalid and could not be preserved at {}: {e}", backup.display()
+            ))?;
+        }
+        return Err(format!(
+            "SAM's packaged runtime is missing from {}. Reinstall SAM from its DMG, or run setup.sh for a developer checkout.",
+            root.display()
+        ));
     }
-    let preserved_api = std::fs::read_to_string(&path).ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .and_then(|config| config.get("api_base_url").and_then(Value::as_str).map(str::to_string))
+    let data_root = user_path(".sam_data")?;
+    let user_packages = user_path(USER_PACKAGES)?;
+    let logs = user_path(USER_LOGS)?;
+    for directory in [&data_root, &user_packages, &logs] {
+        std::fs::create_dir_all(directory).map_err(|e| format!(
+            "Cannot prepare SAM's user directory {}: {e}", directory.display()
+        ))?;
+    }
+
+    let existing = if path.exists() {
+        let raw = std::fs::read_to_string(&path).map_err(|e| format!(
+            "Cannot read SAM runtime configuration {}: {e}", path.display()
+        ))?;
+        match serde_json::from_str::<Value>(&raw) {
+            Ok(Value::Object(value)) => Some(Value::Object(value)),
+            _ => {
+                let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default().as_secs();
+                let backup = path.with_file_name(format!("desktop-runtime.invalid-{stamp}.json"));
+                std::fs::rename(&path, &backup).map_err(|e| format!(
+                    "SAM runtime configuration is damaged and could not be preserved at {}: {e}", backup.display()
+                ))?;
+                None
+            }
+        }
+    } else { None };
+    if let Some(schema) = existing.as_ref()
+        .and_then(|config| config.get("runtime_schema_version"))
+        .and_then(Value::as_u64)
+    {
+        if schema > 1 {
+            return Err(format!("SAM runtime configuration schema {schema} is newer than this app supports. Update SAM before repairing it."));
+        }
+    }
+    let preserved_api = existing.as_ref()
+        .and_then(|config| config.get("api_base_url"))
+        .and_then(Value::as_str)
+        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+        .map(str::to_string)
         .unwrap_or_else(|| "http://127.0.0.1:8420".to_string());
     let mut search_paths = vec![python_root.join("bin").into_os_string()];
+    #[cfg(target_os = "macos")]
+    for candidate in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin"] {
+        let path = PathBuf::from(candidate);
+        if path.is_dir() { search_paths.push(path.into_os_string()); }
+    }
     if let Some(existing) = std::env::var_os("PATH") { search_paths.extend(std::env::split_paths(&existing)); }
     let environment_path = std::env::join_paths(search_paths).map_err(|e| e.to_string())?;
-    let config = serde_json::json!({
+    let mut config = existing.unwrap_or_else(|| serde_json::json!({}));
+    let Some(object) = config.as_object_mut() else {
+        return Err("SAM runtime configuration must be a JSON object".to_string());
+    };
+    let generated = serde_json::json!({
+        "runtime_schema_version": 1,
         "app_root": source,
         "resources_dir": site_packages,
         "sam_cli": cli,
         "python": python,
         "api_base_url": preserved_api,
         "environment_path": environment_path.to_string_lossy(),
+        "user_packages_dir": user_packages,
+        "logs_dir": logs,
     });
+    for (key, value) in generated.as_object().unwrap() {
+        object.insert(key.clone(), value.clone());
+    }
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let temporary = path.with_extension("json.tmp");
     std::fs::write(&temporary, serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    std::fs::rename(&temporary, &path).map_err(|e| format!("Cannot save SAM runtime config: {e}"))?;
+    std::fs::rename(&temporary, &path).map_err(|e| format!("Cannot save SAM runtime config; retry using Repair runtime setup: {e}"))?;
     Ok(())
 }
 
 fn runtime_config() -> Result<RuntimeConfig, String> {
     let path = runtime_config_path()?;
     let raw = std::fs::read_to_string(&path).map_err(|e| format!(
-        "SAM Desktop runtime configuration is missing at {}: {e}. Run the platform setup script first.",
+        "SAM Desktop runtime configuration is missing at {}: {e}. Use Repair runtime setup, or reinstall SAM if this app's resources are missing.",
         path.display()
     ))?;
     let config: RuntimeConfig = serde_json::from_str(&raw)
         .map_err(|e| format!("invalid SAM Desktop runtime configuration {}: {e}", path.display()))?;
+    if config.runtime_schema_version > 1 {
+        return Err(format!("SAM runtime configuration schema {} is newer than this app supports. Update SAM before repairing it.", config.runtime_schema_version));
+    }
     for (label, candidate) in [
         ("application root", &config.app_root),
         ("resources directory", &config.resources_dir),
@@ -124,6 +204,11 @@ fn runtime_config() -> Result<RuntimeConfig, String> {
     }
     if !config.api_base_url.starts_with("http://") && !config.api_base_url.starts_with("https://") {
         return Err("api_base_url must be an http(s) URL".to_string());
+    }
+    if let Some(packages) = &config.user_packages_dir {
+        if packages != &user_path(USER_PACKAGES)? {
+            return Err("user_packages_dir must point to SAM's per-user package directory".to_string());
+        }
     }
     Ok(config)
 }
@@ -149,7 +234,13 @@ fn run_sam_cli(args: &[&str]) -> Result<Value, String> {
     cmd.args(args);
     cmd.arg("--json");
     cmd.current_dir(&config.app_root);
-    let python_path = std::env::join_paths([config.app_root.as_path(), config.resources_dir.as_path()])
+    let mut python_paths = vec![config.app_root.clone()];
+    if let Some(user_packages) = &config.user_packages_dir {
+        python_paths.push(user_packages.clone());
+        cmd.env("SAM_USER_PACKAGES_DIR", user_packages);
+    }
+    python_paths.push(config.resources_dir.clone());
+    let python_path = std::env::join_paths(python_paths)
         .map_err(|e| format!("Invalid SAM Python resource paths: {e}"))?;
     cmd.env("PYTHONPATH", python_path);
     if let Some(path) = &config.environment_path {
@@ -227,6 +318,23 @@ pub fn ollama_status() -> Result<Value, String> {
 #[tauri::command]
 pub fn ollama_start() -> Result<Value, String> {
     run_sam_cli(&["ollama", "start"])
+}
+
+#[tauri::command]
+pub fn open_ollama_download() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg("https://ollama.com/download/mac")
+            .spawn().map_err(|e| format!("Could not open Ollama's macOS download page: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("Install Ollama from https://ollama.com/download for your platform.".to_string())
+}
+
+#[tauri::command]
+pub fn runtime_repair_configuration(app: AppHandle) -> Result<(), String> {
+    initialize_packaged_runtime(&app)
 }
 
 // ─── Setup state (Phase C7, CLI bridge) ────────────────────────────────────

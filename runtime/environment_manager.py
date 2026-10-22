@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import datetime
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -231,8 +232,19 @@ class EnvironmentCompatibilityManager:
             "dependencies": self.dependency_status(),
             "capabilities": self.capabilities(settings),
             "setup": {"journey": read_setup_state(), "installation": journal,
-                      "dependency_repair_supported": Path(sys.prefix).resolve() == (self.root / ".venv").resolve()},
+                      "dependency_repair_supported": self._dependency_repair_target() is not None},
         }
+
+    def _dependency_repair_target(self) -> Optional[Path]:
+        if importlib.util.find_spec("pip") is None:
+            return None
+        configured = os.environ.get("SAM_USER_PACKAGES_DIR")
+        if configured:
+            expected = (Path.home() / ".sam_data" / "python-packages").resolve()
+            target = Path(configured).expanduser().resolve()
+            return target if target == expected else None
+        source_venv = (self.root / ".venv").resolve()
+        return source_venv if Path(sys.prefix).resolve() == source_venv else None
 
     def dependency_plan(self, groups: Optional[list[str]] = None) -> dict:
         """Resolve manifest groups to currently declared requirements lines."""
@@ -258,27 +270,81 @@ class EnvironmentCompatibilityManager:
         manifest's pinned requirement specifiers, never package names from
         the request. A failed repair is journaled and leaves user data intact.
         """
-        source_venv = (self.root / ".venv").resolve()
-        if Path(sys.prefix).resolve() != source_venv:
-            raise CompatibilityError("In-app dependency repair is available for source installs only. "
-                                     "This managed runtime is read-only; install a refreshed SAM package "
-                                     "or use the supported source setup route.")
+        install_target = self._dependency_repair_target()
+        if install_target is None:
+            raise CompatibilityError("In-app dependency repair is unavailable in this runtime. "
+                                     "No supported writable package location or pip is available. "
+                                     "Repair the app installation or use the supported source setup route.")
         plan = self.dependency_plan(groups)
         if not plan["requirements"]:
             raise CompatibilityError("The selected dependency groups contain no declared requirements")
         self.record_setup_step("dependency-repair", "started",
                                "Installing groups: " + ", ".join(plan["groups"]))
+        command = [sys.executable, "-m", "pip", "install"]
+        user_packages = bool(os.environ.get("SAM_USER_PACKAGES_DIR"))
+        staged_target = None
+        if user_packages:
+            install_target.mkdir(parents=True, exist_ok=True)
+            staged_target = Path(tempfile.mkdtemp(
+                prefix="python-packages.stage-", dir=str(install_target.parent)
+            ))
+            shutil.copytree(install_target, staged_target, dirs_exist_ok=True)
+            command.extend(["--upgrade", "--target", str(staged_target)])
+        command.extend(plan["requirements"])
         try:
-            result = self.runner([sys.executable, "-m", "pip", "install", *plan["requirements"]],
+            result = self.runner(command,
                                  capture_output=True, text=True, timeout=1800, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
+            if staged_target:
+                shutil.rmtree(staged_target, ignore_errors=True)
             self.record_setup_step("dependency-repair", "blocked", str(exc))
             raise CompatibilityError("Dependency repair could not start: {}".format(exc)) from exc
         if result.returncode:
+            if staged_target:
+                shutil.rmtree(staged_target, ignore_errors=True)
+            import re
             detail = (result.stderr or result.stdout or "pip failed without details").strip()[-4000:]
+            detail = re.sub(r"(https?://)[^/@\s]+@", r"\1[credentials-redacted]@", detail, flags=re.I)
+            detail = re.sub(r"(?i)(token|password|secret|api[_-]?key)=([^\s&]+)", r"\1=[redacted]", detail)
             self.record_setup_step("dependency-repair", "blocked", detail)
             raise CompatibilityError("Dependency repair failed. Existing settings and models were preserved. "
                                      "Resolve the package or network issue and retry. {}".format(detail))
+        if "vision" in plan["groups"]:
+            browser_env = None
+            if staged_target:
+                browser_env = os.environ.copy()
+                current_python_path = browser_env.get("PYTHONPATH", "")
+                browser_env["PYTHONPATH"] = str(staged_target) + (
+                    os.pathsep + current_python_path if current_python_path else ""
+                )
+            browser = self.runner([sys.executable, "-m", "playwright", "install", "chromium"],
+                                  capture_output=True, text=True, timeout=1800, check=False,
+                                  **({"env": browser_env} if browser_env else {}))
+            if browser.returncode:
+                if staged_target:
+                    shutil.rmtree(staged_target, ignore_errors=True)
+                detail = (browser.stderr or browser.stdout or "Playwright Chromium setup failed").strip()[-2000:]
+                self.record_setup_step("dependency-repair", "blocked", "Python packages installed, but Chromium setup failed: " + detail)
+                raise CompatibilityError("Vision packages were installed, but Playwright could not prepare Chromium. "
+                                         "Check network access and disk space, then retry the vision setup.")
+        if staged_target:
+            backup = Path(tempfile.mkdtemp(
+                prefix="python-packages.previous-", dir=str(install_target.parent)
+            ))
+            backup.rmdir()
+            try:
+                install_target.rename(backup)
+                staged_target.rename(install_target)
+            except OSError as exc:
+                if backup.exists() and not install_target.exists():
+                    backup.rename(install_target)
+                shutil.rmtree(staged_target, ignore_errors=True)
+                self.record_setup_step("dependency-repair", "blocked", str(exc))
+                raise CompatibilityError(
+                    "Downloaded packages are ready, but SAM could not activate them. "
+                    "The previous capability packages were restored; retry the repair."
+                ) from exc
+            shutil.rmtree(backup, ignore_errors=True)
         self._discovery_cache = None
         self.record_setup_step("dependency-repair", "complete",
                                "Repaired groups: " + ", ".join(plan["groups"]))
