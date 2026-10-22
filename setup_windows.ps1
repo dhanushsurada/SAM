@@ -2,6 +2,13 @@
 # Builds the same Tauri desktop client as macOS; it does not install a
 # separately supervised Python backend. Run from PowerShell in the checkout.
 $ErrorActionPreference = "Stop"
+$setupStage = "prerequisites"
+trap {
+    if ($pythonExe -and $manager -and $setupStage) {
+        & $pythonExe $manager record-step $setupStage blocked --detail "Setup stopped: $($_.Exception.Message)" | Out-Null
+    }
+    throw
+}
 $scriptDir = $PSScriptRoot
 Set-Location $scriptDir
 
@@ -47,12 +54,14 @@ if ($installGroups -contains "voice") {
 
 $venvPython = Join-Path $scriptDir ".venv\Scripts\python.exe"
 $manager = Join-Path $scriptDir "runtime\environment_manager.py"
+$setupStage = "python-environment"
 & $pythonExe $manager record-step python-environment started
 & $pythonExe $manager prepare-venv --python $pythonExe --path (Join-Path $scriptDir ".venv") | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not prepare a compatible Python environment. The previous environment was preserved; resolve the reported issue and rerun." }
 & $pythonExe $manager record-step python-environment complete --detail $venvPython
 & $venvPython -m pip install --upgrade pip
 & $pythonExe $manager record-step python-dependencies started
+$setupStage = "python-dependencies"
 $dependencyArgs = @()
 foreach ($group in $installGroups) {
     $resolved = & $venvPython (Join-Path $scriptDir "runtime\environment_manager.py") resolve-dependencies --group $group --format requirements
@@ -60,11 +69,16 @@ foreach ($group in $installGroups) {
     $dependencyArgs += @($resolved | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 & $venvPython -m pip install @dependencyArgs
-if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed. Rerun setup_windows.ps1 to resume; existing settings and model files are preserved." }
+if ($LASTEXITCODE -ne 0) {
+    & $pythonExe $manager record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the package issue." | Out-Null
+    & $pythonExe $manager restore-venv --path (Join-Path $scriptDir ".venv") | Out-Null
+    throw "Dependency installation failed. The previous environment was restored when available and the failed candidate retained; rerun after resolving the package issue."
+}
 if ($installGroups -contains "vision") { & $venvPython -m playwright install chromium }
 & $pythonExe $manager record-step python-dependencies complete
 
 $samData = Join-Path $env:USERPROFILE ".sam_data"
+$setupStage = "ollama-start"
 New-Item -ItemType Directory -Force -Path "$samData\logs", "$samData\memory\chroma", "$samData\founder_mode\export", "$samData\skills\compiled" | Out-Null
 
 & $pythonExe $manager record-step ollama-start started
@@ -90,6 +104,7 @@ if (-not $ready) { throw "Ollama did not become ready within 60 seconds." }
 & $pythonExe $manager record-step ollama-start complete
 
 $models = & $venvPython -c "from config.settings import Settings; s=Settings(); print('\n'.join(x or '' for x in (s.primary_model,s.fallback_model,s.embedding_model,s.vision_model)))"
+$setupStage = "model-downloads"
 $driveName = $env:USERPROFILE.Substring(0, 1)
 $freeModelGb = [math]::Round((Get-PSDrive -Name $driveName).Free / 1GB, 1)
 Write-Host "Available home-volume space before model downloads: $freeModelGb GB. Ollama reports exact progress after you select a model."
@@ -105,6 +120,7 @@ foreach ($model in $models) {
 & $pythonExe $manager record-step model-downloads complete
 
 Push-Location (Join-Path $scriptDir "interfaces\desktop")
+$setupStage = "desktop-build"
 try {
     npm ci
     if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
@@ -113,6 +129,7 @@ try {
 } finally { Pop-Location }
 
 $runtimeConfig = Join-Path $samData "desktop-runtime.json"
+$setupStage = "runtime-configuration"
 $existing = @{}
 if (Test-Path $runtimeConfig) {
     $previous = Get-Content $runtimeConfig -Raw | ConvertFrom-Json

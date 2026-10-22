@@ -125,11 +125,17 @@ export interface EnvironmentReport {
     ollama: { installed: boolean; available: boolean; state: string; detail: string; models: string[]; configured_model: string | null; configured_model_available: boolean };
     features: Record<string, { available: boolean; missing_packages: string[]; incompatible_packages: unknown[]; missing_system_prerequisites: string[]; reason: string }>;
   };
-  setup: { journey: { state: string; selected_model: string | null }; installation: { steps?: Record<string, { state: string; detail?: string }>; state?: string } };
+  setup: { journey: { state: string; selected_model: string | null }; installation: { steps?: Record<string, { state: string; detail?: string }>; state?: string }; dependency_repair_supported?: boolean };
 }
 
 export function getEnvironmentReport(): Promise<EnvironmentReport> {
   return request<EnvironmentReport>("/environment", undefined, CORE_BASE);
+}
+
+export function repairEnvironment(groups: string[]): Promise<{ state: string; groups: string[] }> {
+  return request<{ state: string; groups: string[] }>("/environment/repair", {
+    method: "POST", body: JSON.stringify({ groups }),
+  }, CORE_BASE);
 }
 
 /**

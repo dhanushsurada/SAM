@@ -13,6 +13,16 @@
 # Usage: chmod +x setup_linux.sh && ./setup_linux.sh
 
 set -e
+SETUP_STAGE="prerequisites"
+SAM_PYTHON_FOR_JOURNAL=""
+record_setup_failure() {
+    status=$?
+    if [[ -n "$SAM_PYTHON_FOR_JOURNAL" && -x "$SAM_PYTHON_FOR_JOURNAL" ]]; then
+        "$SAM_PYTHON_FOR_JOURNAL" runtime/environment_manager.py record-step "$SETUP_STAGE" blocked --detail "Setup stopped with exit code $status; rerun setup_linux.sh to resume safely." >/dev/null 2>&1 || true
+    fi
+    exit "$status"
+}
+trap record_setup_failure ERR
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -49,6 +59,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     sudo apt-get install -y python3 python3-venv python3-pip
 fi
 BOOTSTRAP_PYTHON="$(command -v python3)"
+SAM_PYTHON_FOR_JOURNAL="$BOOTSTRAP_PYTHON"
 "$BOOTSTRAP_PYTHON" runtime/compatibility.py check-platform --os linux
 "$BOOTSTRAP_PYTHON" runtime/compatibility.py check-requirements
 PYTHON="$("$BOOTSTRAP_PYTHON" runtime/compatibility.py select-python 2>/dev/null || true)"
@@ -97,6 +108,7 @@ if [[ " ${INSTALL_GROUPS[*]} " == *" voice "* ]]; then
 fi
 
 echo -e "${GREEN}[2/8] Checking Ollama...${NC}"
+SETUP_STAGE="ollama-start"
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step ollama-start started
 if ! command -v ollama &> /dev/null; then
     read -r -p "Ollama is required for local models. Install it now using the official installer? [y/N] " answer
@@ -124,6 +136,7 @@ if [[ "$OLLAMA_READY" != true ]]; then echo "Ollama failed to become ready." >&2
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step ollama-start complete
 
 echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
+SETUP_STAGE="python-environment"
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-environment started
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py prepare-venv --python "$PYTHON" --path "$PWD/.venv"
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-environment complete --detail "$PWD/.venv/bin/python"
@@ -140,7 +153,13 @@ for group in "${INSTALL_GROUPS[@]}"; do
     done < <(.venv/bin/python runtime/environment_manager.py resolve-dependencies --group "$group" --format requirements)
 done
 "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies started
-pip install "${DEPENDENCY_ARGS[@]}" --quiet
+SETUP_STAGE="python-dependencies"
+if ! pip install "${DEPENDENCY_ARGS[@]}" --quiet; then
+    "$BOOTSTRAP_PYTHON" runtime/environment_manager.py record-step python-dependencies blocked --detail "Package installation failed; retry after resolving the reported dependency issue." >/dev/null
+    "$BOOTSTRAP_PYTHON" runtime/environment_manager.py restore-venv --path "$PWD/.venv" >/dev/null || true
+    echo "The previous Python environment was restored when available; the failed candidate was retained. Rerun after resolving the package issue." >&2
+    exit 1
+fi
 
 if [[ " ${INSTALL_GROUPS[*]} " == *" vision "* ]]; then
     echo "  Installing Playwright Chromium..."
@@ -170,6 +189,7 @@ mkdir -p "$HOME/.sam_data/founder_mode/export"
 mkdir -p "$HOME/.sam_data/skills/compiled"
 
 echo -e "${GREEN}[8/8] Review configured model downloads...${NC}"
+SETUP_STAGE="model-downloads"
 MODEL_LIST=$(.venv/bin/python - <<'PY'
 from config.settings import Settings
 s = Settings()

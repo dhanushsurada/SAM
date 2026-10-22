@@ -42,6 +42,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from config.settings import Settings, validate_assistant_name
 
 from core.model_manager import (
@@ -69,6 +70,10 @@ from interfaces.api.connect_routes import (
 from runtime.environment_manager import EnvironmentCompatibilityManager
 
 logger = logging.getLogger("SAM.iQOO.Server")
+
+
+class EnvironmentRepairRequest(BaseModel):
+    groups: list[str]
 
 # interfaces/api/server.py -> interfaces/api -> interfaces -> repo root.
 # (One level deeper than the old iqoo/server.py -> iqoo -> repo root, since
@@ -223,6 +228,22 @@ def environment_report():
         "embedding_model": settings.embedding_model,
         "vision_model": settings.vision_model,
     })
+
+
+@app.post("/api/environment/repair", dependencies=[Depends(require_local_caller)])
+def repair_environment(request: EnvironmentRepairRequest):
+    """Install explicitly selected manifest groups into the active runtime."""
+    groups = request.groups
+    if not groups:
+        raise HTTPException(status_code=422, detail="groups must be a non-empty list of dependency group names")
+    try:
+        return EnvironmentCompatibilityManager().repair_dependencies(groups)
+    except Exception as exc:
+        from runtime.compatibility import CompatibilityError
+        if isinstance(exc, CompatibilityError):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        logger.exception("Dependency repair failed")
+        raise HTTPException(status_code=500, detail="Dependency repair failed; see local SAM logs") from exc
 
 
 @app.on_event("startup")
