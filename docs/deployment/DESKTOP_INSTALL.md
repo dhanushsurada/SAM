@@ -42,9 +42,10 @@ interpreter, setup renames it to a dated `.backup-*` directory before creating
 a compatible replacement. The backup is retained. Dependency, model, and
 desktop-build steps are recorded under `~/.sam_data/environment_setup.json`.
 Failed steps are marked blocked with a timestamp and attempt count. Rerunning
-the installer repeats its idempotent setup stages, reuses a supported
-environment, skips models already installed, and preserves user settings and
-data. If replacement-environment dependency installation fails, the previous
+the installer rechecks each stage, reuses a supported environment, and skips
+dependency installation when every selected group already satisfies the
+manifest's package constraints. It also skips models already installed and
+preserves user settings and data. If replacement-environment dependency installation fails, the previous
 environment is restored when one exists and the failed candidate is retained
 for diagnosis. This is safe rerun recovery; it does not claim to resume a
 partially downloaded package at byte offset.
