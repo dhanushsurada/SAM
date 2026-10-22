@@ -1,222 +1,180 @@
 #!/bin/bash
-# SAM Setup Script
-# Run once on your Mac after cloning the repo.
-# Usage: chmod +x setup.sh && ./setup.sh
+# SAM macOS source-based developer setup.
+# Builds the Tauri .app from this checkout; this is not a consumer DMG installer.
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-echo -e "${BLUE}"
-echo "  ╔═══════════════════════════════════╗"
-echo "  ║          SAM — Setup              ║"
-echo "  ║  Personal AI. Fully Local.        ║"
-echo "  ╚═══════════════════════════════════╝"
-echo -e "${NC}"
-
-# ─── Check macOS ──────────────────────────────────────────────────────────
 if [[ "$(uname)" != "Darwin" ]]; then
-    echo -e "${RED}ERROR: SAM setup requires macOS${NC}"
+  echo "ERROR: setup.sh supports macOS only." >&2
+  exit 1
+fi
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Homebrew is required. Install it from https://brew.sh, then rerun setup.sh." >&2
+  exit 1
+fi
+
+for tool in python3 node npm cargo; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Missing $tool. Install Python 3, Node.js, and Rust toolchain, then rerun." >&2
     exit 1
-fi
+  fi
+done
 
-# ─── Check Apple Silicon ──────────────────────────────────────────────────
-CHIP=$(uname -m)
-if [[ "$CHIP" != "arm64" ]]; then
-    echo -e "${YELLOW}WARNING: Intel Mac detected. Performance will be significantly lower.${NC}"
-    echo -e "${YELLOW}SAM is optimised for Apple Silicon (M1/M2/M3).${NC}"
-fi
-
-echo -e "${GREEN}[1/8] Checking Python...${NC}"
-if ! command -v python3 &> /dev/null; then
-    echo "Python3 not found. Installing via Homebrew..."
-    if ! command -v brew &> /dev/null; then
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    fi
-    brew install python3
-fi
-if command -v python3.11 >/dev/null 2>&1; then
-    PYTHON=python3.11
-elif command -v python3.12 >/dev/null 2>&1; then
-    PYTHON=python3.12
-else
-    PYTHON=python3
-fi
-
-PYTHON_VERSION=$($PYTHON --version)
-echo "  Found: $PYTHON_VERSION"
-
-echo -e "${GREEN}[1.5/8] Checking PortAudio...${NC}"
+PYTHON=python3
+if command -v python3.12 >/dev/null 2>&1; then PYTHON=python3.12; fi
+if command -v python3.11 >/dev/null 2>&1; then PYTHON=python3.11; fi
 
 if ! brew list portaudio >/dev/null 2>&1; then
-    echo "  Installing PortAudio..."
-    brew install portaudio
-else
-    echo "  PortAudio already installed"
+  echo "Installing PortAudio (Homebrew)..."
+  brew install portaudio
 fi
 
-echo -e "${GREEN}[2/8] Installing Ollama...${NC}"
-if ! command -v ollama &> /dev/null; then
-    echo "  Downloading Ollama..."
+if [[ ! -x .venv/bin/python ]]; then
+  if [[ -e .venv ]]; then
+    echo "An incomplete .venv exists. Move it aside yourself and rerun; setup will not delete it." >&2
+    exit 1
+  fi
+  "$PYTHON" -m venv .venv
+fi
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m playwright install chromium
+
+mkdir -p "$HOME/.sam_data/logs" "$HOME/.sam_data/memory/chroma" \
+  "$HOME/.sam_data/founder_mode/export" "$HOME/.sam_data/skills/compiled"
+
+if ! command -v ollama >/dev/null 2>&1; then
+  read -r -p "Ollama is required. Install it now using the official Ollama installer? [y/N] " answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
     curl -fsSL https://ollama.com/install.sh | sh
-    echo "  Ollama installed"
+  else
+    echo "Install Ollama from https://ollama.com/download and rerun setup.sh." >&2
+    exit 1
+  fi
+  if ! command -v ollama >/dev/null 2>&1; then
+    echo "Ollama installer completed but ollama is not on PATH. Restart the terminal and rerun setup.sh." >&2
+    exit 1
+  fi
+fi
+
+if ! curl --silent --fail --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then
+  echo "Starting Ollama..."
+  (ollama serve >/dev/null 2>&1 &)
+fi
+OLLAMA_READY=false
+for _ in {1..60}; do
+  if curl --silent --fail --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then
+    OLLAMA_READY=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$OLLAMA_READY" != true ]]; then
+  echo "Ollama did not become ready within 60 seconds. Start it and rerun setup.sh." >&2
+  exit 1
+fi
+
+# Read existing Settings values. The setup script never rewrites settings.yaml
+# and asks before downloading any model (which can require many GB of storage).
+MODEL_LIST=$(.venv/bin/python - <<'PY'
+from config.settings import Settings
+s = Settings()
+for item in (s.primary_model, s.fallback_model, s.embedding_model, s.vision_model):
+    print(item or "")
+PY
+)
+MODELS=()
+while IFS= read -r model_line; do MODELS+=("$model_line"); done <<< "$MODEL_LIST"
+LABELS=("Primary model" "Fallback model" "Embedding model" "Vision model")
+for i in "${!MODELS[@]}"; do
+  model="${MODELS[$i]}"
+  [[ -n "$model" ]] || continue
+  if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "$model"; then
+    echo "${LABELS[$i]} already installed: $model"
+    continue
+  fi
+  read -r -p "Download ${LABELS[$i]} '$model'? Model downloads may be several GB. [y/N] " answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    ollama pull "$model"
+  else
+    echo "Skipped $model; you can download it later from SAM Settings."
+  fi
+done
+
+echo "Installing desktop frontend dependencies and building the native app..."
+(
+  cd interfaces/desktop
+  npm ci
+  npm run tauri -- build --bundles app
+)
+
+APP_PATH="$SCRIPT_DIR/interfaces/desktop/src-tauri/target/release/bundle/macos/SAM.app"
+if [[ ! -d "$APP_PATH" ]]; then
+  echo "Tauri build completed but expected app was not found: $APP_PATH" >&2
+  exit 1
+fi
+
+# Configuration is deliberately outside the source tree. Refresh checkout
+# paths while preserving the user's configured API endpoint.
+RUNTIME_CONFIG="$HOME/.sam_data/desktop-runtime.json"
+if [[ ! -e "$RUNTIME_CONFIG" ]]; then
+  API_PORT=$(.venv/bin/python -c 'from config.settings import Settings; print(Settings().api_port)')
+  SAM_ROOT="$SCRIPT_DIR" SAM_PYTHON="$SCRIPT_DIR/.venv/bin/python" \
+  SAM_CLI="$SCRIPT_DIR/sam_cli.py" SAM_API="http://127.0.0.1:$API_PORT" \
+    .venv/bin/python - <<'PY'
+import json, os
+from pathlib import Path
+path = Path.home() / ".sam_data" / "desktop-runtime.json"
+config = {
+    "app_root": os.environ["SAM_ROOT"],
+    "resources_dir": os.environ["SAM_ROOT"],
+    "sam_cli": os.environ["SAM_CLI"],
+    "python": os.environ["SAM_PYTHON"],
+    "api_base_url": os.environ["SAM_API"],
+    "environment_path": os.environ.get("PATH", ""),
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
 else
-    echo "  Ollama already installed"
+  SAM_ROOT="$SCRIPT_DIR" SAM_PYTHON="$SCRIPT_DIR/.venv/bin/python" \
+  SAM_CLI="$SCRIPT_DIR/sam_cli.py" \
+  SAM_PATH="$PATH" \
+    .venv/bin/python - <<'PY'
+import json, os
+from pathlib import Path
+path = Path.home() / ".sam_data" / "desktop-runtime.json"
+existing = json.loads(path.read_text())
+existing.update({
+    "app_root": os.environ["SAM_ROOT"],
+    "resources_dir": os.environ["SAM_ROOT"],
+    "sam_cli": os.environ["SAM_CLI"],
+    "python": os.environ["SAM_PYTHON"],
+    "environment_path": os.environ["SAM_PATH"],
+})
+existing.setdefault("api_base_url", "http://127.0.0.1:8420")
+path.write_text(json.dumps(existing, indent=2) + "\n")
+PY
+  echo "Updated runtime paths and preserved API endpoint: $RUNTIME_CONFIG"
 fi
 
-echo -e "${GREEN}[3/8] Starting Ollama...${NC}"
-ollama serve &>/dev/null &
-OLLAMA_PID=$!
-sleep 3
-
-echo -e "${GREEN}[4/8] Pulling AI models (this takes time — grab a coffee)...${NC}"
-
-# Detect RAM to pull right model
-RAM_GB=$(sysctl -n hw.memsize | awk '{print int($1/1073741824)}')
-echo "  Detected RAM: ${RAM_GB}GB"
-
-if [ "$RAM_GB" -ge 32 ]; then
-    MODEL="qwen2.5:32b"
-elif [ "$RAM_GB" -ge 16 ]; then
-    MODEL="qwen2.5:14b"
-else
-    MODEL="qwen2.5:7b"
+# Migrate the legacy backend launch agent only after the replacement app and
+# runtime configuration are ready. Preserve the plist as a disabled backup.
+LEGACY_PLIST="$HOME/Library/LaunchAgents/ai.sam.assistant.plist"
+if [[ -f "$LEGACY_PLIST" ]]; then
+  if ! launchctl bootout "gui/$(id -u)" "$LEGACY_PLIST" >/dev/null 2>&1 \
+      && launchctl print "gui/$(id -u)/ai.sam.assistant" >/dev/null 2>&1; then
+    echo "The legacy ai.sam.assistant launchd job is still loaded; refusing to start a second backend manager." >&2
+    exit 1
+  fi
+  LEGACY_BACKUP="$LEGACY_PLIST.disabled"
+  if [[ -e "$LEGACY_BACKUP" ]]; then LEGACY_BACKUP="$LEGACY_PLIST.disabled.$(date +%Y%m%d%H%M%S)"; fi
+  mv "$LEGACY_PLIST" "$LEGACY_BACKUP"
+  echo "Disabled legacy launch agent and preserved it at $LEGACY_BACKUP"
 fi
 
-echo "  Pulling brain model: $MODEL"
-ollama pull $MODEL
-
-echo "  Pulling embedding model: nomic-embed-text"
-ollama pull nomic-embed-text
-
-echo "  Pulling vision model: moondream"
-ollama pull moondream
-
-echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
-
-if command -v python3.11 >/dev/null 2>&1; then
-    PYTHON=python3.11
-elif command -v python3.12 >/dev/null 2>&1; then
-    PYTHON=python3.12
-else
-    PYTHON=python3
-fi
-
-echo "  Using Python: $($PYTHON --version)"
-
-if [ -d ".venv" ] && [ -x ".venv/bin/python3" ]; then
-    echo "  Existing .venv found — reusing it (run 'rm -rf .venv' first for a clean rebuild)"
-else
-    if [ -d ".venv" ]; then
-        echo -e "${YELLOW}  .venv exists but looks incomplete — recreating it${NC}"
-        rm -rf .venv
-    fi
-    $PYTHON -m venv .venv
-fi
-source .venv/bin/activate
-pip install --upgrade pip --quiet
-
-echo -e "${GREEN}[6/8] Installing Python packages...${NC}"
-# Safe to re-run: pip install is idempotent and repairs a partial/broken
-# env (missing or outdated packages) without touching unrelated ones.
-pip install -r requirements.txt --quiet
-
-echo "  Installing Playwright browsers..."
-playwright install chromium
-
-echo -e "${GREEN}[7/8] Initializing ~/.sam_data...${NC}"
-# All persistent SAM data lives under ~/.sam_data (see config/settings.py),
-# not inside the repo — this survives reinstalls/clones. The old
-# repo-relative dirs this step used to create (logs/, memory/store/,
-# founder_mode/store/, skills/compiled/, skills/library/) are no longer
-# read by any code path (memory/store.py, founder_mode/manager.py, and
-# skills/compiler.py all migrated to ~/.sam_data — see skills/compiler.py's
-# docstring for that migration's history). Left untouched here, never
-# deleted, in case anything legacy is still sitting in them.
-mkdir -p "$HOME/.sam_data/logs"
-mkdir -p "$HOME/.sam_data/memory/chroma"
-mkdir -p "$HOME/.sam_data/founder_mode/export"
-mkdir -p "$HOME/.sam_data/skills/compiled"
-
-echo -e "${GREEN}[8/8] Installing launchd agent (auto-start on boot)...${NC}"
-PLIST_PATH="$HOME/Library/LaunchAgents/ai.sam.assistant.plist"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Idempotent reinstall: if the agent is already loaded, unload it *before*
-# overwriting its plist. Without this, launchd keeps running the job as it
-# was defined at last load while the file on disk changes underneath it —
-# the two silently drift apart until the next reboot happens to re-read it.
-AGENT_WAS_LOADED=false
-if launchctl list 2>/dev/null | grep -q "ai.sam.assistant"; then
-    AGENT_WAS_LOADED=true
-    echo "  Existing agent is loaded — unloading before update..."
-    if ! launchctl unload "$PLIST_PATH" 2>/tmp/sam_launchd_unload_err; then
-        echo -e "${YELLOW}  WARNING: launchctl unload reported an error:${NC}"
-        cat /tmp/sam_launchd_unload_err
-        echo -e "${YELLOW}  Continuing — the plist will still be rewritten and (re)loaded below.${NC}"
-    fi
-    rm -f /tmp/sam_launchd_unload_err
-fi
-
-cat > "$PLIST_PATH" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>ai.sam.assistant</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$SCRIPT_DIR/.venv/bin/python3</string>
-        <string>$SCRIPT_DIR/main.py</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>$SCRIPT_DIR</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>$SCRIPT_DIR/logs/sam.log</string>
-    <key>StandardErrorPath</key>
-    <string>$SCRIPT_DIR/logs/sam_error.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
-    </dict>
-</dict>
-</plist>
-EOF
-
-if launchctl load "$PLIST_PATH" 2>/tmp/sam_launchd_load_err; then
-    if [ "$AGENT_WAS_LOADED" = true ]; then
-        echo "  launchd agent reinstalled (was already running) at $PLIST_PATH"
-    else
-        echo "  launchd agent freshly installed at $PLIST_PATH"
-    fi
-else
-    echo -e "${RED}  ERROR: launchctl load failed:${NC}"
-    cat /tmp/sam_launchd_load_err
-    echo -e "${YELLOW}  The plist was written to $PLIST_PATH but is not loaded.${NC}"
-    echo -e "${YELLOW}  SAM will still run manually (see 'To start SAM now' below); auto-start on boot will not work until this is resolved.${NC}"
-fi
-rm -f /tmp/sam_launchd_load_err
-
-echo ""
-echo -e "${BLUE}╔═══════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                 SAM Setup Complete!                  ║${NC}"
-echo -e "${BLUE}╠═══════════════════════════════════════════════════════╣${NC}"
-echo -e "${BLUE}║  Brain model: ${GREEN}$MODEL${BLUE}                       ║${NC}"
-echo -e "${BLUE}║                                                       ║${NC}"
-echo -e "${BLUE}║  To start SAM now:                                    ║${NC}"
-echo -e "${BLUE}║  ${GREEN}source .venv/bin/activate && python main.py${BLUE}        ║${NC}"
-echo -e "${BLUE}║                                                       ║${NC}"
-echo -e "${BLUE}║  SAM will auto-start on every boot via launchd.      ║${NC}"
-echo -e "${BLUE}║  Say ${GREEN}'Hey SAM'${BLUE} to wake it.                         ║${NC}"
-echo -e "${BLUE}╚═══════════════════════════════════════════════════════╝${NC}"
-echo ""
+echo "Setup complete. Launching the SAM app: $APP_PATH"
+echo "The desktop app owns the SAM API lifecycle; no launchd backend job was installed."
+open "$APP_PATH"

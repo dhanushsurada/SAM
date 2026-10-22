@@ -20,7 +20,7 @@ export interface BrainState {
 }
 
 function describe(e: unknown): string {
-  return e instanceof ApiError ? e.detail : "Couldn't reach the SAM gateway. Is it running on port 8420?";
+  return e instanceof ApiError ? e.detail : "Couldn't reach the configured SAM gateway. Check runtime status in Settings.";
 }
 
 /**

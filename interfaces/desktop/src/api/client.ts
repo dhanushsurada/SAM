@@ -8,6 +8,7 @@ import type {
   ModelSelectRequest,
 } from "./types";
 import { TERMINAL_PHASES } from "./types";
+import { isNative, runtimeApiBaseUrl } from "@/lib/native";
 
 const BASE = "/api/iqoo";
 // SAM Core routes (Brain/model selection) sit beside /api/iqoo, not under it:
@@ -25,8 +26,13 @@ export class ApiError extends Error {
   }
 }
 
+async function endpoint(path: string, base: string): Promise<string> {
+  if (isNative()) return `${(await runtimeApiBaseUrl()).replace(/\/$/, "")}${base}${path}`;
+  return `${base}${path}`;
+}
+
 async function request<T>(path: string, init?: RequestInit, base: string = BASE): Promise<T> {
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(await endpoint(path, base), {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -110,20 +116,27 @@ export function subscribeToTaskEvents(
   onEvent: (event: ExecutionEvent) => void,
   onError?: (err: Event) => void
 ): () => void {
-  const source = new EventSource(`${BASE}/tasks/${encodeURIComponent(taskId)}/events`);
-
-  source.onmessage = (msg: MessageEvent<string>) => {
-    try {
-      const event = JSON.parse(msg.data) as ExecutionEvent;
-      onEvent(event);
-      if (TERMINAL_PHASES.has(event.phase as never)) {
-        source.close();
+  let source: EventSource | undefined;
+  let cancelled = false;
+  void endpoint(`/tasks/${encodeURIComponent(taskId)}/events`, BASE).then((url) => {
+    if (cancelled) return;
+    source = new EventSource(url);
+    source.onmessage = (msg: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(msg.data) as ExecutionEvent;
+        onEvent(event);
+        if (TERMINAL_PHASES.has(event.phase as never)) source?.close();
+      } catch {
+        // A malformed payload shouldn't take the whole stream down.
       }
-    } catch {
-      // A malformed payload shouldn't take the whole stream down.
-    }
-  };
-  if (onError) source.onerror = onError;
+    };
+    if (onError) source.onerror = onError;
+  }).catch(() => {
+    if (!cancelled && onError) onError(new Event("error"));
+  });
 
-  return () => source.close();
+  return () => {
+    cancelled = true;
+    source?.close();
+  };
 }

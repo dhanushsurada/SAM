@@ -10,6 +10,8 @@
  * browser-fallback either way — nothing here is a placeholder.
  */
 
+import type { BrainStatus } from "@/api/types";
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
@@ -180,6 +182,10 @@ export function runtimeStatus(): Promise<RuntimeSnapshot> {
   return invokeNative<RuntimeSnapshot>("runtime_status");
 }
 
+export function runtimeApiBaseUrl(): Promise<string> {
+  return invokeNative<string>("runtime_api_base_url");
+}
+
 export function runtimeStart(process?: ProcessName): Promise<LifecycleResponse> {
   return invokeNative<LifecycleResponse>("runtime_start", { process: process ?? null });
 }
@@ -205,12 +211,12 @@ export function ollamaStart(): Promise<OllamaActionResult> {
  * `unknown` here rather than guessed at and re-typed; callers that need
  * fields from it should narrow from the same place /brain does, not
  * from a second, possibly-drifting type defined only in this file. */
-export function modelsList(): Promise<unknown> {
-  return invokeNative("models_list");
+export function modelsList(): Promise<BrainStatus> {
+  return invokeNative<BrainStatus>("models_list");
 }
 
-export function modelSelect(name: string): Promise<unknown> {
-  return invokeNative("model_select", { name });
+export function modelSelect(name: string): Promise<BrainStatus> {
+  return invokeNative<BrainStatus>("model_select", { name });
 }
 
 /** Starts a pull; progress arrives via onModelPullProgress(), not via

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusPill } from "@/components/StatusPill";
 import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
+import { useRuntime, useRuntimePolling } from "@/stores/runtime";
+import { isNative } from "@/lib/native";
 
 const STEPS = ["Welcome", "System check", "Model & voice", "Permissions", "Configuration", "Ready"] as const;
 
@@ -12,8 +14,29 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const navigate = useNavigate();
   const { health, healthLoading, healthError, refreshHealth } = useTaskSession();
+  const runtime = useRuntime();
+  const native = isNative();
+  useRuntimePolling();
+  const [modelName, setModelName] = useState("");
 
-  const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  useEffect(() => {
+    if (!native) return;
+    void runtime.refreshModels();
+  }, [native, runtime.refreshModels]);
+  useEffect(() => {
+    if (!native) return;
+    if (step !== 2 || (runtime.models && !runtime.modelsError)) return;
+    const timer = setInterval(() => void runtime.refreshModels(), 4000);
+    return () => clearInterval(timer);
+  }, [native, step, runtime.models, runtime.modelsError, runtime.refreshModels]);
+  useEffect(() => {
+    if (runtime.models?.selected_model && !modelName) setModelName(runtime.models.selected_model);
+  }, [runtime.models, modelName]);
+
+  const next = () => {
+    if (step === 0) void runtime.advanceSetupState("in_progress");
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  };
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
   return (
@@ -52,11 +75,10 @@ export function OnboardingPage() {
                 <h2 className="text-base font-medium">System check</h2>
                 <ModeBadge mode="live" />
               </div>
-              <p className="text-sm text-mute">Checking whether SAM's gateway is reachable on port 8420.</p>
+              <p className="text-sm text-mute">Checking whether the configured SAM gateway is reachable.</p>
               {healthError && (
                 <p className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-xs text-danger">
-                  Can't reach it — make sure you've run the installer and started the server
-                  (<code className="font-mono-data">python main.py</code>, or the packaged app).
+                  Can't reach the local SAM API yet. The installed desktop app starts it automatically; check its runtime configuration or retry the API from Settings.
                 </p>
               )}
               {health && !healthError && (
@@ -74,6 +96,7 @@ export function OnboardingPage() {
               <Button variant="secondary" size="sm" onClick={refreshHealth} loading={healthLoading}>
                 Re-check
               </Button>
+              {healthError && native && <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>}
               <p className="text-xs text-mute">
                 This only checks the iQOO gateway — it's the one thing this browser tab can
                 actually reach. Not being able to continue past this step isn't required; you can
@@ -85,22 +108,23 @@ export function OnboardingPage() {
           {step === 2 && (
             <div className="space-y-3">
               <h2 className="text-base font-medium">Model & voice</h2>
-              <p className="text-sm text-mute">
-                Both happen outside this browser — nothing here can install a model or grant
-                microphone access to a native process. Genuinely nothing to verify from a browser
-                tab for either, so this step is informational rather than an interactive check
-                that would just be theater.
-              </p>
-              <div className="rounded-md border border-line bg-void px-3 py-2">
-                <p className="font-mono-data text-xs text-mute">ollama pull qwen2.5:14b</p>
-                <p className="font-mono-data text-xs text-mute">ollama pull qwen2.5:7b # fallback</p>
+              {!native && <p className="text-xs text-mute">Runtime controls are available in the installed SAM desktop app.</p>}
+              <p className="text-sm text-mute">Ollama and the installed models are read from SAM's shared runtime state. Downloads may be several GB; review the model name before starting one.</p>
+              {runtime.snapshot?.ollama && <p className="text-xs text-mute">Ollama: {runtime.snapshot.ollama.state} — {runtime.snapshot.ollama.detail}</p>}
+              {runtime.snapshot?.ollama.state !== "READY" && <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>}
+              <div className="flex gap-2">
+                <input aria-label="Model name" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="e.g. qwen2.5:14b" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm" />
+                <Button variant="secondary" size="sm" onClick={() => void runtime.refreshModels()} loading={runtime.modelsLoading}>Refresh</Button>
               </div>
-              <p className="text-xs text-mute">
-                Wake-word listening runs as a native process on this machine, not through a
-                browser tab — there's no permission here for it to request. Voice attachments sent
-                through the iQOO phone gateway are a separate, later concept, handled on the phone
-                itself.
-              </p>
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.pullModel(modelName)}>Download model</Button>
+                <Button variant="primary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.selectModel(modelName)}>Use this model</Button>
+              </div>
+              {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}
+              {runtime.pullError && <p className="text-xs text-danger">{runtime.pullError}</p>}
+              {runtime.modelsError && <p className="text-xs text-danger">{runtime.modelsError}</p>}
+              <p className="text-xs text-mute">Configured primary: {runtime.models?.selected_model ?? "loading"}; installed: {runtime.models?.models.map((m) => m.name).join(", ") || "none detected"}.</p>
+              <p className="text-xs text-mute">Voice permissions and wake-word controls are managed separately by macOS and SAM's runtime.</p>
             </div>
           )}
 
@@ -139,7 +163,7 @@ export function OnboardingPage() {
                 Command Center is the home screen — its quick input runs on the same live gateway
                 you just checked.
               </p>
-              <Button variant="primary" onClick={() => navigate("/")}>
+              <Button variant="primary" onClick={() => { void runtime.advanceSetupState("complete", modelName || runtime.models?.selected_model); navigate("/"); }}>
                 Go to Command Center
               </Button>
             </div>

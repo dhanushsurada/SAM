@@ -50,6 +50,28 @@ class ModelPullRouteTests(unittest.TestCase):
         response = self.client.post("/api/models/pull", json={"model": ""})
         self.assertEqual(response.status_code, 422)
 
+    def test_tauri_webview_origin_can_preflight_api_requests(self):
+        response = self.client.options(
+            "/api/iqoo/tasks",
+            headers={
+                "Origin": "tauri://localhost",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "tauri://localhost")
+
+    def test_unlisted_origin_is_not_granted_cors_access(self):
+        response = self.client.options(
+            "/api/iqoo/tasks",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        self.assertNotIn("access-control-allow-origin", response.headers)
+
 
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(
