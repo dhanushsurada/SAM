@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
-import { isNative } from "@/lib/native";
+import { isNative, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
 import { getEnvironmentReport, type EnvironmentReport } from "@/api/client";
 
 const STEPS = ["Welcome", "System check", "Model & voice", "Permissions", "Configuration", "Ready"] as const;
@@ -21,6 +22,9 @@ export function OnboardingPage() {
   const [modelName, setModelName] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentReport | null>(null);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
+  const [confirmPull, setConfirmPull] = useState(false);
+  const [ollamaActionMessage, setOllamaActionMessage] = useState<string | null>(null);
+  const [runtimeRepairMessage, setRuntimeRepairMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!native) return;
@@ -48,6 +52,28 @@ export function OnboardingPage() {
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
   };
   const back = () => setStep((s) => Math.max(s - 1, 0));
+  const startOllama = async () => {
+    setOllamaActionMessage(null);
+    try {
+      const result = await runtime.startOllama();
+      setOllamaActionMessage(result.message);
+    } catch (error) {
+      setOllamaActionMessage(error instanceof Error ? error.message : "Could not start Ollama.");
+    }
+  };
+  const repairRuntime = async () => {
+    setRuntimeRepairMessage(null);
+    try {
+      await repairRuntimeConfiguration();
+      await runtime.startProcess("api");
+      await runtime.refresh();
+      setRuntimeRepairMessage("SAM runtime setup was repaired and the API start was requested.");
+      await refreshHealth();
+    } catch (error) {
+      setRuntimeRepairMessage(error instanceof Error ? error.message : "Reinstall SAM from its DMG, then try again.");
+    }
+  };
+  const installedModel = Boolean(runtime.models?.models.some((model) => model.name === modelName));
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-void px-4 py-10 text-ink">
@@ -114,6 +140,11 @@ export function OnboardingPage() {
                 Re-check
               </Button>
               {healthError && native && <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>}
+              {native && runtime.error && <div className="space-y-2">
+                <p role="alert" className="text-xs text-danger">Desktop runtime: {runtime.error}</p>
+                <Button variant="secondary" size="sm" onClick={() => void repairRuntime()}>Repair runtime setup</Button>
+                {runtimeRepairMessage && <p role="status" className="text-xs text-mute">{runtimeRepairMessage}</p>}
+              </div>}
               <p className="text-xs text-mute">
                 This only checks the iQOO gateway — it's the one thing this browser tab can
                 actually reach. Not being able to continue past this step isn't required; you can
@@ -131,15 +162,25 @@ export function OnboardingPage() {
                 {environment.environment.hardware.disk.free_gb ?? "Unknown"} GB free on the home volume. Model size varies; Ollama reports byte progress after you start a download. Downloads are always started by your explicit action.
               </p>}
               {runtime.snapshot?.ollama && <p className="text-xs text-mute">Ollama: {runtime.snapshot.ollama.state} — {runtime.snapshot.ollama.detail}</p>}
-              {runtime.snapshot?.ollama.state !== "READY" && <Button variant="secondary" size="sm" onClick={() => void runtime.startOllama()}>Start Ollama</Button>}
+              {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <div className="space-y-2 rounded-md border border-line bg-void p-3">
+                <p className="text-sm text-ink">Ollama is needed for local models. SAM does not bundle it.</p>
+                <p className="text-xs text-mute">Install the official Ollama macOS app. After installation, return here and refresh. You may also connect SAM to an Ollama server configured in Settings.</p>
+                <Button variant="secondary" size="sm" onClick={() => void openOllamaDownload().catch((error) => setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama download page."))}>Get Ollama for macOS</Button>
+              </div>}
+              {runtime.snapshot?.ollama.state === "STOPPED" && <div className="space-y-2">
+                <p className="text-xs text-mute">Ollama is installed but not responding. Start it or check the configured host.</p>
+                <Button variant="secondary" size="sm" onClick={() => void startOllama()}>Start Ollama</Button>
+              </div>}
+              {runtime.snapshot?.ollama.state === "READY" && runtime.models?.models.length === 0 && <p className="text-xs text-warn">No model is installed. Model-backed chat, planning, and other Brain features stay unavailable until you choose and download a model.</p>}
+              {ollamaActionMessage && <p role="status" className="text-xs text-mute">{ollamaActionMessage}</p>}
               <div className="flex gap-2">
                 <input aria-label="Model name" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="e.g. qwen2.5:14b" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm" />
                 <Button variant="secondary" size="sm" onClick={() => void runtime.refreshModels()} loading={runtime.modelsLoading}>Refresh</Button>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.pullModel(modelName)}>Download model</Button>
+                <Button variant="secondary" size="sm" disabled={!modelName.trim() || runtime.pulling || runtime.snapshot?.ollama.state !== "READY"} onClick={() => setConfirmPull(true)}>{runtime.pullError ? "Retry model download" : "Download model"}</Button>
                 {runtime.pulling && <Button variant="ghost" size="sm" onClick={() => void runtime.cancelPull()}>Cancel download</Button>}
-                <Button variant="primary" size="sm" disabled={!modelName || runtime.pulling} onClick={() => void runtime.selectModel(modelName)}>Use this model</Button>
+                <Button variant="primary" size="sm" disabled={!installedModel || runtime.pulling} onClick={() => void runtime.selectModel(modelName)}>Use this model</Button>
               </div>
               {runtime.pullProgress && <p className="text-xs text-mute">{runtime.pullProgress.name}: {runtime.pullProgress.status}{runtime.pullProgress.total ? ` (${Math.round(100 * (runtime.pullProgress.completed ?? 0) / runtime.pullProgress.total)}%)` : ""}</p>}
               {runtime.pullError && <p className="text-xs text-danger">{runtime.pullError}</p>}
@@ -190,6 +231,16 @@ export function OnboardingPage() {
             </div>
           )}
         </Card>
+
+        <ConfirmDialog
+          open={confirmPull}
+          title="Download this model?"
+          description={`Ollama will download ${modelName || "the selected model"}. Model downloads can require several gigabytes of storage and network data. Review available disk space above before confirming. You can cancel and retry later.`}
+          confirmLabel="Download model"
+          destructive={false}
+          onConfirm={() => { setConfirmPull(false); if (modelName.trim()) void runtime.pullModel(modelName.trim()); }}
+          onCancel={() => setConfirmPull(false)}
+        />
 
         <div className="flex justify-between">
           <Button variant="ghost" size="sm" onClick={back} disabled={step === 0}>
