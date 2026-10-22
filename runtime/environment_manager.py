@@ -294,10 +294,12 @@ class EnvironmentCompatibilityManager:
         except CompatibilityError as exc:
             issues.append({"severity": "error", "area": "python", "message": str(exc)})
         try:
-            tool_names = ("node", "npm", "rust") if platform.system() in {"Darwin", "Windows"} else ()
+            has_desktop_sources = (self.root / "interfaces" / "desktop" / "src-tauri").is_dir()
+            tool_names = (("node", "npm", "rust")
+                          if has_desktop_sources and platform.system() in {"Darwin", "Windows"} else ())
             if tool_names:
                 check_tools(self.manifest, names=tool_names, which=self.which, runner=self.runner)
-            if platform.system() == "Darwin":
+            if has_desktop_sources and platform.system() == "Darwin":
                 for executable, label, args in (
                     ("brew", "Homebrew", ["--version"]),
                     ("xcode-select", "Apple Command Line Tools", ["-p"]),
