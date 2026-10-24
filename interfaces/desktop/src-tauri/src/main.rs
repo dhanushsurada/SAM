@@ -46,7 +46,21 @@ use tauri_plugin_autostart::ManagerExt;
 /// this file from depending on `Shortcut::new` being a `const fn`, which
 /// wasn't worth confirming from memory alone.
 fn quick_assistant_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space)
+    // Cmd+Shift+Space on macOS. Ctrl+Shift+Space elsewhere: Win+Shift+Space
+    // is reserved by Windows for input-language switching.
+    #[cfg(target_os = "macos")]
+    let modifiers = Modifiers::SUPER | Modifiers::SHIFT;
+    #[cfg(not(target_os = "macos"))]
+    let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
+    Shortcut::new(Some(modifiers), Code::Space)
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
 }
 
 fn toggle_quick_assistant(app: &tauri::AppHandle) {
@@ -88,6 +102,11 @@ fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<bool, Str
 
 fn main() {
     tauri::Builder::default()
+        // A second launch (double-click, Start menu, installer finish page)
+        // must focus the running app, not start a second backend.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -164,15 +183,21 @@ fn main() {
             // reads wrong in one of the two.
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&tray_menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
                     }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => show_main_window(app),
                     "quick" => toggle_quick_assistant(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -204,20 +229,21 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building SAM")
         .run(|app_handle, event| {
+            // Quit (tray, Cmd+Q, installer-initiated close): stop the Python
+            // backend so nothing keeps the app's files locked.
+            if let RunEvent::Exit = event {
+                runtime::shutdown_backend();
+                return;
+            }
             // Clicking the Dock icon while SAM has no visible window
-            // (e.g. after CloseRequested hid it) should reopen the main
-            // window — the convention every native Mac app follows.
-            if let RunEvent::Reopen {
-                has_visible_windows,
-                ..
-            } = event
-            {
+            // reopens it. This event exists on macOS only.
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { has_visible_windows, .. } = event {
                 if !has_visible_windows {
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
+                    show_main_window(app_handle);
                 }
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = app_handle;
         });
 }

@@ -218,8 +218,8 @@ export function ollamaStart(): Promise<OllamaActionResult> {
   return invokeNative<OllamaActionResult>("ollama_start");
 }
 
-export function openOllamaDownload(): Promise<void> {
-  return invokeNative<void>("open_ollama_download");
+export function openOllamaDownload(): Promise<string> {
+  return invokeNative<string>("open_ollama_download");
 }
 
 export function repairRuntimeConfiguration(): Promise<void> {

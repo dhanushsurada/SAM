@@ -1,9 +1,50 @@
 # SAM Desktop installation and recovery
 
-SAM currently has two macOS paths with different purposes: a source-based
-developer setup and a separately built consumer app/DMG. The consumer bundle
-path is implemented in packaging code but has not been built or validated in
-this change. Linux and Windows remain source-based paths described below.
+SAM ships as a consumer installer on **Windows (NSIS .exe), macOS (DMG) and
+Linux (.deb / AppImage)**. Each embeds a managed Python runtime and the core
+dependency group, so end users install nothing else except Ollama (guided from
+first run). Source-based developer setups (`setup.sh`, `setup_linux.sh`,
+`setup_windows.ps1`) remain available. End-user instructions are in
+[`INSTALL.md`](../../INSTALL.md); this document is the maintainer reference.
+
+## Pipeline
+
+```
+scripts/stage_runtime.py        build the relocatable runtime on the target OS/arch
+  -> source/  python/  site-packages/  bundle.json   (resources/sam-runtime)
+scripts/smoke_test_runtime.py   start API via sam_cli, hit /api/iqoo/health + /api/environment, stop, assert port freed
+tauri build                     per-OS targets from tauri.<os>.conf.json
+  Windows  NSIS setup.exe  (per-user install, no UAC, WebView2 bootstrapper embedded,
+                            installer-hooks.nsh stops running SAM before upgrade/uninstall,
+                            asks before deleting ~/.sam_data)
+  macOS    .app + .dmg     (hardened runtime, Entitlements.plist, Info.plist usage strings,
+                            scripts/macos_sign_runtime.sh signs nested Mach-O when a Developer ID is set)
+  Linux    .deb + AppImage
+.github/workflows/release.yml   matrix build + install-test + SHA256SUMS.txt + draft GitHub release
+.github/workflows/ci.yml        pytest (3.11/3.12), frontend build, cargo check x3 OS, runtime smoke x3 OS, script lint
+scripts/install.sh|install.ps1  one-line bootstrap installers (checksum-verified)
+```
+
+Release: `git tag v0.1.0 && git push --tags`. Locally on the target OS:
+`cd interfaces/desktop && npm ci && npm run package`.
+
+Asset names (consumed by the bootstrap scripts): `SAM_<ver>_windows-x86_64-setup.exe`,
+`SAM_<ver>_macos-arm64.dmg`, `SAM_<ver>_macos-x86_64.dmg`,
+`SAM_<ver>_linux-x86_64.deb`, `SAM_<ver>_linux-x86_64.AppImage`, `SHA256SUMS.txt`.
+
+Optional signing secrets (builds are unsigned without them): `APPLE_CERTIFICATE`
+(base64 .p12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`. Windows Authenticode signing is
+not wired up yet (needs a purchased certificate and a `signCommand`).
+
+Runtime behaviour worth knowing: single instance (a second launch focuses the
+first); quitting from the tray stops the Python backend (so installers can
+replace files); the Quick Assistant shortcut is Cmd+Shift+Space on macOS and
+Ctrl+Shift+Space elsewhere; Ollama is located via PATH and the official install
+locations, so it is detected immediately after installation.
+
+Not implemented: in-app auto-update (needs a signing key and update endpoint),
+Windows ARM64 and Linux ARM64 builds, a universal macOS binary.
 
 ## Supported policy and environment manager
 
@@ -50,77 +91,20 @@ environment is restored when one exists and the failed candidate is retained
 for diagnosis. This is safe rerun recovery; it does not claim to resume a
 partially downloaded package at byte offset.
 
-## macOS consumer app and DMG
+## Optional capabilities in the installed app
 
-On a packaging Mac with `uv`, Node/npm, Rust, Xcode Command Line Tools, and
-network access:
+Voice, vision, memory and integrations are not installed by default. Choose a
+capability in Diagnostics; its manifest-constrained packages install under
+`~/.sam_data/python-packages` (outside the read-only app bundle). Vision also
+installs Chromium into the user's Playwright cache. A system prerequisite such
+as PortAudio still needs the platform package manager.
 
-```sh
-cd interfaces/desktop
-npm ci
-npm run package:macos-consumer
-```
-
-The packaging script provisions a managed Python runtime using the manifest's
-preferred supported version, installs the core dependency group, and stages
-SAM source and dependencies as Tauri resources. Tauri bundles the resources
-inside the app and emits an `.app` and `.dmg`; first launch creates
-`~/.sam_data/desktop-runtime.json` with paths derived from the installed app,
-then starts the API automatically. Existing API endpoint configuration is
-preserved when a consumer app initializes its bundled paths.
-
-The package uses the current Mac architecture and does not bundle Ollama or
-large language models. First run guides the user to install the official
-Ollama macOS app, start it or connect to a configured endpoint, then choose a
-model. Downloads require a separate confirmation that explains storage and
-network use; progress, cancellation, and retry are available in onboarding and
-Settings.
-
-The app bundles core Python dependencies and pip as a package-management tool.
-Voice, vision, memory, and integrations are not installed by default. A user
-can choose an optional capability in Diagnostics; its manifest-constrained
-packages are installed under `~/.sam_data/python-packages`, outside the
-read-only app bundle. Capability status reports missing Python packages and
-OS prerequisites separately. The Vision group also installs Chromium into the
-user's Playwright cache. A system prerequisite such as PortAudio still needs
-the documented macOS package-manager route.
-
-Runtime files use stable paths: the app bundle contains the interpreter,
-application source, and core site-packages; `~/.sam_data/desktop-runtime.json`
-stores runtime paths; `~/.sam_data/logs` stores logs; and settings, memory,
-credentials, Ollama models, and optional packages remain in user-owned
-locations. Replacing the app with a newer DMG refreshes bundled resources and
-preserves user data. A damaged runtime config is backed up and reconstructed
-from the current app resources; missing bundle resources produce a repair
-message to reinstall the app.
-
-The default app/DMG is unsigned and architecture specific; this implementation
-path has not been validated as a release. Consumer distribution currently
-targets macOS only. Build arm64 and x86_64 artifacts on matching packaging
-machines; no universal binary or Windows/Linux consumer packages are declared.
-Linux backend setup and Windows MSI remain source/developer paths. Version 1
-uses manual DMG replacement for updates; it has no in-app updater.
-
-For Developer ID signing and notarization, install Xcode Command Line Tools
-and configure `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
-app-specific password), and `APPLE_TEAM_ID` in the packaging shell, then run
-from the repository root:
-
-```sh
-scripts/package_macos_signed_release.sh
-```
-
-The wrapper packages with Tauri signing enabled, submits the DMG to Apple's
-notary service, waits for acceptance, and staples the ticket. Keep credentials
-outside the repository. arm64 and x86_64 require separate packaging runs.
-
-The app-only uninstaller is `scripts/uninstall_macos_consumer.sh`. It removes
-the app bundle and leaves `~/.sam_data`, downloaded models, settings, and
-credentials intact. Passing `--remove-user-data` requests full removal and
-requires typing the complete data path. Ollama and its model store are retained
-in either case. Installing a newer app over the old app is the supported
-upgrade path; the stable user data directory is preserved. There is no
-in-app updater or automatic runtime migration beyond settings schema migrations.
+Runtime files use stable paths: the app bundle holds the interpreter,
+application source and core site-packages; `~/.sam_data/desktop-runtime.json`
+stores runtime paths (rebuilt automatically if damaged); `~/.sam_data/logs`
+holds logs; settings, memory, credentials, Ollama models and optional packages
+stay in user-owned locations. Installing a newer version over the old one
+refreshes bundled resources and preserves user data.
 
 ## Linux developer setup
 
@@ -163,7 +147,8 @@ missing package and prerequisite guidance.
 
 ## Verification status
 
-This document describes the implemented paths and intended behavior. It does
-not assert that native builds, consumer packaging, installers, or first launch
-have been executed successfully. Those checks must be performed separately on
-the target operating systems.
+The Claude handoff reports a successful Linux x86_64 runtime stage, smoke
+test, Tauri `cargo check`, frontend build, and offline test run. Those results
+were not reproduced in this checkout. Windows- and macOS-specific builds,
+installers, signing, and first-launch behavior also remain unverified here;
+use the CI workflows and target machines before publishing a release.

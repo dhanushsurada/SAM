@@ -177,6 +177,15 @@ export function SettingsPage() {
     }
   };
 
+  const getOllama = async () => {
+    setOllamaActionMessage(null);
+    try {
+      setOllamaActionMessage(await openOllamaDownload());
+    } catch (error) {
+      setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama's installation route.");
+    }
+  };
+
   const repairRuntime = async () => {
     setRuntimeRepairing(true);
     setSettingsMessage(null);
@@ -222,11 +231,11 @@ export function SettingsPage() {
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={() => void runtime.startProcess("api")}>Start SAM API</Button>
           {runtime.snapshot?.ollama.state === "NOT_INSTALLED" ?
-            <Button variant="secondary" size="sm" onClick={() => void openOllamaDownload().catch((error) => setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama download page."))}>Get Ollama</Button> :
+            <Button variant="secondary" size="sm" onClick={() => void getOllama()}>Get Ollama</Button> :
             <Button variant="secondary" size="sm" onClick={() => void startOllama()}>Start Ollama</Button>}
           <Button variant="ghost" size="sm" onClick={() => { void runtime.refresh(); void runtime.refreshModels(); }}>Refresh status</Button>
         </div>
-        {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <p className="text-xs text-mute">Install the official Ollama macOS app, then return here and refresh. SAM does not bundle Ollama. You can also configure a reachable Ollama endpoint in the Brain settings.</p>}
+        {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <p className="text-xs text-mute">SAM does not bundle Ollama. Use Get Ollama for the supported installation route, then return and refresh. You can also configure a reachable Ollama endpoint in Brain settings.</p>}
         {runtime.snapshot?.ollama.state === "STOPPED" && <p className="text-xs text-mute">Ollama is installed but not responding. Start it here, open the Ollama app, or check the configured Ollama host.</p>}
         {ollamaActionMessage && <p role="status" className="text-xs text-mute">{ollamaActionMessage}</p>}
         <div className="flex items-center justify-between border-t border-line pt-3">

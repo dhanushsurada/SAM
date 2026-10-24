@@ -201,7 +201,8 @@ class EnvironmentCompatibilityManager:
                 "reason": ("Install the optional '{}' dependency group and its listed prerequisites.".format(group)
                            if package_state.get("missing") or package_state.get("incompatible") or missing_os else "ready"),
             }
-        ollama_installed = bool(self.which("ollama"))
+        from runtime.ollama.manager import find_ollama_executable
+        ollama_installed = bool(self.which("ollama")) or bool(find_ollama_executable())
         configured_model = settings.get("primary_model")
         configured_available = bool(configured_model and configured_model in ollama["models"])
         ollama.update(installed=ollama_installed,

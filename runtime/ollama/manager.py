@@ -8,9 +8,12 @@ does not expose a stop operation or persist a process ID.
 from __future__ import annotations
 
 import ipaddress
+import os
+import platform
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
@@ -18,6 +21,40 @@ import requests
 from runtime.health.status import RuntimeStatus
 
 TAGS_TIMEOUT_S = 3.0
+
+
+def _known_ollama_locations() -> list[Path]:
+    """Where the official installers put Ollama. Needed because a process that
+    was already running when Ollama was installed keeps its old PATH and
+    would otherwise report "not installed" right after a successful install."""
+    system = platform.system()
+    if system == "Windows":
+        local = os.environ.get("LOCALAPPDATA")
+        candidates = []
+        if local:
+            candidates.append(Path(local) / "Programs" / "Ollama" / "ollama.exe")
+        program_files = os.environ.get("ProgramFiles")
+        if program_files:
+            candidates.append(Path(program_files) / "Ollama" / "ollama.exe")
+        return candidates
+    if system == "Darwin":
+        return [
+            Path("/Applications/Ollama.app/Contents/Resources/ollama"),
+            Path.home() / "Applications/Ollama.app/Contents/Resources/ollama",
+            Path("/opt/homebrew/bin/ollama"),
+            Path("/usr/local/bin/ollama"),
+        ]
+    return [Path("/usr/local/bin/ollama"), Path("/usr/bin/ollama"), Path("/opt/ollama/bin/ollama")]
+
+
+def find_ollama_executable() -> str | None:
+    found = shutil.which("ollama")
+    if found:
+        return found
+    for candidate in _known_ollama_locations():
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 class OllamaManager:
@@ -60,7 +97,7 @@ class OllamaManager:
                     "detail": f"configured Ollama endpoint is not responding at {self.host}",
                     "models": [],
                 }
-            if shutil.which("ollama") is None:
+            if find_ollama_executable() is None:
                 return {
                     "state": RuntimeStatus.NOT_INSTALLED.value,
                     "detail": "the `ollama` executable was not found on PATH",
@@ -89,12 +126,17 @@ class OllamaManager:
                 "message": f"SAM cannot start Ollama configured at non-local host {self.host}.",
             }
 
+        executable = find_ollama_executable() or "ollama"
         try:
+            popen_kwargs: dict = {"start_new_session": True}
+            if platform.system() == "Windows":
+                # No console window flash; detach from this process group.
+                popen_kwargs = {"creationflags": 0x08000000 | 0x00000200}
             subprocess.Popen(
-                ["ollama", "serve"],
+                [executable, "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                **popen_kwargs,
             )
         except OSError as e:
             return {"ok": False, "already_running": False, "message": f"could not launch Ollama: {e}"}

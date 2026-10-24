@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>SAM listens for your wake word and voice commands. Audio is processed on this Mac and never uploaded.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>SAM controls other apps on your behalf when you ask it to.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>SAM can use the camera when you ask it to look at something.</string>
+</dict>
+</plist>

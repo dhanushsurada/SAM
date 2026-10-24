@@ -46,3 +46,4 @@ build/
 interfaces/desktop/src-tauri/resources/sam-runtime/*
 !interfaces/desktop/src-tauri/resources/sam-runtime/README.md
 interfaces/desktop/src-tauri/resources/sam-runtime.previous-*/
+node_modules/

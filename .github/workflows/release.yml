@@ -1,0 +1,162 @@
+name: Release installers
+
+# Push a tag like v0.1.0 (or run manually) to build SAM installers for
+# Windows, macOS (Apple silicon + Intel) and Linux, smoke-test each one, and
+# publish a DRAFT GitHub release with SHA256SUMS.txt for you to review.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      draft_release:
+        description: "Create a draft release from this run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  # Optional signing secrets. Builds still succeed (unsigned) when they are absent.
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+  APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+  APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: windows-x86_64, runner: windows-latest, os: windows, arch: x86_64 }
+          - { label: macos-arm64,    runner: macos-latest,   os: macos,   arch: arm64 }
+          - { label: macos-x86_64,   runner: macos-15-intel, os: macos,   arch: x86_64 }
+          - { label: linux-x86_64,   runner: ubuntu-22.04,   os: linux,   arch: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: interfaces/desktop/package-lock.json }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: "interfaces/desktop/src-tauri -> target" }
+
+      - name: Install Linux build libraries
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev libssl-dev patchelf libxdo-dev xvfb
+
+      - name: Import Apple signing certificate
+        if: matrix.os == 'macos' && env.APPLE_CERTIFICATE != ''
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$RUNNER_TEMP/ci.keychain"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/ci.keychain"
+          security unlock-keychain -p ci "$RUNNER_TEMP/ci.keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/ci.keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$RUNNER_TEMP/ci.keychain"
+          security list-keychains -d user -s "$RUNNER_TEMP/ci.keychain" login.keychain
+
+      - name: Install frontend dependencies
+        working-directory: interfaces/desktop
+        run: npm ci
+
+      - name: Stage bundled Python runtime
+        run: python scripts/stage_runtime.py
+
+      - name: Smoke-test staged runtime
+        run: python scripts/smoke_test_runtime.py interfaces/desktop/src-tauri/resources/sam-runtime
+
+      - name: Sign nested macOS binaries
+        if: matrix.os == 'macos' && env.APPLE_SIGNING_IDENTITY != ''
+        run: bash scripts/macos_sign_runtime.sh
+
+      - name: Build installers
+        working-directory: interfaces/desktop
+        run: npm run tauri -- build
+
+      - name: Collect and rename artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c "import json;print(json.load(open('interfaces/desktop/src-tauri/tauri.conf.json'))['version'])")"
+          BUNDLE=interfaces/desktop/src-tauri/target/release/bundle
+          mkdir -p dist
+          pick() { # pattern suffix
+            local f; f="$(ls $BUNDLE/$1 2>/dev/null | head -n1 || true)"
+            [[ -n "$f" ]] || { echo "Missing build output: $1" >&2; exit 1; }
+            cp "$f" "dist/SAM_${VERSION}_${{ matrix.label }}$2"
+          }
+          case "${{ matrix.os }}" in
+            windows) pick 'nsis/*.exe' '-setup.exe' ;;
+            macos)   pick 'dmg/*.dmg' '.dmg' ;;
+            linux)   pick 'deb/*.deb' '.deb'; pick 'appimage/*.AppImage' '.AppImage' ;;
+          esac
+          ls -la dist
+
+      - name: Install-test (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist -Filter *-setup.exe).FullName
+          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
+          $root = Join-Path $env:LOCALAPPDATA "SAM"
+          if (-not (Test-Path (Join-Path $root "sam-runtime\bundle.json"))) { throw "Installed runtime not found under $root" }
+          python scripts/smoke_test_runtime.py (Join-Path $root "sam-runtime")
+          $uninstaller = Join-Path $root "uninstall.exe"
+          Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $root "sam-runtime")) { throw "Uninstall left the runtime behind" }
+
+      - name: Install-test (Linux .deb)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          RUNTIME="$(dirname "$(find /usr -name bundle.json -path '*sam-runtime*' | head -n1)")"
+          test -n "$RUNTIME"
+          python scripts/smoke_test_runtime.py "$RUNTIME"
+          sudo apt-get remove -y sam
+          test -z "$(find /usr -name bundle.json -path '*sam-runtime*' | head -n1)"
+
+      - name: Install-test (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          MOUNT="$(hdiutil attach -nobrowse -quiet dist/*.dmg | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
+          python scripts/smoke_test_runtime.py "$MOUNT/SAM.app/Contents/Resources/sam-runtime"
+          if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then codesign --verify --deep --strict "$MOUNT/SAM.app"; fi
+          hdiutil detach -quiet "$MOUNT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.draft_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, pattern: installers-*, merge-multiple: true }
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum SAM_* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
+            --title "SAM $TAG" || gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

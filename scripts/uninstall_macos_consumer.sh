@@ -11,6 +11,9 @@ elif [[ $# -gt 0 ]]; then
   exit 2
 fi
 
+pkill -x sam-desktop 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/SAM.plist" 2>/dev/null || true
+
 apps=("/Applications/SAM.app" "$HOME/Applications/SAM.app")
 for app in "${apps[@]}"; do
   if [[ -d "$app" ]]; then
