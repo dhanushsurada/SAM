@@ -61,6 +61,14 @@ export function OnboardingPage() {
       setOllamaActionMessage(error instanceof Error ? error.message : "Could not start Ollama.");
     }
   };
+  const getOllama = async () => {
+    setOllamaActionMessage(null);
+    try {
+      setOllamaActionMessage(await openOllamaDownload());
+    } catch (error) {
+      setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama's installation route.");
+    }
+  };
   const repairRuntime = async () => {
     setRuntimeRepairMessage(null);
     try {
@@ -164,8 +172,8 @@ export function OnboardingPage() {
               {runtime.snapshot?.ollama && <p className="text-xs text-mute">Ollama: {runtime.snapshot.ollama.state} — {runtime.snapshot.ollama.detail}</p>}
               {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <div className="space-y-2 rounded-md border border-line bg-void p-3">
                 <p className="text-sm text-ink">Ollama is needed for local models. SAM does not bundle it.</p>
-                <p className="text-xs text-mute">Install the official Ollama macOS app. After installation, return here and refresh. You may also connect SAM to an Ollama server configured in Settings.</p>
-                <Button variant="secondary" size="sm" onClick={() => void openOllamaDownload().catch((error) => setOllamaActionMessage(error instanceof Error ? error.message : "Could not open Ollama download page."))}>Get Ollama for macOS</Button>
+                <p className="text-xs text-mute">Install Ollama for your operating system using its official installer or instructions. SAM does not bundle it. You may also connect to an Ollama server configured in Settings.</p>
+                <Button variant="secondary" size="sm" onClick={() => void getOllama()}>Get Ollama</Button>
               </div>}
               {runtime.snapshot?.ollama.state === "STOPPED" && <div className="space-y-2">
                 <p className="text-xs text-mute">Ollama is installed but not responding. Start it or check the configured host.</p>

@@ -10,17 +10,22 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "package:macos-consumer": "python3 ../../scripts/package_macos_consumer.py && tauri build --bundles app,dmg"
+    "stage:runtime": "node scripts/stage-runtime.mjs",
+    "package": "npm run stage:runtime && tauri build",
+    "package:macos-consumer": "npm run package"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-notification": "^2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-icons": "^5.6.0",
-    "react-router-dom": "^6.30.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-notification": "^2"
+    "react-router-dom": "^6.30.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/node": "^22.20.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -29,7 +34,6 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.2",
-    "vite": "^5.4.8",
-    "@tauri-apps/cli": "^2"
+    "vite": "^5.4.8"
   }
 }

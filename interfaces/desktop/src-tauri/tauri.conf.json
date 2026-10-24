@@ -46,7 +46,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": "all",
     "resources": {
       "resources/sam-runtime": "sam-runtime"
     },
@@ -56,6 +56,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Dhanush Surada",
+    "copyright": "Copyright \u00a9 2026 Dhanush Surada",
+    "category": "Productivity",
+    "shortDescription": "SAM \u2014 a local, private AI assistant",
+    "longDescription": "SAM is a fully local, privacy-first AI assistant that runs on your own computer with Ollama. No cloud, no API keys, no subscription."
   }
 }

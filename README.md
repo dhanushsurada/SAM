@@ -23,48 +23,37 @@
 
 | Component | Minimum | Recommended |
 |---|---|---|
-| Chip | M2 (Apple Silicon) | M3 |
-| RAM | 16GB | 16GB+ |
-| Storage | 256GB free | 512GB |
-| macOS | Sonoma (14) | Sequoia (15) or later |
+| OS | Windows 10/11 · macOS 14+ · Ubuntu/Debian (x86_64) | latest |
+| Chip | Any 64-bit CPU (Apple silicon recommended on Mac) | M2/M3 or modern x86 |
+| RAM | 8GB (small models) | 16GB+ (14B default model) |
+| Storage | 20GB free | 50GB+ for several models |
 
 ---
 
-## Setup (One Time)
+## Install
+
+**Download the installer for your OS — no Python, Node, Rust or Git needed.**
+
+| Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) |
+|---|---|---|
+| `…-setup.exe` — double-click | `.dmg` — drag to Applications | `.deb` — `sudo apt install ./SAM_*.deb` |
+
+Get them from the **Releases** page, or run the one-liner (verifies SHA-256):
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/dhanushsurada/SAM
-cd SAM
-
-# 2. Run the source-based developer setup
-chmod +x setup.sh
-./setup.sh
+curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash   # macOS / Linux
+irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1 | iex          # Windows
 ```
 
-Installers select Python 3.11 or 3.12 according to
-`compatibility/manifest.json`, including versioned Homebrew interpreters
-outside the current PATH. Core dependencies are installed by default; setup
-offers voice, vision, memory, and integrations as optional groups. Declared
-package versions are checked against `requirements.txt`, and feature-specific
-system prerequisites are requested only when that feature is selected. The
-macOS setup checks its desktop toolchain, then builds and launches a Tauri
-`.app` from this checkout. Ollama is installed with the macOS Homebrew cask
-when needed. Setup reviews configured model downloads with you before
-pulling them; it preserves existing model choices.
-This is a developer setup, not a standalone DMG installer. See
-[`docs/deployment/DESKTOP_INSTALL.md`](docs/deployment/DESKTOP_INSTALL.md).
+SAM bundles its own Python runtime; first launch guides you through installing
+Ollama and choosing a model. Full guide, first-run walkthrough, updating,
+uninstalling and troubleshooting: **[INSTALL.md](INSTALL.md)**.
 
-For a macOS consumer bundle, a packaging machine can run `npm ci` in
-`interfaces/desktop`, then `npm run package:macos-consumer`. This stages a
-managed Python runtime and the core SAM dependencies into the Tauri resources
-and produces an app plus DMG. Packaging requires `uv`, network access, and the
-native build tools for the target Mac architecture. The output is architecture
-specific. For a Developer ID signed and notarized release, configure
-`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`,
-then run `scripts/package_macos_signed_release.sh`. The app-only uninstaller is
-`scripts/uninstall_macos_consumer.sh`; deleting user data requires its explicit
-`--remove-user-data` option and a typed confirmation.
+### Developers
+
+Build from source with `setup.sh` (macOS), `setup_linux.sh` (Debian/Ubuntu
+backend) or `setup_windows.ps1`, or build the installers yourself — see
+[`docs/deployment/DESKTOP_INSTALL.md`](docs/deployment/DESKTOP_INSTALL.md).
 
 ---
 

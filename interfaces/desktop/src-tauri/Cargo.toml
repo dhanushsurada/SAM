@@ -38,6 +38,8 @@ eventsource-stream = "0.2"
 # methods are called directly rather than only used transitively.
 futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "time"] }
+# A second launch must focus the running app instead of starting a second backend.
+tauri-plugin-single-instance = "2"
 
 [[bin]]
 name = "sam-desktop"

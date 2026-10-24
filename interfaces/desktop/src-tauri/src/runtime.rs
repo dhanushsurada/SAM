@@ -25,8 +25,11 @@ use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -64,6 +67,17 @@ struct RuntimeConfig {
     logs_dir: Option<PathBuf>,
 }
 
+/// A GUI app that spawns console programs (python.exe, powershell.exe) on
+/// Windows would flash a black console window each time. No-op elsewhere.
+pub fn hide_console(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 fn user_path(relative: &str) -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
@@ -85,9 +99,11 @@ pub fn initialize_packaged_runtime(app: &AppHandle) -> Result<(), String> {
     let root = resources.join("sam-runtime");
     let source = root.join("source");
     let python_root = root.join("python");
-    let python = python_root.join("bin").join("python3");
-    #[cfg(target_os = "windows")]
-    let python = python_root.join("python.exe");
+    let python = if cfg!(windows) {
+        python_root.join("python.exe")
+    } else {
+        python_root.join("bin").join("python3")
+    };
     let site_packages = root.join("site-packages");
     let cli = source.join("sam_cli.py");
     if !cli.exists() || !python.exists() || !site_packages.exists() {
@@ -103,7 +119,7 @@ pub fn initialize_packaged_runtime(app: &AppHandle) -> Result<(), String> {
             ))?;
         }
         return Err(format!(
-            "SAM's packaged runtime is missing from {}. Reinstall SAM from its DMG, or run setup.sh for a developer checkout.",
+            "SAM's packaged runtime is missing from {}. Reinstall SAM with its installer, or run the setup script for a developer checkout.",
             root.display()
         ));
     }
@@ -147,13 +163,22 @@ pub fn initialize_packaged_runtime(app: &AppHandle) -> Result<(), String> {
         .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
         .map(str::to_string)
         .unwrap_or_else(|| "http://127.0.0.1:8420".to_string());
-    let mut search_paths = vec![python_root.join("bin").into_os_string()];
+    let mut search_paths: Vec<OsString> = if cfg!(windows) {
+        vec![python_root.clone().into_os_string(), python_root.join("Scripts").into_os_string()]
+    } else {
+        vec![python_root.join("bin").into_os_string()]
+    };
     #[cfg(target_os = "macos")]
-    for candidate in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin"] {
+    for candidate in [
+        "/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin",
+        "/Applications/Ollama.app/Contents/Resources",
+    ] {
         let path = PathBuf::from(candidate);
         if path.is_dir() { search_paths.push(path.into_os_string()); }
     }
-    if let Some(existing) = std::env::var_os("PATH") { search_paths.extend(std::env::split_paths(&existing)); }
+    if let Some(existing) = std::env::var_os("PATH") {
+        search_paths.extend(std::env::split_paths(&existing).map(PathBuf::into_os_string));
+    }
     let environment_path = std::env::join_paths(search_paths).map_err(|e| e.to_string())?;
     let mut config = existing.unwrap_or_else(|| serde_json::json!({}));
     let Some(object) = config.as_object_mut() else {
@@ -234,6 +259,7 @@ fn run_sam_cli(args: &[&str]) -> Result<Value, String> {
     cmd.args(args);
     cmd.arg("--json");
     cmd.current_dir(&config.app_root);
+    hide_console(&mut cmd);
     let mut python_paths = vec![config.app_root.clone()];
     if let Some(user_packages) = &config.user_packages_dir {
         python_paths.push(user_packages.clone());
@@ -320,16 +346,72 @@ pub fn ollama_start() -> Result<Value, String> {
     run_sam_cli(&["ollama", "start"])
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", url]);
+        hide_console(&mut cmd).spawn()
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = Command::new("xdg-open").arg(url).spawn();
+    result.map(|_| ()).map_err(|e| format!("Could not open {url}: {e}"))
+}
+
+/// Windows: download Ollama's official installer, require a valid
+/// Authenticode signature whose subject names Ollama, then start it (its own
+/// installer UI runs, so the user sees and approves what happens).
+/// macOS / Linux: open the official download page; Linux additionally needs
+/// the documented one-line command because it requires administrator rights.
 #[tauri::command]
-pub fn open_ollama_download() -> Result<(), String> {
+pub async fn open_ollama_download() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let url = "https://ollama.com/download/OllamaSetup.exe";
+        let bytes = reqwest::get(url).await
+            .map_err(|e| format!("Could not download the Ollama installer: {e}"))?
+            .error_for_status().map_err(|e| format!("Ollama's download server refused the request: {e}"))?
+            .bytes().await.map_err(|e| format!("The Ollama download was interrupted: {e}"))?;
+        if bytes.len() < 1_000_000 {
+            return Err("The downloaded Ollama installer is unexpectedly small; not running it.".to_string());
+        }
+        let dir = std::env::temp_dir().join("sam-ollama-installer");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let exe = dir.join("OllamaSetup.exe");
+        std::fs::write(&exe, &bytes).map_err(|e| format!("Could not save the installer: {e}"))?;
+        let mut check = Command::new("powershell");
+        check.args(["-NoProfile", "-NonInteractive", "-Command",
+            "$s = Get-AuthenticodeSignature -LiteralPath $env:SAM_VERIFY_PATH; if ($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -like '*Ollama*') { exit 0 } else { exit 3 }"])
+            .env("SAM_VERIFY_PATH", &exe);
+        let verified = hide_console(&mut check).status().map(|s| s.success()).unwrap_or(false);
+        if !verified {
+            let _ = std::fs::remove_file(&exe);
+            return Err("The downloaded file is not validly signed by Ollama, so SAM did not run it. Download Ollama from https://ollama.com/download instead.".to_string());
+        }
+        Command::new(&exe).spawn().map_err(|e| format!("Could not start the Ollama installer: {e}"))?;
+        return Ok("The Ollama installer is open. Finish it, then return to SAM and press Re-check.".to_string());
+    }
     #[cfg(target_os = "macos")]
     {
-        Command::new("open").arg("https://ollama.com/download/mac")
-            .spawn().map_err(|e| format!("Could not open Ollama's macOS download page: {e}"))?;
-        return Ok(());
+        open_url("https://ollama.com/download/mac")?;
+        return Ok("Opened Ollama's download page. Install it, open it once, then return and press Re-check.".to_string());
     }
-    #[cfg(not(target_os = "macos"))]
-    Err("Install Ollama from https://ollama.com/download for your platform.".to_string())
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        open_url("https://ollama.com/download/linux")?;
+        Ok("Opened Ollama's download page. In a terminal run: curl -fsSL https://ollama.com/install.sh | sh — then return and press Re-check.".to_string())
+    }
+}
+
+/// Stop every SAM-owned backend process. Called on quit so an installer
+/// upgrade or uninstall never finds python.exe still holding bundle files.
+pub fn shutdown_backend() {
+    if let Err(error) = runtime_stop(None) {
+        eprintln!("SAM: backend shutdown reported: {error}");
+    }
 }
 
 #[tauri::command]

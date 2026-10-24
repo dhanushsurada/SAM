@@ -158,7 +158,10 @@ class SAMRuntime:
                 text=True,
                 start_new_session=(platform.system() != "Windows"),
                 creationflags=(
-                    subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
+                    # NEW_PROCESS_GROUP | CREATE_NO_WINDOW: no console flash
+                    # when the GUI app launches the backend on Windows.
+                    subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
+                    if platform.system() == "Windows" else 0
                 ),
             )
         except OSError as e:
