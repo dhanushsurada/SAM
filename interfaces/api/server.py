@@ -121,10 +121,10 @@ SETTINGS_EDITABLE_FIELDS = {
     "founder_mode_classifier_model", "founder_mode_min_confidence_to_show",
     "planner_model", "reflection_model", "allow_risky_terminal_commands",
     "telegram_bot_token", "telegram_bot_username", "incognito", "log_level",
-    "license_enforcement_enabled",
+    "license_enforcement_enabled", "api_auth_token",
 }
 SETTINGS_READ_ONLY_FIELDS = {"api_host", "api_port"}
-SETTINGS_SECRET_FIELDS = {"telegram_bot_token"}
+SETTINGS_SECRET_FIELDS = {"telegram_bot_token", "api_auth_token"}
 SETTINGS_SESSION_ONLY_FIELDS = {"incognito"}
 
 
@@ -272,7 +272,25 @@ def _shutdown():
 
 # ─── Task API ────────────────────────────────────────────────────────────
 
-@app.post("/api/iqoo/tasks", response_model=TaskRecord, status_code=201)
+def require_task_auth(request: Request) -> None:
+    """Enforces token authentication for task endpoints when api_auth_token is configured."""
+    settings = _settings_instance()
+    expected = (getattr(settings, "api_auth_token", "") or "").strip()
+    if expected:
+        token = request.headers.get("X-SAM-Token") or ""
+        if not token:
+            auth_header = request.headers.get("Authorization") or ""
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+        import secrets
+        if not token or not secrets.compare_digest(token, expected):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing API authorization token",
+            )
+
+
+@app.post("/api/iqoo/tasks", response_model=TaskRecord, status_code=201, dependencies=[Depends(require_task_auth)])
 def create_task(req: TaskCreateRequest):
     gateway = get_gateway()
     task_id = gateway.submit_task(
@@ -283,7 +301,7 @@ def create_task(req: TaskCreateRequest):
     return gateway.get_task(task_id)
 
 
-@app.get("/api/iqoo/tasks/{task_id}", response_model=TaskRecord)
+@app.get("/api/iqoo/tasks/{task_id}", response_model=TaskRecord, dependencies=[Depends(require_task_auth)])
 def get_task(task_id: str):
     record = get_gateway().get_task(task_id)
     if record is None:
@@ -291,7 +309,7 @@ def get_task(task_id: str):
     return record
 
 
-@app.post("/api/iqoo/tasks/{task_id}/cancel", response_model=TaskRecord)
+@app.post("/api/iqoo/tasks/{task_id}/cancel", response_model=TaskRecord, dependencies=[Depends(require_task_auth)])
 def cancel_task(task_id: str):
     gateway = get_gateway()
     if gateway.get_task(task_id) is None:
@@ -300,7 +318,7 @@ def cancel_task(task_id: str):
     return gateway.get_task(task_id)
 
 
-@app.post("/api/iqoo/tasks/{task_id}/retry", response_model=TaskRecord)
+@app.post("/api/iqoo/tasks/{task_id}/retry", response_model=TaskRecord, dependencies=[Depends(require_task_auth)])
 def retry_task(task_id: str):
     gateway = get_gateway()
     try:
@@ -371,7 +389,7 @@ async def event_stream(gateway: TaskGateway, task_id: str, after_seq: int,
                 return
 
 
-@app.get("/api/iqoo/tasks/{task_id}/events")
+@app.get("/api/iqoo/tasks/{task_id}/events", dependencies=[Depends(require_task_auth)])
 async def stream_events(task_id: str, request: Request):
     gateway = get_gateway()
     if gateway.get_task(task_id) is None:
@@ -392,7 +410,7 @@ def health():
     return get_gateway().health()
 
 
-@app.post("/api/iqoo/demo/reset")
+@app.post("/api/iqoo/demo/reset", dependencies=[Depends(require_local_caller)])
 def demo_reset():
     gateway = get_gateway()
     try:
@@ -412,7 +430,7 @@ def get_models():
     return get_gateway().get_brain_status()
 
 
-@app.post("/api/models/select", response_model=BrainStatus)
+@app.post("/api/models/select", response_model=BrainStatus, dependencies=[Depends(require_local_caller)])
 def select_model(req: ModelSelectRequest):
     """Each refusal has its own status so the UI can say exactly what to do:
     409 a task is running/queued, 404 not installed, 422 installed but not

@@ -5,8 +5,10 @@ Sandboxed — dangerous commands blocked.
 """
 
 import logging
-import subprocess
+import platform
+import re
 import shlex
+import subprocess
 from typing import Optional
 
 logger = logging.getLogger("SAM.Terminal")
@@ -62,10 +64,21 @@ class TerminalRunner:
         if description:
             logger.info(f"Purpose: {description}")
 
+        if platform.system() != "Windows":
+            # /bin/sh does not consistently implement pipefail (notably
+            # Debian's dash). Run the requested shell program with Bash's
+            # pipeline failure propagation instead of silently continuing
+            # after a failed `set -o pipefail`.
+            exec_args = ["bash", "-o", "pipefail", "-c", command]
+            use_shell = False
+        else:
+            exec_args = command
+            use_shell = True
+
         try:
             result = subprocess.run(
-                command,
-                shell=True,
+                exec_args,
+                shell=use_shell,
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -79,7 +92,7 @@ class TerminalRunner:
                 output += f"\nSTDERR: {result.stderr}"
 
             if result.returncode != 0:
-                output += f"\nExit code: {result.returncode}"
+                output += f"\nExit code: {result.returncode}\nSAM_TERMINAL_FAILED"
 
             self._history.append({
                 "command": command,
@@ -99,21 +112,23 @@ class TerminalRunner:
     def _check_safety(self, command: str) -> Optional[str]:
         """Check if command is safe to run. Returns error string if blocked."""
         cmd_lower = command.lower().strip()
+        subcmds = [cmd_lower] + [s.strip() for s in re.split(r'[;&|\n]+', cmd_lower) if s.strip()]
 
-        for blocked in BLOCKED_COMMANDS:
-            if blocked in cmd_lower:
-                logger.warning(f"BLOCKED dangerous command: {command}")
-                return f"Blocked: This command ({blocked}) is not allowed for safety reasons."
+        for sub in subcmds:
+            for blocked in BLOCKED_COMMANDS:
+                if blocked in sub:
+                    logger.warning(f"BLOCKED dangerous command: {command}")
+                    return f"Blocked: This command ({blocked}) is not allowed for safety reasons."
 
-        if not self._allow_risky:
-            for risky in REQUIRES_CONFIRMATION:
-                if risky in cmd_lower:
-                    logger.warning(f"Refused risky command (needs manual confirmation): {command}")
-                    return (
-                        f"I didn't run this automatically because it needs manual confirmation: "
-                        f"'{command}'. Run it yourself, or enable allow_risky_terminal_commands "
-                        f"in settings if you want SAM to run this class of command on its own."
-                    )
+            if not self._allow_risky:
+                for risky in REQUIRES_CONFIRMATION:
+                    if risky in sub:
+                        logger.warning(f"Refused risky command (needs manual confirmation): {command}")
+                        return (
+                            f"I didn't run this automatically because it needs manual confirmation: "
+                            f"'{command}'. Run it yourself, or enable allow_risky_terminal_commands "
+                            f"in settings if you want SAM to run this class of command on its own."
+                        )
 
         return None
 
@@ -121,10 +136,10 @@ class TerminalRunner:
         return self.run("pwd")
 
     def list_files(self, path: str = ".") -> str:
-        return self.run(f"ls -la {path}")
+        return self.run(f"ls -la {shlex.quote(path)}")
 
     def read_file(self, path: str) -> str:
-        return self.run(f"cat {path}")
+        return self.run(f"cat {shlex.quote(path)}")
 
     def get_history(self) -> list:
         return self._history

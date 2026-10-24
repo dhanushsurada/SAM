@@ -142,6 +142,7 @@ class Settings:
     # probe it can never independently drift apart.
     api_host: str = "0.0.0.0"
     api_port: int = 8420
+    api_auth_token: str = ""           # Optional bearer token to authenticate API task endpoints
 
     # Phase 3 — Licensing. Matches the frozen principle: "no hard license
     # enforcement at launch — non-blocking warnings only." Default is a

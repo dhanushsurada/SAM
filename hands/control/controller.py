@@ -37,6 +37,13 @@ SCREENCAPTURE_BIN = "/usr/sbin/screencapture"
 # os.path.expanduser("~") resolves correctly on both macOS and Windows.
 SCREENSHOTS_DIR = os.path.join(os.path.expanduser("~"), ".sam_data", "screenshots")
 
+
+def _escape_applescript_string(s: str) -> str:
+    """Safely escapes backslashes, double quotes, and linebreaks for AppleScript string literals."""
+    if not isinstance(s, str):
+        s = str(s)
+    return s.replace('\\', '\\\\').replace('"', '\\"').replace('\r', ' ').replace('\n', ' ')
+
 # Phase 3 (Hands reliability): common macOS display-name aliases for
 # open_app()'s name resolution below. Not an exhaustive app database —
 # just the handful of well-known cases where the name someone would
@@ -326,9 +333,10 @@ class ComputerController:
         logger.info(f"Opened app: {app_name}")
 
     def _open_app_mac(self, app_name: str):
+        safe_name = _escape_applescript_string(app_name)
         tried = [app_name]
         try:
-            self._applescript(f'tell application "{app_name}" to activate')
+            self._applescript(f'tell application "{safe_name}" to activate')
             return
         except RuntimeError:
             pass
@@ -338,7 +346,8 @@ class ComputerController:
                 continue
             tried.append(candidate)
             try:
-                self._applescript(f'tell application "{candidate}" to activate')
+                safe_candidate = _escape_applescript_string(candidate)
+                self._applescript(f'tell application "{safe_candidate}" to activate')
                 logger.info(f"Resolved app name '{app_name}' -> '{candidate}'")
                 return
             except RuntimeError:
@@ -398,7 +407,8 @@ class ComputerController:
     def close_app(self, app_name: str):
         """Close/quit an application — cross-platform."""
         if IS_MAC:
-            self._applescript(f'tell application "{app_name}" to quit')
+            safe_name = _escape_applescript_string(app_name)
+            self._applescript(f'tell application "{safe_name}" to quit')
         elif IS_WIN:
             subprocess.run(["taskkill", "/IM", f"{app_name}.exe", "/F"],
                            capture_output=True)
@@ -421,7 +431,10 @@ class ComputerController:
         }
         exe = win_app_map.get(app_name.lower(), f"{app_name}.exe")
         try:
-            subprocess.Popen(["start", exe], shell=True)
+            if hasattr(os, "startfile"):
+                os.startfile(exe)
+            else:
+                subprocess.Popen([exe])
         except Exception:
             # Try pywinauto
             if self._winauto:
@@ -431,8 +444,12 @@ class ComputerController:
 
     def set_volume(self, level: int):
         """Set system volume (0-100) cross-platform."""
+        try:
+            safe_level = max(0, min(100, int(level)))
+        except (ValueError, TypeError):
+            safe_level = 50
         if IS_MAC:
-            self._applescript(f"set volume output volume {level}")
+            self._applescript(f"set volume output volume {safe_level}")
         elif IS_WIN:
             # PowerShell via nircmd or built-in
             ps_cmd = (
@@ -442,7 +459,7 @@ class ComputerController:
             # Better: use nircmd if available
             try:
                 subprocess.run(
-                    ["nircmd.exe", "setsysvolume", str(int(level / 100 * 65535))],
+                    ["nircmd.exe", "setsysvolume", str(int(safe_level / 100 * 65535))],
                     check=True, capture_output=True
                 )
             except Exception:
@@ -451,16 +468,20 @@ class ComputerController:
     def notify(self, title: str, message: str):
         """Show system notification cross-platform."""
         if IS_MAC:
+            safe_msg = _escape_applescript_string(message)
+            safe_title = _escape_applescript_string(title)
             self._applescript(
-                f'display notification "{message}" with title "{title}"'
+                f'display notification "{safe_msg}" with title "{safe_title}"'
             )
         elif IS_WIN:
+            safe_title_win = title.replace("'", "''")
+            safe_msg_win = message.replace("'", "''")
             ps_cmd = (
                 f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
                 f"ContentType = WindowsRuntime] | Out-Null; "
                 f"$t = [Windows.UI.Notifications.ToastNotificationManager]"
                 f"::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText01); "
-                f"$t.GetElementsByTagName('text')[0].AppendChild($t.CreateTextNode('{title}: {message}')) | Out-Null; "
+                f"$t.GetElementsByTagName('text')[0].AppendChild($t.CreateTextNode('{safe_title_win}: {safe_msg_win}')) | Out-Null; "
                 f"$n = [Windows.UI.Notifications.ToastNotification]::new($t); "
                 f"[Windows.UI.Notifications.ToastNotificationManager]"
                 f"::CreateToastNotifier('SAM').Show($n)"
@@ -473,7 +494,10 @@ class ComputerController:
         if IS_MAC:
             subprocess.run(["open", url])
         elif IS_WIN:
-            subprocess.run(["start", url], shell=True)
+            if hasattr(os, "startfile"):
+                os.startfile(url)
+            else:
+                subprocess.run(["cmd", "/c", "start", "", url], shell=False)
 
     # ─── Clipboard ────────────────────────────────────────────────────────
 
@@ -482,7 +506,7 @@ class ComputerController:
         if IS_MAC:
             subprocess.run(["pbcopy"], input=text.encode())
         elif IS_WIN:
-            subprocess.run(["clip"], input=text.encode(), shell=True)
+            subprocess.run(["clip"], input=text.encode(), shell=False)
 
     def get_clipboard(self) -> str:
         """Get clipboard content cross-platform."""

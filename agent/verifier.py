@@ -38,6 +38,8 @@ _FAILURE_SIGNALS = [
     # is still mid-launch — so treating this as retryable can genuinely help,
     # not just add noise.
     "is in the foreground instead",
+    # Terminal pipeline failure marker
+    "sam_terminal_failed",
 ]
 
 
