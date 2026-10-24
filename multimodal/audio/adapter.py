@@ -76,12 +76,11 @@ class AudioAdapter:
         stt = self._get_stt()
 
         suffix = AUDIO_MIME_SUFFIX.get(attachment.get("mime_type", ""), ".bin")
-        tmp_path = tempfile.mktemp(suffix=suffix)
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            tmp_path = f.name
+            f.write(audio_bytes)
 
         try:
-            with open(tmp_path, "wb") as f:
-                f.write(audio_bytes)
-
             if stt._model is not None:
                 return self._transcribe_with_whisper(stt, tmp_path)
             return self._transcribe_with_fallback(tmp_path, suffix)

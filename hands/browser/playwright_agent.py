@@ -350,7 +350,8 @@ class BrowserAgent:
         """Take screenshot of browser page."""
         if path is None:
             import tempfile
-            path = tempfile.mktemp(suffix=".png")
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                path = f.name
         self._page.screenshot(path=path)
         return path
 

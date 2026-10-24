@@ -40,7 +40,8 @@ class ScreenReader:
         confusing downstream "could not find X on screen" from
         find_element(), with no hint about the real cause.
         """
-        path = tempfile.mktemp(suffix=".png", dir="/tmp")
+        with tempfile.NamedTemporaryFile(suffix=".png", dir="/tmp", delete=False) as f:
+            path = f.name
         result = subprocess.run(
             [SCREENCAPTURE_BIN, "-x", path],
             capture_output=True, text=True,
