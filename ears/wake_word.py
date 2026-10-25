@@ -7,8 +7,12 @@ Falls back to keyboard input if model files missing.
 
 import logging
 import threading
-import numpy as np
 from typing import Callable
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 logger = logging.getLogger("SAM.WakeWord")
 
@@ -24,6 +28,12 @@ class WakeWordListener:
 
     def _load_model(self):
         """Load openWakeWord model with proper error handling."""
+        if np is None:
+            logger.warning("numpy not installed — using keyboard fallback for wake word")
+            self._model = None
+            self._use_keyboard = True
+            return
+
         try:
             # Download default models if missing
             import openwakeword

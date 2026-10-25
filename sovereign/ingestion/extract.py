@@ -21,8 +21,16 @@ from pathlib import Path
 from typing import List, Optional
 
 import requests
-from pypdf import PdfReader
-import docx  # python-docx
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
+try:
+    import docx  # python-docx
+except ImportError:
+    docx = None
 
 logger = logging.getLogger("SAM.Sovereign.Ingestion")
 
@@ -73,6 +81,10 @@ def _hash_bytes(data: bytes) -> str:
 
 
 def _extract_pdf(path: Path) -> List[ExtractedPage]:
+    if PdfReader is None:
+        raise ExtractionError(
+            f"pypdf is required to extract PDF file {path.name}. Install pypdf to enable PDF extraction."
+        )
     try:
         reader = PdfReader(str(path))
     except Exception as e:
@@ -93,6 +105,10 @@ def _extract_pdf(path: Path) -> List[ExtractedPage]:
 
 
 def _extract_docx(path: Path) -> List[ExtractedPage]:
+    if docx is None:
+        raise ExtractionError(
+            f"python-docx is required to extract Word document {path.name}. Install python-docx to enable DOCX extraction."
+        )
     try:
         document = docx.Document(str(path))
     except Exception as e:

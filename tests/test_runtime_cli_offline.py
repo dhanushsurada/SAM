@@ -39,6 +39,7 @@ Usage:
     python3 tests/test_runtime_cli_offline.py
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -66,7 +67,7 @@ def run_cli(args, input_text="no\n", timeout=15, home=None):
         return subprocess.run(
             [sys.executable, "sam_cli.py"] + args,
             cwd=str(REPO_ROOT),
-            env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
             input=input_text,
             capture_output=True,
             text=True,
@@ -170,7 +171,7 @@ def test_reset_commands_did_not_actually_reset():
         (sam_data / "identity.json").write_text('{"name": "test"}')
         subprocess.run(
             [sys.executable, "sam_cli.py", "reset-all"],
-            cwd=str(REPO_ROOT), env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            cwd=str(REPO_ROOT), env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
             input="no\n", capture_output=True, text=True, timeout=10,
         )
         check("declining reset-all's confirmation leaves ~/.sam_data untouched", (sam_data / "identity.json").exists())
@@ -290,7 +291,7 @@ def test_skill_compiles_to_path_cli_actually_reads():
         )
         proc = subprocess.run(
             [sys.executable, "-c", compile_snippet],
-            cwd=str(REPO_ROOT), env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            cwd=str(REPO_ROOT), env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
             capture_output=True, text=True, timeout=15,
         )
         check("skill compiles cleanly (3 successful runs of the same pattern)",

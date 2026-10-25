@@ -99,9 +99,9 @@ def check_platform(manifest: dict, os_name: Optional[str] = None,
     if minimum and current_version and _version_tuple(current_version) < _version_tuple(minimum):
         label = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}.get(key, key)
         raise CompatibilityError(
-            "SAM's {} installation policy requires version {} or later; this machine reports {}. "
+            "SAM's {} installation policy requires {} {} or later; this machine reports {}. "
             "Upgrade to a supported release or use the documented manual setup.".format(
-                label, minimum, current_version or "an unknown version"
+                label, label, minimum, current_version or "an unknown version"
             )
         )
 

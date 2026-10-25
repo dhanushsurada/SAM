@@ -538,7 +538,8 @@ def test_persistence_writes_only_the_model_keys():
     with scratch_settings() as (s, data_dir):
         user_file = data_dir / "settings.yaml"
         user_file.write_text(yaml.dump({"user_name": "Tester", "temperature": 0.9,
-                                        "primary_model": "qwen2.5:14b"}))
+                                        "primary_model": "qwen2.5:14b",
+                                        "sam_settings_schema_version": 1}))
         s = Settings()                       # loads the user's file
         s.incognito = True                   # the voice loop's runtime-only "incognito" command
         s.apply_model_choice(primary="qwen3:8b", fallback="qwen2.5:7b")
@@ -552,7 +553,7 @@ def test_persistence_writes_only_the_model_keys():
               "incognito" not in saved)
         check("nothing else is frozen into the file (no full-settings dump)",
               set(saved) == {"user_name", "temperature", "primary_model", "fallback_model",
-                             "model_explicitly_set"})
+                             "model_explicitly_set", "sam_settings_schema_version"})
         check("the write is atomic: no temp file left behind",
               [p.name for p in data_dir.iterdir()] == ["settings.yaml"])
         restarted = Settings()
@@ -574,7 +575,7 @@ def test_persistence_carries_the_repo_config_when_there_is_no_user_file():
               all(saved[k] == v for k, v in repo.items() if k != "primary_model"))
         check("plus the model choice", saved["primary_model"] == "qwen3:8b"
               and saved["model_explicitly_set"] is True)
-        check("and nothing else", set(saved) == set(repo) | {"primary_model", "model_explicitly_set"})
+        check("and nothing else", set(saved) == set(repo) | {"primary_model", "model_explicitly_set", "sam_settings_schema_version"})
 
 
 def test_fallback_only_choice_is_not_an_explicit_primary():

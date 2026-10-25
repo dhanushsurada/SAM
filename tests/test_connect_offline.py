@@ -18,13 +18,22 @@ Usage:
     HOME=/tmp/sam_connect_test python3 tests/test_connect_offline.py
 """
 
+import os
+import sys
+import tempfile
+import atexit
+import shutil
 import base64
 import secrets
-import sys
 import threading
 import time
 from pathlib import Path
 from unittest import mock
+
+if "sam_connect_test" not in os.environ.get("HOME", ""):
+    _temp_home = tempfile.mkdtemp(prefix="sam_connect_test_")
+    os.environ["HOME"] = _temp_home
+    atexit.register(lambda: shutil.rmtree(_temp_home, ignore_errors=True))
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

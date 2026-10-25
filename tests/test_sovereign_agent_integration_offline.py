@@ -77,11 +77,7 @@ def test_react_loop_dispatches_read_document_and_search_knowledge():
     mocked production methods. The knowledge index is explicitly made
     unavailable so this test deterministically exercises the graceful
     unavailable path regardless of whether ChromaDB is installed."""
-    from reportlab.pdfgen import canvas
     loop = ReactLoop(Settings())
-    # Make the unavailable-index behavior deterministic. The real machine may
-    # have ChromaDB installed; this test specifically exercises the graceful
-    # unavailable path rather than depending on package installation state.
     class UnavailableKnowledgeIndex:
         @property
         def available(self):
@@ -95,14 +91,20 @@ def test_react_loop_dispatches_read_document_and_search_knowledge():
 
     loop._knowledge_index = UnavailableKnowledgeIndex()
 
-    pdf_path = Path(tempfile.mkdtemp()) / "agent_integration_report.pdf"
-    c = canvas.Canvas(str(pdf_path))
-    c.drawString(72, 720, "Deviation: pressure reading 152 PSI exceeds the 150 PSI limit.")
-    c.save()
-
+    fixture_pdf = Path(__file__).resolve().parent / "fixtures" / "sovereign" / "inspection_report.pdf"
+    try:
+        from reportlab.pdfgen import canvas
+        pdf_path = Path(tempfile.mkdtemp()) / "agent_integration_report.pdf"
+        c = canvas.Canvas(str(pdf_path))
+        c.drawString(72, 720, "Deviation: pressure reading 152 PSI exceeds the 150 PSI limit.")
+        c.save()
+        expected_text = "152 PSI"
+    except ImportError:
+        pdf_path = fixture_pdf
+        expected_text = "pressure"
     read_observation = loop.execute("read_document", {"path": str(pdf_path)})
     check("read_document via ReactLoop returns wrapped content", "BEGIN DOCUMENT CONTENT" in read_observation)
-    check("read_document via ReactLoop returns the real extracted text", "152 PSI" in read_observation)
+    check("read_document via ReactLoop returns the real extracted text", expected_text in read_observation)
 
     search_observation = loop.execute("search_knowledge", {"query": "pressure limit"})
     check("search_knowledge via ReactLoop runs without crashing",

@@ -29,6 +29,7 @@ Usage:
     python3 tests/test_cli_diagnostics_offline.py
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -58,7 +59,7 @@ def run_cli(args, home: Path, input_text="no\n", timeout=15):
     return subprocess.run(
         [sys.executable, "sam_cli.py"] + args,
         cwd=str(REPO_ROOT),
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
         input=input_text,
         capture_output=True,
         text=True,
@@ -105,7 +106,7 @@ def test_main_py_logs_to_the_path_cmd_logs_reads():
         result = subprocess.run(
             [sys.executable, "-c", script],
             cwd=str(REPO_ROOT),
-            env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
             capture_output=True, text=True, timeout=20,
         )
         expected_log = home / ".sam_data" / "logs" / "sam.log"

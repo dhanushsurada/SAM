@@ -13,6 +13,7 @@ Usage:
 """
 
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 import sqlite3
@@ -59,6 +60,8 @@ def test_tier_resolution_never_raises():
 
 def test_memory_retention_gate():
     settings = Settings()
+    tmp_db = Path(tempfile.mkdtemp()) / "episodes.db"
+    settings.sqlite_path = str(tmp_db)
     store = MemoryStore(settings)
 
     old_ts = (datetime.now() - timedelta(days=15)).isoformat()
@@ -87,9 +90,10 @@ def test_founder_mode_gated_when_enforced_and_unlicensed():
     ctx = mgr.get_context()
     check("Founder Mode context is empty on free tier (enforcement on, no license)", ctx == "")
 
+    before = len(mgr._get_recent_decisions(50))
     mgr.capture_if_relevant("I decided to use Django because of the admin panel", FakeResponse())
     after = len(mgr._get_recent_decisions(50))
-    check("capture_if_relevant is a no-op on free tier", after == 1)
+    check("capture_if_relevant is a no-op on free tier", after == before)
 
 
 def test_founder_mode_full_access_when_enforcement_off():

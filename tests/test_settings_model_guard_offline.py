@@ -34,7 +34,10 @@ Usage:
     python3 tests/test_settings_model_guard_offline.py
 """
 
+from __future__ import annotations
+
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -75,7 +78,7 @@ def _settings_snapshot(home: Path, yaml_text: str | None, fake_ram_gb: int) -> d
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=str(REPO_ROOT),
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
         capture_output=True, text=True, timeout=15,
     )
     if result.returncode != 0:

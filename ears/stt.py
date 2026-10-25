@@ -5,12 +5,19 @@ Only activates AFTER wake word is detected.
 Records until silence, then transcribes.
 """
 
+from __future__ import annotations
+
 import logging
 import tempfile
 import os
 import time
-import numpy as np
 from pathlib import Path
+from typing import Any
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 logger = logging.getLogger("SAM.STT")
 
@@ -57,6 +64,8 @@ class SpeechToText:
         Record audio from microphone until silence or timeout.
         Returns numpy array of audio samples.
         """
+        if np is None:
+            raise RuntimeError("numpy is required for microphone audio recording.")
         import pyaudio
 
         CHUNK = 1024
@@ -152,6 +161,8 @@ class SpeechToText:
 
     def _fallback_transcribe(self, audio_data: np.ndarray) -> str:
         """Fallback using speech_recognition library."""
+        if np is None:
+            raise RuntimeError("numpy is required for fallback audio transcription.")
         try:
             import speech_recognition as sr
             recognizer = sr.Recognizer()

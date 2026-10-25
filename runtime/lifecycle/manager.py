@@ -82,6 +82,7 @@ class SAMRuntime:
     ):
         self.repo_root = Path(repo_root) if repo_root is not None else _detect_repo_root()
         self.data_dir = Path(data_dir) if data_dir is not None else None
+        self._custom_specs = specs is not None
         resolved_specs = specs if specs is not None else default_specs(self.repo_root)
         self._specs = {s.name: s for s in resolved_specs}
 
@@ -112,7 +113,7 @@ class SAMRuntime:
         # Optional processes fail with a precise setup instruction instead
         # of crashing through an import error while core/API services remain
         # independently startable.
-        if name == "voice":
+        if not self._custom_specs and name == "voice":
             try:
                 from runtime.environment_manager import EnvironmentCompatibilityManager
                 capability = EnvironmentCompatibilityManager().capabilities().get("features", {}).get("voice", {})
@@ -125,7 +126,7 @@ class SAMRuntime:
                 message = "Could not determine whether voice prerequisites are available: {}".format(exc)
                 write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
                 return StartResult(name=name, ok=False, message=message)
-        if name == "telegram":
+        if not self._custom_specs and name == "telegram":
             try:
                 from importlib.util import find_spec
                 if find_spec("telegram") is None:

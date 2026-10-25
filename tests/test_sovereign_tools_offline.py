@@ -35,13 +35,46 @@ TMP = Path(tempfile.mkdtemp(prefix="sam_sovereign_tools_test_"))
 
 
 def _make_pdf(path: Path, pages_text):
-    from reportlab.pdfgen import canvas
-    c = canvas.Canvas(str(path))
-    for i, text in enumerate(pages_text):
-        c.drawString(72, 720, text)
-        if i < len(pages_text) - 1:
-            c.showPage()
-    c.save()
+    try:
+        from reportlab.pdfgen import canvas
+        c = canvas.Canvas(str(path))
+        for i, text in enumerate(pages_text):
+            c.drawString(72, 720, text)
+            if i < len(pages_text) - 1:
+                c.showPage()
+        c.save()
+        return
+    except Exception:
+        pass
+    objs = []
+    def add_obj(body):
+        objs.append(body)
+        return len(objs)
+    f_num = add_obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    page_nums, content_nums = [], []
+    for text in pages_text:
+        stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET"
+        c_num = add_obj(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+        content_nums.append(c_num)
+    pages_obj_num = len(objs) + len(pages_text) + 1
+    for c_num in content_nums:
+        p_num = add_obj(f"<< /Type /Page /Parent {pages_obj_num} 0 R /MediaBox [0 0 612 792] /Contents {c_num} 0 R /Resources << /Font << /F1 {f_num} 0 R >> >> >>")
+        page_nums.append(p_num)
+    kids = " ".join(f"{n} 0 R" for n in page_nums)
+    p_root = add_obj(f"<< /Type /Pages /Kids [{kids}] /Count {len(page_nums)} >>")
+    catalog = add_obj(f"<< /Type /Catalog /Pages {p_root} 0 R >>")
+    out = ["%PDF-1.4\n"]
+    offsets = [0]
+    for i, body in enumerate(objs, 1):
+        offset = sum(len(x.encode("latin-1")) for x in out)
+        offsets.append(offset)
+        out.append(f"{i} 0 obj\n{body}\nendobj\n")
+    xref_offset = sum(len(x.encode("latin-1")) for x in out)
+    out.append(f"xref\n0 {len(objs)+1}\n0000000000 65535 f \n")
+    for off in offsets[1:]:
+        out.append(f"{off:010d} 00000 n \n")
+    out.append(f"trailer\n<< /Size {len(objs)+1} /Root {catalog} 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
+    path.write_bytes("".join(out).encode("latin-1"))
 
 
 class FakeCollection:

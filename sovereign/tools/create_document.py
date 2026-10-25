@@ -14,7 +14,10 @@ optional, so existing callers are unaffected.
 from datetime import datetime
 from pathlib import Path
 
-import docx
+try:
+    import docx
+except ImportError:
+    docx = None
 
 
 class DocumentCreationError(Exception):
@@ -47,6 +50,8 @@ def create_document(title: str, sections, output_dir: str, source_documents=None
     source_documents: optional list of filenames, rendered as a short
         traceability line under the title.
     """
+    if docx is None:
+        raise DocumentCreationError("python-docx is required to create docx documents. Install python-docx.")
     title = (title or "").strip()
     if not title:
         raise DocumentCreationError("A title is required")

@@ -184,7 +184,15 @@ def snapshot_connections() -> Optional[List[dict]]:
         return None
 
     conns = []
-    for c in psutil.net_connections(kind="inet"):
+    try:
+        raw_conns = psutil.net_connections(kind="inet")
+    except (getattr(psutil, "AccessDenied", PermissionError), PermissionError, OSError):
+        try:
+            raw_conns = psutil.Process().net_connections(kind="inet")
+        except Exception:
+            raw_conns = []
+
+    for c in raw_conns:
         if c.status == psutil.CONN_LISTEN or not c.raddr:
             continue
         conns.append({
