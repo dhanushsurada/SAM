@@ -63,8 +63,6 @@ struct RuntimeConfig {
     environment_path: Option<String>,
     #[serde(default)]
     user_packages_dir: Option<PathBuf>,
-    #[serde(default)]
-    logs_dir: Option<PathBuf>,
 }
 
 /// A GUI app that spawns console programs (python.exe, powershell.exe) on

@@ -17,13 +17,15 @@ permissions:
   contents: write
 
 env:
-  # Optional signing secrets. Builds still succeed (unsigned) when they are absent.
-  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-  APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-  APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-  APPLE_ID: ${{ secrets.APPLE_ID }}
-  APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  # Keep secrets under private names at job scope. Tauri interprets the
+  # presence of its APPLE_* signing variables as a request to sign, even when
+  # GitHub expands an unset secret to an empty string.
+  SAM_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+  SAM_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+  SAM_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+  SAM_APPLE_ID: ${{ secrets.APPLE_ID }}
+  SAM_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+  SAM_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
 jobs:
   build:
@@ -56,14 +58,22 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
             librsvg2-dev libsoup-3.0-dev libssl-dev patchelf libxdo-dev xvfb
 
-      - name: Import Apple signing certificate
-        if: matrix.os == 'macos' && env.APPLE_CERTIFICATE != ''
+      - name: Validate Apple signing configuration
+        if: matrix.os == 'macos' && (env.SAM_APPLE_SIGNING_IDENTITY != '' || env.SAM_APPLE_CERTIFICATE != '' || env.SAM_APPLE_CERTIFICATE_PASSWORD != '')
         run: |
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          if [[ -z "$SAM_APPLE_SIGNING_IDENTITY" || -z "$SAM_APPLE_CERTIFICATE" || -z "$SAM_APPLE_CERTIFICATE_PASSWORD" ]]; then
+            echo "For signed macOS builds, configure APPLE_SIGNING_IDENTITY, APPLE_CERTIFICATE, and APPLE_CERTIFICATE_PASSWORD together. Remove the partial secrets for unsigned builds." >&2
+            exit 1
+          fi
+
+      - name: Import Apple signing certificate
+        if: matrix.os == 'macos' && env.SAM_APPLE_CERTIFICATE != ''
+        run: |
+          echo "$SAM_APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p ci "$RUNNER_TEMP/ci.keychain"
           security set-keychain-settings -lut 21600 "$RUNNER_TEMP/ci.keychain"
           security unlock-keychain -p ci "$RUNNER_TEMP/ci.keychain"
-          security import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/ci.keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/ci.keychain" -P "$SAM_APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$RUNNER_TEMP/ci.keychain"
           security list-keychains -d user -s "$RUNNER_TEMP/ci.keychain" login.keychain
 
@@ -78,11 +88,31 @@ jobs:
         run: python scripts/smoke_test_runtime.py interfaces/desktop/src-tauri/resources/sam-runtime
 
       - name: Sign nested macOS binaries
-        if: matrix.os == 'macos' && env.APPLE_SIGNING_IDENTITY != ''
+        if: matrix.os == 'macos' && env.SAM_APPLE_SIGNING_IDENTITY != ''
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.SAM_APPLE_SIGNING_IDENTITY }}
         run: bash scripts/macos_sign_runtime.sh
 
       - name: Build installers
+        if: matrix.os != 'macos'
         working-directory: interfaces/desktop
+        run: npm run tauri -- build
+
+      - name: Build unsigned macOS installer
+        if: matrix.os == 'macos' && env.SAM_APPLE_SIGNING_IDENTITY == ''
+        working-directory: interfaces/desktop
+        run: npm run tauri -- build
+
+      - name: Build signed macOS installer
+        if: matrix.os == 'macos' && env.SAM_APPLE_SIGNING_IDENTITY != ''
+        working-directory: interfaces/desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.SAM_APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ env.SAM_APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ env.SAM_APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ env.SAM_APPLE_ID }}
+          APPLE_PASSWORD: ${{ env.SAM_APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ env.SAM_APPLE_TEAM_ID }}
         run: npm run tauri -- build
 
       - name: Collect and rename artifacts
@@ -133,7 +163,7 @@ jobs:
         run: |
           MOUNT="$(hdiutil attach -nobrowse -quiet dist/*.dmg | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
           python scripts/smoke_test_runtime.py "$MOUNT/SAM.app/Contents/Resources/sam-runtime"
-          if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then codesign --verify --deep --strict "$MOUNT/SAM.app"; fi
+          if [[ -n "${SAM_APPLE_SIGNING_IDENTITY:-}" ]]; then codesign --verify --deep --strict "$MOUNT/SAM.app"; fi
           hdiutil detach -quiet "$MOUNT"
 
       - uses: actions/upload-artifact@v4
