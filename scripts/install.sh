@@ -40,7 +40,13 @@ SUMS_URL="$(printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"
 [[ -n "$ASSET_URL" ]] || die "No installer for $OS/$ARCH_ID found in that release."
 [[ -n "$SUMS_URL"  ]] || die "The release has no SHA256SUMS.txt; refusing to install an unverifiable file."
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"
+MOUNT=""
+cleanup() {
+  if [[ -n "$MOUNT" ]]; then hdiutil detach -quiet "$MOUNT" || true; fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 FILE="$TMP/$(basename "$ASSET_URL")"
 say "Downloading $(basename "$ASSET_URL")"
 curl -fL --progress-bar -o "$FILE" "$ASSET_URL"
@@ -55,12 +61,14 @@ if command -v sha256sum >/dev/null 2>&1; then ACTUAL="$(sha256sum "$FILE" | awk 
 case "$FILE" in
   *.dmg)
     say "Installing to /Applications"
-    MOUNT="$(hdiutil attach -nobrowse -quiet "$FILE" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
-    [[ -d "$MOUNT/SAM.app" ]] || { hdiutil detach -quiet "$MOUNT" || true; die "SAM.app not found in the disk image."; }
+    MOUNT="$(hdiutil attach -nobrowse "$FILE" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
+    [[ -n "$MOUNT" ]] || die "Could not determine the mounted disk image path."
+    [[ -d "$MOUNT/SAM.app" ]] || die "SAM.app not found in the disk image."
     pkill -x sam-desktop 2>/dev/null || true
     rm -rf "/Applications/SAM.app" 2>/dev/null || sudo rm -rf "/Applications/SAM.app"
     cp -R "$MOUNT/SAM.app" /Applications/ 2>/dev/null || sudo cp -R "$MOUNT/SAM.app" /Applications/
     hdiutil detach -quiet "$MOUNT" || true
+    MOUNT=""
     say "Done. Opening SAM"; open /Applications/SAM.app ;;
   *.deb)
     say "Installing the .deb (needs administrator rights)"
