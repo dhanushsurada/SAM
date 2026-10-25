@@ -410,6 +410,12 @@ def health():
     return get_gateway().health()
 
 
+@app.get("/api/runtime/health", dependencies=[Depends(require_local_caller)])
+def runtime_readiness():
+    """Fast local liveness check; optional model probes belong to /api/iqoo/health."""
+    return {"status": "ok"}
+
+
 @app.post("/api/iqoo/demo/reset", dependencies=[Depends(require_local_caller)])
 def demo_reset():
     gateway = get_gateway()

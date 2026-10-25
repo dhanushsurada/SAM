@@ -12,8 +12,8 @@ Audit findings (Checkpoint 1) this file encodes directly:
     only honest ready-check for them is "still alive after a short grace
     period" — NOT a real health check. See runtime/lifecycle/manager.py's
     _wait_for_ready() for exactly what this does and does not guarantee.
-  - api (interfaces/api/server.py) has a real health endpoint at
-    /api/iqoo/health. Host/port are sourced from config/settings.py
+  - api (interfaces/api/server.py) has a lightweight local readiness
+    endpoint at /api/runtime/health. Host/port are sourced from config/settings.py
     (Settings().api_host / .api_port, default 0.0.0.0:8420) — this spec's
     health_url is built from that same Settings().api_port at call time
     below, so it cannot independently drift from what the server actually
@@ -70,7 +70,7 @@ def default_specs(repo_root: Path) -> list[ProcessSpec]:
             command=[sys.executable, "-m", "interfaces.api.server"],
             cwd=repo_root,
             ready_check="http",
-            health_url=f"http://127.0.0.1:{api_port}/api/iqoo/health",
+            health_url=f"http://127.0.0.1:{api_port}/api/runtime/health",
             startup_timeout_seconds=15.0,
             shutdown_timeout_seconds=10.0,
             cmdline_fragment="interfaces.api.server",

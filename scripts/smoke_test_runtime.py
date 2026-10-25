@@ -113,13 +113,17 @@ def main() -> int:
             health = None
             while time.monotonic() < deadline:
                 try:
-                    health = get_json(args.port, "/api/iqoo/health", timeout=2)
+                    health = get_json(args.port, "/api/runtime/health", timeout=2)
                     break
                 except Exception:
                     time.sleep(0.5)
             if health is None:
                 fail("API health endpoint never answered")
-            print("2/4 health:", health)
+            print("2/4 runtime readiness:", health)
+            health = get_json(args.port, "/api/iqoo/health", timeout=10)
+            if "status" not in health:
+                fail(f"/api/iqoo/health lacks 'status': {list(health)}")
+            print("    gateway health:", health)
             environment = get_json(args.port, "/api/environment", timeout=10)
             if "environment" not in environment:
                 fail(f"/api/environment lacks 'environment': {list(environment)}")
