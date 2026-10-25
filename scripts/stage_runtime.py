@@ -114,10 +114,20 @@ def dereference_symlinks(tree: Path) -> None:
 def install_python(uv: str, version: str, work: Path, python_dir: Path) -> Path:
     install_dir = work / "uv-python"
     run([uv, "python", "install", "--install-dir", install_dir, version])
-    candidates = [p for p in install_dir.iterdir() if p.is_dir() and not p.is_symlink() and p.name.startswith("cpython-")]
-    if not candidates:
-        raise SystemExit("uv installed Python but no cpython-* directory was produced.")
-    shutil.move(str(sorted(candidates)[0]), str(python_dir))
+    if system_key() == "windows":
+        executables = sorted(install_dir.rglob("python.exe"), key=lambda path: len(path.parts))
+        if not executables:
+            raise SystemExit("uv installed Python but no python.exe was produced.")
+        # uv's Windows install-dir layout can contain an additional directory
+        # level. Move the interpreter's actual runtime root, not an assumed
+        # top-level cpython-* directory, so bundle.json points to a real path.
+        installation_root = executables[0].parent
+    else:
+        candidates = [p for p in install_dir.iterdir() if p.is_dir() and not p.is_symlink() and p.name.startswith("cpython-")]
+        if not candidates:
+            raise SystemExit("uv installed Python but no cpython-* directory was produced.")
+        installation_root = sorted(candidates)[0]
+    shutil.move(str(installation_root), str(python_dir))
     dereference_symlinks(python_dir)
     if system_key() == "windows":
         interpreter = python_dir / "python.exe"

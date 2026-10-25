@@ -2,6 +2,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from runtime.compatibility import (
@@ -38,9 +39,10 @@ class CompatibilityPolicyTests(unittest.TestCase):
         def runner(args, **_kwargs):
             return subprocess.CompletedProcess(args, 0, stdout="Python 3.13.1", stderr="")
 
-        with self.assertRaisesRegex(CompatibilityError, "brew install python@3.11"):
-            resolve_python(self.manifest, candidates=["python3"],
-                           which=lambda _name: "/python", runner=runner)
+        with patch("runtime.compatibility.platform.system", return_value="Linux"):
+            with self.assertRaisesRegex(CompatibilityError, "apt packages documented"):
+                resolve_python(self.manifest, candidates=["python3"],
+                               which=lambda _name: "/python", runner=runner)
 
     def test_macos_platform_minimum_and_architecture(self):
         check_platform(self.manifest, "macos", "14.0", "aarch64")
