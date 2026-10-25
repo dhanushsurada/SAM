@@ -92,7 +92,8 @@ def main() -> int:
         try:
             print("1/4 start api ...", flush=True)
             start = cli("start", "api")
-            print("   ", json.dumps(start)[:300])
+            summary = json.dumps(start)
+            print("   ", summary if start.get("success") is False else summary[:300])
             started = True
             deadline = time.monotonic() + args.timeout
             health = None

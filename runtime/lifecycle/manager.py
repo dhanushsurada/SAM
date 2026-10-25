@@ -36,6 +36,7 @@ from runtime.lifecycle.state import (
     is_pid_alive,
     pid_matches_expected,
     read_state,
+    DEFAULT_SAM_DATA_DIR,
     update_phase,
     write_state,
 )
@@ -90,6 +91,10 @@ class SAMRuntime:
         if name not in self._specs:
             raise ValueError(f"Unknown process '{name}'. Known: {sorted(self._specs)}")
         return self._specs[name]
+
+    def _process_log_path(self, name: str) -> Path:
+        data_dir = Path(self.data_dir) if self.data_dir is not None else DEFAULT_SAM_DATA_DIR
+        return data_dir / "logs" / f"{name}.log"
 
     @property
     def process_names(self) -> list[str]:
@@ -150,21 +155,23 @@ class SAMRuntime:
         if read_state(name, self.data_dir) is not None:
             clear_state(name, self.data_dir)
 
+        log_path = self._process_log_path(name)
         try:
-            proc = subprocess.Popen(
-                spec.command,
-                cwd=str(spec.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                start_new_session=(platform.system() != "Windows"),
-                creationflags=(
-                    # NEW_PROCESS_GROUP | CREATE_NO_WINDOW: no console flash
-                    # when the GUI app launches the backend on Windows.
-                    subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
-                    if platform.system() == "Windows" else 0
-                ),
-            )
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("ab", buffering=0) as process_log:
+                proc = subprocess.Popen(
+                    spec.command,
+                    cwd=str(spec.cwd),
+                    stdout=process_log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=(platform.system() != "Windows"),
+                    creationflags=(
+                        # NEW_PROCESS_GROUP | CREATE_NO_WINDOW: no console flash
+                        # when the GUI app launches the backend on Windows.
+                        subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
+                        if platform.system() == "Windows" else 0
+                    ),
+                )
         except OSError as e:
             message = f"Failed to launch {name}: {e}"
             write_state(name, None, spec.command, self.data_dir, phase="failed", message=message)
@@ -172,7 +179,7 @@ class SAMRuntime:
 
         write_state(name, proc.pid, spec.command, self.data_dir, phase="starting")
 
-        ok, message = self._wait_for_ready(proc, spec)
+        ok, message = self._wait_for_ready(proc, spec, log_path=log_path)
         if not ok:
             if proc.poll() is None:
                 # Never became healthy but is still alive: it's a process
@@ -182,6 +189,9 @@ class SAMRuntime:
                 # holds a port with nothing left tracking it.
                 self._terminate_freshly_spawned(proc)
                 message += " The unhealthy process has been terminated."
+                output = self._read_tail_if_exited(proc, log_path=log_path)
+                if output != "(no output captured)":
+                    message += " Recent output:\n" + output
             # A startup failure must be explicit (Section 8) — recorded as
             # a persisted FAILED phase (Section 11), not silently cleared
             # back to indistinguishable-from-never-tried STOPPED. A later
@@ -205,7 +215,8 @@ class SAMRuntime:
         except Exception:
             pass
 
-    def _wait_for_ready(self, proc: subprocess.Popen, spec: ProcessSpec) -> tuple[bool, str]:
+    def _wait_for_ready(self, proc: subprocess.Popen, spec: ProcessSpec,
+                        log_path: Path | None = None) -> tuple[bool, str]:
         deadline = time.monotonic() + spec.startup_timeout_seconds
 
         if spec.ready_check == "http":
@@ -213,7 +224,7 @@ class SAMRuntime:
                 if proc.poll() is not None:
                     return False, (
                         f"{spec.name} exited during startup (code {proc.returncode}). "
-                        f"Output:\n{self._read_tail_if_exited(proc)}"
+                        f"Output:\n{self._read_tail_if_exited(proc, log_path=log_path)}"
                     )
                 try:
                     with urllib.request.urlopen(spec.health_url, timeout=1.0) as resp:
@@ -234,7 +245,7 @@ class SAMRuntime:
             if proc.poll() is not None:
                 return False, (
                     f"{spec.name} exited during startup (code {proc.returncode}). "
-                    f"Output:\n{self._read_tail_if_exited(proc)}"
+                    f"Output:\n{self._read_tail_if_exited(proc, log_path=log_path)}"
                 )
             return True, (
                 f"{spec.name} is running (pid {proc.pid}). Note: {spec.name} exposes no "
@@ -244,17 +255,18 @@ class SAMRuntime:
 
         return False, f"Unknown ready_check '{spec.ready_check}' for {spec.name}."
 
-    def _read_tail_if_exited(self, proc: subprocess.Popen, max_lines: int = 20) -> str:
-        # Only ever called after proc.poll() is not None, so the pipe has
-        # already closed on the child's side and this read reliably hits
-        # EOF rather than blocking.
+    def _read_tail_if_exited(self, proc: subprocess.Popen, max_lines: int = 20,
+                             log_path: Path | None = None) -> str:
+        # Read from the per-process file log. A PIPE can fill while SAM polls
+        # health, blocking the child before it can finish startup (notably on
+        # Windows); file-backed output remains drain-free and inspectable.
         if proc.poll() is None:
             return "(process is still running; not reading output to avoid blocking)"
         try:
-            remaining = proc.stdout.read() if proc.stdout else ""
-        except Exception:
-            remaining = ""
-        lines = (remaining or "").splitlines()
+            path = log_path or self._process_log_path("unknown")
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
         return "\n".join(lines[-max_lines:]) if lines else "(no output captured)"
 
     # ─── stop ───────────────────────────────────────────────────────────

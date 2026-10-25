@@ -55,24 +55,29 @@ class EnvironmentCompatibilityManager:
         """Return a read-only snapshot of OS, hardware, tools, and packages."""
         if self._discovery_cache is not None:
             return self._discovery_cache
+        packaged_runtime = bool(os.environ.get("SAM_USER_PACKAGES_DIR"))
         versions = {}
         python_policy = self.manifest["python"]
-        for version, path in available_python_interpreters(self.manifest, self.which, self.runner).items():
-            versions[version] = {"path": path, "version": version}
-        executable_candidates = list(dict.fromkeys(
-            list(python_policy["executables"].values()) + python_policy["bootstrap_candidates"]
-        ))
-        for name in executable_candidates:
-            path = self.which(name)
-            if path:
-                try:
-                    result = self.runner([path, "--version"], capture_output=True,
-                                         text=True, timeout=5, check=False)
-                    value = (result.stdout or result.stderr).strip()
-                    if result.returncode == 0:
-                        versions[name] = {"path": path, "version": value}
-                except (OSError, subprocess.SubprocessError):
-                    pass
+        if packaged_runtime:
+            running_version = "{}.{}".format(sys.version_info.major, sys.version_info.minor)
+            versions[running_version] = {"path": sys.executable, "version": platform.python_version()}
+        else:
+            for version, path in available_python_interpreters(self.manifest, self.which, self.runner).items():
+                versions[version] = {"path": path, "version": version}
+            executable_candidates = list(dict.fromkeys(
+                list(python_policy["executables"].values()) + python_policy["bootstrap_candidates"]
+            ))
+            for name in executable_candidates:
+                path = self.which(name)
+                if path:
+                    try:
+                        result = self.runner([path, "--version"], capture_output=True,
+                                             text=True, timeout=5, check=False)
+                        value = (result.stdout or result.stderr).strip()
+                        if result.returncode == 0:
+                            versions[name] = {"path": path, "version": value}
+                    except (OSError, subprocess.SubprocessError):
+                        pass
 
         tools = {}
         for name, policy in self.manifest.get("tools", {}).items():
@@ -80,7 +85,7 @@ class EnvironmentCompatibilityManager:
                           "xcode_command_line_tools": "xcode-select"}.get(name, name)
             path = self.which(executable)
             entry = {"installed": bool(path), "path": path, "minimum_version": policy.get("minimum_version")}
-            if path and name != "xcode_command_line_tools":
+            if path and name != "xcode_command_line_tools" and not packaged_runtime:
                 try:
                     result = self.runner([path, "--version"], capture_output=True,
                                          text=True, timeout=5, check=False)
@@ -97,11 +102,19 @@ class EnvironmentCompatibilityManager:
                 package: self._module_available(import_names.get(package, package.replace("-", "_")))
                 for package in requirements
             }
-        try:
-            selected_python = {"path": resolve_python(self.manifest, which=self.which,
-                                                       runner=self.runner)[0], "supported": True}
-        except CompatibilityError as exc:
-            selected_python = {"path": None, "supported": False, "detail": str(exc)}
+        if packaged_runtime:
+            running_version = "{}.{}".format(sys.version_info.major, sys.version_info.minor)
+            selected_python = {"path": sys.executable,
+                               "supported": running_version in python_policy["supported_versions"]}
+            if not selected_python["supported"]:
+                selected_python["detail"] = "Bundled Python {} is outside the supported versions: {}.".format(
+                    running_version, ", ".join(python_policy["supported_versions"]))
+        else:
+            try:
+                selected_python = {"path": resolve_python(self.manifest, which=self.which,
+                                                           runner=self.runner)[0], "supported": True}
+            except CompatibilityError as exc:
+                selected_python = {"path": None, "supported": False, "detail": str(exc)}
         try:
             disk = shutil.disk_usage(self.root)
             disk_info = {"total_gb": round(disk.total / (1024 ** 3), 2),
@@ -405,11 +418,13 @@ class EnvironmentCompatibilityManager:
             check_platform(self.manifest, os_name, os_version, architecture)
         except CompatibilityError as exc:
             issues.append({"severity": "error", "area": "platform", "message": str(exc)})
-        try:
-            executable, version = resolve_python(self.manifest)
-            issues.append({"severity": "ok", "area": "python", "message": "Using Python {} at {}".format(version, executable)})
-        except CompatibilityError as exc:
-            issues.append({"severity": "error", "area": "python", "message": str(exc)})
+        selected_python = self.discover()["python"]["selected"]
+        if selected_python.get("supported"):
+            issues.append({"severity": "ok", "area": "python",
+                           "message": "Using Python at {}".format(selected_python["path"])})
+        else:
+            issues.append({"severity": "error", "area": "python",
+                           "message": selected_python.get("detail", "No supported Python interpreter was found.")})
         try:
             has_desktop_sources = (self.root / "interfaces" / "desktop" / "src-tauri").is_dir()
             tool_names = (("node", "npm", "rust")
@@ -474,14 +489,16 @@ class EnvironmentCompatibilityManager:
             missing = []
             if manager == "brew":
                 brew = self.which("brew")
-                for package in packages:
+                if not brew:
+                    missing = list(packages)
+                elif packages:
                     try:
-                        result = self.runner([brew or "brew", "list", package], capture_output=True,
+                        result = self.runner([brew, "list", "--versions", *packages], capture_output=True,
                                              text=True, timeout=2, check=False)
-                        if result.returncode != 0:
-                            missing.append(package)
+                        installed = {line.split()[0] for line in result.stdout.splitlines() if line.split()}
+                        missing = [package for package in packages if package not in installed]
                     except (OSError, subprocess.SubprocessError):
-                        missing.append(package)
+                        missing = list(packages)
             elif manager == "apt":
                 for package in packages:
                     try:
