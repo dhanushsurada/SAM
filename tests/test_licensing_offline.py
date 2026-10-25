@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey 
 
 import licensing.license_manager as lm_module  # noqa: E402
 from licensing.schema import License, SCHEMA_VERSION  # noqa: E402
+from licensing import issue_license  # noqa: E402
 from licensing.issue_license import issue, load_private_key  # noqa: E402
 from licensing import keygen  # noqa: E402
 
@@ -36,17 +37,29 @@ def check(label, condition):
 
 
 def main():
-    test_home = Path.home()
+    import tempfile
+    test_home = Path(tempfile.mkdtemp(prefix="sam_licensing_test_"))
     test_key_dir = test_home / ".sam_signing_keys"
     test_pub_key = test_key_dir / "sam_public_key.pem"
+    test_priv_key = test_key_dir / "sam_private_key.pem"
+    test_sam_data = test_home / ".sam_data"
+    test_licensing_dir = test_sam_data / "licensing"
+    test_active_license = test_licensing_dir / "active_license.json"
+    test_clock_state = test_licensing_dir / "clock_state.json"
 
-    # Generate a throwaway TEST keypair (never the real production key —
-    # this only ever runs under a throwaway HOME set by the test runner).
-    keygen.main()
-    check("Test keypair generated", test_pub_key.exists())
+    with patch.object(keygen, "KEY_DIR", test_key_dir), \
+         patch.object(issue_license, "PRIVATE_KEY_PATH", test_priv_key), \
+         patch.object(lm_module, "PUBLIC_KEY_PATH", test_pub_key), \
+         patch.object(lm_module, "SAM_DATA_DIR", test_sam_data), \
+         patch.object(lm_module, "LICENSING_DIR", test_licensing_dir), \
+         patch.object(lm_module, "ACTIVE_LICENSE_PATH", test_active_license), \
+         patch.object(lm_module, "CLOCK_STATE_PATH", test_clock_state), \
+         patch.object(Path, "home", return_value=test_home):
 
-    # Point license_manager at the TEST public key for this whole test run.
-    with patch.object(lm_module, "PUBLIC_KEY_PATH", test_pub_key):
+        # Generate a throwaway TEST keypair (never the real production key —
+        # this only ever runs under a throwaway HOME set by the test runner).
+        keygen.main()
+        check("Test keypair generated", test_pub_key.exists())
 
         # === Basic roundtrip ===
         path = issue(edition="SAM Personal", lifetime=False, years=1.0,

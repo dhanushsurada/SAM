@@ -29,15 +29,15 @@ class RuntimeStatusTests(unittest.TestCase):
 
 class OllamaManagerTests(unittest.TestCase):
     @patch("runtime.ollama.manager.requests.get", side_effect=OSError("offline"))
-    @patch("runtime.ollama.manager.shutil.which", return_value=None)
-    def test_local_missing_binary_reports_not_installed(self, which, get):
+    @patch("runtime.ollama.manager.find_ollama_executable", return_value=None)
+    def test_local_missing_binary_reports_not_installed(self, find_exe, get):
         result = OllamaManager().status()
         self.assertEqual(result["state"], RuntimeStatus.NOT_INSTALLED.value)
         self.assertEqual(result["models"], [])
 
     @patch("runtime.ollama.manager.requests.get", side_effect=OSError("offline"))
-    @patch("runtime.ollama.manager.shutil.which", return_value="/usr/bin/ollama")
-    def test_installed_but_offline_reports_stopped(self, which, get):
+    @patch("runtime.ollama.manager.find_ollama_executable", return_value="/usr/bin/ollama")
+    def test_installed_but_offline_reports_stopped(self, find_exe, get):
         self.assertEqual(OllamaManager().status()["state"], RuntimeStatus.STOPPED.value)
 
     def test_remote_endpoint_is_never_started_by_sam(self):

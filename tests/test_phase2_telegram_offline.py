@@ -7,10 +7,19 @@ Usage:
     HOME=/tmp/sam_smoke_test_phase2 python3 tests/test_phase2_telegram_offline.py
 """
 
+import os
 import sys
+import tempfile
+import atexit
+import shutil
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+if "sam_smoke_test" not in os.environ.get("HOME", ""):
+    _temp_home = tempfile.mkdtemp(prefix="sam_smoke_test_telegram_")
+    os.environ["HOME"] = _temp_home
+    atexit.register(lambda: shutil.rmtree(_temp_home, ignore_errors=True))
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

@@ -100,6 +100,7 @@ def run_task_with_optional_sovereign_mode(
             task=task, brain=brain, session=session,
             founder_context=founder_context,
             initial_response=initial_response, cancel_event=cancel_event,
+            on_step=on_step,
         )
         return result_text, None
 
@@ -113,6 +114,7 @@ def run_task_with_optional_sovereign_mode(
                 task=task, brain=brain, session=session,
                 founder_context=founder_context,
                 initial_response=initial_response, cancel_event=cancel_event,
+                on_step=on_step,
             )
         return result_text, guard.report()
     finally:

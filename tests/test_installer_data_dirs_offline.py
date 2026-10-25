@@ -18,6 +18,7 @@ Usage:
     python3 tests/test_installer_data_dirs_offline.py
 """
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -45,7 +46,7 @@ def _import_settings(home: Path):
     result = subprocess.run(
         [sys.executable, "-c", "import config.settings"],
         cwd=str(REPO_ROOT),
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
         capture_output=True, text=True, timeout=15,
     )
     if result.returncode != 0:

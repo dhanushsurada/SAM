@@ -385,7 +385,7 @@ class ReactLoop:
         return False
 
     def run_task(self, task: str, brain, session, initial_response=None, cancel_event=None,
-                 on_event=None) -> TaskOutcome:
+                 on_event=None, on_step=None) -> TaskOutcome:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete, MAX_STEPS reached, or cancelled.
@@ -433,6 +433,19 @@ class ReactLoop:
             # Check if task is complete
             if response.action is None or response.action == "none":
                 logger.info("Task complete — no more actions needed")
+                observations.append({
+                    "step": steps,
+                    "action": None,
+                    "payload": None,
+                    "observation": response.text,
+                    "attempts": None,
+                    "success": True,
+                })
+                if on_step is not None:
+                    try:
+                        on_step(observations[-1])
+                    except Exception as e:
+                        logger.debug(f"on_step callback failed: {e}")
                 self._safe_reflect(task, observations, response.text)
                 status = (STATUS_FAILED if self._last_action_unresolved(observations)
                           else STATUS_SUCCESS)
@@ -452,6 +465,11 @@ class ReactLoop:
                 "attempts": verified["attempts"],
                 "success": verified["success"],
             })
+            if on_step is not None:
+                try:
+                    on_step(observations[-1])
+                except Exception as e:
+                    logger.debug(f"on_step callback failed: {e}")
             logger.info(f"Observation: {observation[:100]}")
 
             current_input = f"Observation from last step: {observation}"
@@ -479,7 +497,8 @@ class ReactLoop:
         return TaskOutcome(result, STATUS_UNABLE_TO_VERIFY)
 
     def run_planned_task(self, task: str, brain, session, founder_context: str = "",
-                          initial_response=None, cancel_event=None, on_event=None) -> TaskOutcome:
+                          initial_response=None, cancel_event=None, on_event=None,
+                          on_step=None) -> TaskOutcome:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
@@ -518,13 +537,13 @@ class ReactLoop:
         if not self._looks_multi_step(task):
             logger.info("Task looks single-step — skipping Planner call")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event, on_event=on_event)
+                                  cancel_event=cancel_event, on_event=on_event, on_step=on_step)
 
         plan = planner.decompose(task, self.settings, founder_context)
         if not plan:
             logger.info("No plan available — falling back to adaptive ReAct loop")
             return self.run_task(task, brain, session, initial_response=initial_response,
-                                  cancel_event=cancel_event, on_event=on_event)
+                                  cancel_event=cancel_event, on_event=on_event, on_step=on_step)
 
         logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
         self._safe_event(on_event, "planning", f"Plan created with {len(plan)} step(s)")
@@ -580,6 +599,11 @@ class ReactLoop:
                 "attempts": attempts,
                 "success": success,
             })
+            if on_step is not None:
+                try:
+                    on_step(observations[-1])
+                except Exception as e:
+                    logger.debug(f"on_step callback failed: {e}")
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
 
             if not success and recovery_replans < 2:
