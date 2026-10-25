@@ -22,10 +22,10 @@ from __future__ import annotations
 import os
 import platform
 import signal
+import http.client
 import subprocess
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -227,10 +227,19 @@ class SAMRuntime:
                         f"Output:\n{self._read_tail_if_exited(proc, log_path=log_path)}"
                     )
                 try:
-                    with urllib.request.urlopen(spec.health_url, timeout=1.0) as resp:
-                        if resp.status < 500:
+                    parsed = urllib.parse.urlsplit(spec.health_url)
+                    connection_type = (http.client.HTTPSConnection
+                                       if parsed.scheme == "https" else http.client.HTTPConnection)
+                    connection = connection_type(parsed.hostname, parsed.port, timeout=1.0)
+                    try:
+                        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+                        connection.request("GET", path)
+                        response = connection.getresponse()
+                        if response.status < 500:
                             return True, f"{spec.name} is ready (pid {proc.pid})."
-                except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+                    finally:
+                        connection.close()
+                except (http.client.HTTPException, ConnectionError, TimeoutError, OSError):
                     pass
                 time.sleep(0.3)
             return False, (

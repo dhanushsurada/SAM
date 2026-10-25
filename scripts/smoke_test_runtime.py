@@ -17,6 +17,7 @@ Exit code 0 only when every step succeeds.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import socket
@@ -24,7 +25,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 
@@ -46,6 +46,20 @@ def port_open(port: int) -> bool:
     with socket.socket() as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def get_json(port: int, path: str, timeout: float) -> dict:
+    """Call the local API directly, without consulting proxy environment vars."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        connection.request("GET", path, headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        if response.status >= 400:
+            fail(f"GET {path} returned HTTP {response.status}: {payload}")
+        return payload
+    finally:
+        connection.close()
 
 
 def main() -> int:
@@ -99,16 +113,14 @@ def main() -> int:
             health = None
             while time.monotonic() < deadline:
                 try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{args.port}/api/iqoo/health", timeout=2) as r:
-                        health = json.loads(r.read())
-                        break
+                    health = get_json(args.port, "/api/iqoo/health", timeout=2)
+                    break
                 except Exception:
                     time.sleep(0.5)
             if health is None:
                 fail("API health endpoint never answered")
             print("2/4 health:", health)
-            with urllib.request.urlopen(f"http://127.0.0.1:{args.port}/api/environment", timeout=10) as r:
-                environment = json.loads(r.read())
+            environment = get_json(args.port, "/api/environment", timeout=10)
             if "environment" not in environment:
                 fail(f"/api/environment lacks 'environment': {list(environment)}")
             print("    environment endpoint ok")
