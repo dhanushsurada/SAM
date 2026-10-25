@@ -118,16 +118,22 @@ def install_python(uv: str, version: str, work: Path, python_dir: Path) -> Path:
         executables = sorted(install_dir.rglob("python.exe"), key=lambda path: len(path.parts))
         if not executables:
             raise SystemExit("uv installed Python but no python.exe was produced.")
-        # uv's Windows install-dir layout can contain an additional directory
-        # level. Move the interpreter's actual runtime root, not an assumed
-        # top-level cpython-* directory, so bundle.json points to a real path.
-        installation_root = executables[0].parent
+        # Prefer the managed CPython tree over uv's possible executable shim.
+        # Copy it into the bundle so the runtime cannot retain references to
+        # the temporary uv install directory, which is deleted after staging.
+        cpython_roots = {
+            parent for executable in executables for parent in executable.parents
+            if parent.name.startswith("cpython-")
+        }
+        installation_root = sorted(cpython_roots, key=lambda path: len(path.parts), reverse=True)[0] \
+            if cpython_roots else executables[0].parent
+        shutil.copytree(installation_root, python_dir, symlinks=False)
     else:
         candidates = [p for p in install_dir.iterdir() if p.is_dir() and not p.is_symlink() and p.name.startswith("cpython-")]
         if not candidates:
             raise SystemExit("uv installed Python but no cpython-* directory was produced.")
         installation_root = sorted(candidates)[0]
-    shutil.move(str(installation_root), str(python_dir))
+        shutil.move(str(installation_root), str(python_dir))
     dereference_symlinks(python_dir)
     if system_key() == "windows":
         interpreter = python_dir / "python.exe"
@@ -239,6 +245,14 @@ def main() -> int:
             if backup and backup.exists() and not out.exists():
                 backup.rename(out)
             raise
+        bundled_interpreter = out / relative_python
+        if not bundled_interpreter.is_file():
+            if backup is not None and backup.exists():
+                failed_stage = out.with_name(out.name + ".incomplete")
+                out.rename(failed_stage)
+                backup.rename(out)
+            raise SystemExit("Staged runtime lost its Python executable after relocation: {}".format(
+                bundled_interpreter))
         if backup is not None:
             shutil.rmtree(backup, ignore_errors=True)
     print(f"Staged {key}/{arch} runtime at {out}")

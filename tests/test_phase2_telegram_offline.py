@@ -16,6 +16,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 if "sam_smoke_test" not in os.environ.get("HOME", ""):
     _temp_home = tempfile.mkdtemp(prefix="sam_smoke_test_telegram_")
     os.environ["HOME"] = _temp_home
@@ -75,6 +77,7 @@ def test_device_registry():
     dr_module.PAIRING_TOKEN_TTL_MINUTES = old_ttl
 
 
+@pytest.mark.asyncio
 async def test_bridge_handlers():
     settings = Settings()
     registry = DeviceRegistry()
