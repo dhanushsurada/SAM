@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "${{ matrix.python }}", cache: pip }
-      - run: pip install pytest requests pyyaml fastapi "uvicorn[standard]" httpx python-multipart cryptography python-telegram-bot
+      - run: pip install pytest pytest-asyncio requests pyyaml fastapi "uvicorn[standard]" httpx python-multipart cryptography python-telegram-bot playwright python-docx pypdf Pillow
       - run: python -m pytest tests -q --ignore=tests/test_founder_mode_live.py --ignore=tests/test_sovereign_e2e_live.py
 
   desktop-frontend:

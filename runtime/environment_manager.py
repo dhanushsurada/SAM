@@ -48,6 +48,8 @@ class EnvironmentCompatibilityManager:
         self.runner = runner
         self.opener = opener
         self._discovery_cache = None
+        self._dependency_status_cache = None
+        self._system_dependency_status_cache = None
 
     def discover(self) -> dict:
         """Return a read-only snapshot of OS, hardware, tools, and packages."""
@@ -347,12 +349,16 @@ class EnvironmentCompatibilityManager:
                 ) from exc
             shutil.rmtree(backup, ignore_errors=True)
         self._discovery_cache = None
+        self._dependency_status_cache = None
+        self._system_dependency_status_cache = None
         self.record_setup_step("dependency-repair", "complete",
                                "Repaired groups: " + ", ".join(plan["groups"]))
         return {"state": "complete", "groups": plan["groups"], "report": self.report()}
 
     def dependency_status(self) -> dict:
         """Separate install-critical packages from optional capabilities."""
+        if self._dependency_status_cache is not None:
+            return self._dependency_status_cache
         report = self.discover()["dependencies"]
         required = set(self.manifest["python"].get("required_groups", []))
         requirement_specs = parse_requirements(self.root / self.manifest["python"]["requirements_file"])
@@ -379,6 +385,7 @@ class EnvironmentCompatibilityManager:
             status[group] = {"required": group in required, "available": not missing and not incompatible,
                              "missing": missing, "incompatible": incompatible, "versions": versions,
                              "recovery": recovery}
+        self._dependency_status_cache = status
         return status
 
     def dependencies_ready(self, groups: Optional[list[str]] = None) -> bool:
@@ -456,6 +463,8 @@ class EnvironmentCompatibilityManager:
 
     def system_dependency_status(self) -> dict:
         """Describe optional OS prerequisites without making them core blockers."""
+        if self._system_dependency_status_cache is not None:
+            return self._system_dependency_status_cache
         os_key = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system(), "")
         groups = {}
         for group, policies in self.manifest.get("system_dependencies", {}).items():
@@ -468,7 +477,7 @@ class EnvironmentCompatibilityManager:
                 for package in packages:
                     try:
                         result = self.runner([brew or "brew", "list", package], capture_output=True,
-                                             text=True, timeout=5, check=False)
+                                             text=True, timeout=2, check=False)
                         if result.returncode != 0:
                             missing.append(package)
                     except (OSError, subprocess.SubprocessError):
@@ -477,7 +486,7 @@ class EnvironmentCompatibilityManager:
                 for package in packages:
                     try:
                         result = self.runner(["dpkg-query", "-W", "-f=${Status}", package],
-                                             capture_output=True, text=True, timeout=5, check=False)
+                                             capture_output=True, text=True, timeout=2, check=False)
                         if result.returncode != 0 or "install ok installed" not in result.stdout:
                             missing.append(package)
                     except (OSError, subprocess.SubprocessError):
@@ -487,7 +496,7 @@ class EnvironmentCompatibilityManager:
             if libraries and platform.system() == "Linux":
                 try:
                     result = self.runner(["ldconfig", "-p"], capture_output=True, text=True,
-                                         timeout=8, check=False)
+                                         timeout=3, check=False)
                     available_libraries = result.stdout or ""
                     missing_libraries = [library for library in libraries
                                          if library not in available_libraries]
@@ -501,6 +510,7 @@ class EnvironmentCompatibilityManager:
                              "install_hint": (("brew install " if manager == "brew" else "sudo apt-get install ")
                                               + " ".join(missing)
                                               if missing and manager in {"brew", "apt"} else "")}
+        self._system_dependency_status_cache = groups
         return groups
 
     def system_dependency_plan(self, group: str) -> dict:
