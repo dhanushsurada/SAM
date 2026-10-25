@@ -161,10 +161,17 @@ jobs:
       - name: Install-test (macOS)
         if: matrix.os == 'macos'
         run: |
-          MOUNT="$(hdiutil attach -nobrowse -quiet dist/*.dmg | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
-          python scripts/smoke_test_runtime.py "$MOUNT/SAM.app/Contents/Resources/sam-runtime"
+          MOUNT=""
+          cleanup() { if [[ -n "$MOUNT" ]]; then hdiutil detach -quiet "$MOUNT" || true; fi; }
+          trap cleanup EXIT
+          MOUNT="$(hdiutil attach -nobrowse dist/*.dmg | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
+          [[ -n "$MOUNT" ]] || { echo "Could not determine the mounted DMG volume path." >&2; exit 1; }
+          APP="$MOUNT/SAM.app"
+          RUNTIME="$APP/Contents/Resources/sam-runtime"
+          [[ -d "$APP" ]] || { echo "SAM.app was not found in mounted DMG: $MOUNT" >&2; exit 1; }
+          [[ -f "$RUNTIME/bundle.json" ]] || { echo "Packaged runtime metadata is missing: $RUNTIME/bundle.json" >&2; exit 1; }
+          python scripts/smoke_test_runtime.py "$RUNTIME"
           if [[ -n "${SAM_APPLE_SIGNING_IDENTITY:-}" ]]; then codesign --verify --deep --strict "$MOUNT/SAM.app"; fi
-          hdiutil detach -quiet "$MOUNT"
 
       - uses: actions/upload-artifact@v4
         with:
