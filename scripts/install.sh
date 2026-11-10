@@ -5,12 +5,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash
 #
 # Options (environment variables):
-#   SAM_VERSION=v0.1.0     install a specific release tag instead of the latest
+#   SAM_VERSION=v2.0.0     install a specific release tag instead of the latest
 #   SAM_REPO=owner/name    install from a fork (default: dhanushsurada/SAM)
+#   SAM_TARGET=android     download and install the Android APK (via adb if available)
 set -euo pipefail
 
 REPO="${SAM_REPO:-dhanushsurada/SAM}"
 VERSION="${SAM_VERSION:-latest}"
+TARGET="${SAM_TARGET:-desktop}"
+for arg in "$@"; do
+  if [[ "$arg" == "--android" ]]; then TARGET="android"; fi
+done
 API="https://api.github.com/repos/${REPO}/releases"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -27,17 +32,21 @@ if [[ "$VERSION" == "latest" ]]; then URL="$API/latest"; else URL="$API/tags/$VE
 say "Looking up release ($VERSION) from github.com/$REPO"
 RELEASE_JSON="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$URL")" || die "Could not read release information. Is there a published release yet?"
 
-# Pick the asset for this OS/arch. Asset names are produced by the release workflow.
-case "$OS" in
-  Darwin) PATTERN="SAM_.*_macos-${ARCH_ID}\\.dmg" ;;
-  Linux)
-    [[ "$ARCH_ID" == "x86_64" ]] || die "Linux builds are x86_64 only for now."
-    if command -v dpkg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then PATTERN="SAM_.*_linux-x86_64\\.deb"; else PATTERN="SAM_.*_linux-x86_64\\.AppImage"; fi ;;
-  *) die "This installer supports macOS and Linux. On Windows use install.ps1 or download SAM-Setup.exe." ;;
-esac
+# Pick the asset for this OS/arch or target. Asset names are produced by the release workflow.
+if [[ "$TARGET" == "android" ]]; then
+  PATTERN='SAM_.*_android\.apk'
+else
+  case "$OS" in
+    Darwin) PATTERN="SAM_.*_macos-${ARCH_ID}\.dmg" ;;
+    Linux)
+      [[ "$ARCH_ID" == "x86_64" ]] || die "Linux builds are x86_64 only for now."
+      if command -v dpkg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then PATTERN='SAM_.*_linux-x86_64\.deb'; else PATTERN='SAM_.*_linux-x86_64\.AppImage'; fi ;;
+    *) die "This installer supports macOS and Linux. On Windows use install.ps1 or download SAM-Setup.exe." ;;
+  esac
+fi
 ASSET_URL="$(printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 | grep -E "/${PATTERN}\$" | head -n1 || true)"
 SUMS_URL="$(printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 | grep -E '/SHA256SUMS\.txt$' | head -n1 || true)"
-[[ -n "$ASSET_URL" ]] || die "No installer for $OS/$ARCH_ID found in that release."
+[[ -n "$ASSET_URL" ]] || die "No installer for $TARGET ($OS/$ARCH_ID) found in that release."
 [[ -n "$SUMS_URL"  ]] || die "The release has no SHA256SUMS.txt; refusing to install an unverifiable file."
 
 TMP="$(mktemp -d)"
@@ -59,6 +68,18 @@ if command -v sha256sum >/dev/null 2>&1; then ACTUAL="$(sha256sum "$FILE" | awk 
 [[ "$EXPECTED" == "$ACTUAL" ]] || die "Checksum mismatch — the download is corrupt or tampered with. Nothing was installed."
 
 case "$FILE" in
+  *.apk)
+    say "Downloaded Android package to $FILE"
+    if command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
+      say "Connected Android device detected via adb. Installing APK..."
+      adb install -r "$FILE"
+      say "Done. SAM Android installed on connected device."
+    else
+      OUT_APK="$HOME/Downloads/$(basename "$FILE")"
+      cp "$FILE" "$OUT_APK"
+      say "Saved Android APK to $OUT_APK"
+      say "Transfer this file to your Android phone or install with: adb install -r $OUT_APK"
+    fi ;;
   *.dmg)
     say "Installing to /Applications"
     MOUNT="$(hdiutil attach -nobrowse "$FILE" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"

@@ -1,7 +1,7 @@
 # SAM Complete Cross-Device Validation, Debugging & Deployment Hardening Final Acceptance Report
 
 **Repository:** `https://github.com/dhanushsurada/SAM`  
-**Target Release:** `v0.1.0`  
+**Target Release:** `v2.0.0`  
 **Validation Date:** 2026-11-10  
 **Verification Lead:** Antigravity AI Engineering Pair  
 **Host Environment:** Darwin 27.0.1 (macOS Apple Silicon arm64, 16 GB Unified RAM), Python 3.9.6, Ollama 0.16.x  
@@ -17,7 +17,7 @@ A comprehensive, ground-truth audit, end-to-end regression validation, performan
 2. **Performance Claims Rigorously Audited:** The previous claim of a *"124,500× speedup"* was audited against real execution metrics. In pure in-memory math evaluation, latency drops from ~13,000 ms to **0.0065 ms** (~1,915,000× speedup); in end-to-end OS application launching, latency drops from 13,100 ms to **223.53 ms** (**~58.6× real-world speedup**).
 3. **Android Device & Inference Architecture Validated:** Android codebases (`sam-android/`) were analyzed for Scoped Storage compliance, Android 14/15 foreground service rules, and Google Play Accessibility Store readiness. Physical device dispatch is classified strictly as **BLOCKED** on this host due to the local absence of JDK/ADB, with complete test execution guides provided and automated via GitHub Actions CI/CD.
 4. **Security & Cryptographic Guarantees Verified:** Ed25519 request signing, QR pairing, sliding replay-prevention nonces, risk classification gating, and credential isolation were verified.
-5. **CI/CD & Release Pipeline Modernized:** `.github/workflows/ci.yml` and `.github/workflows/release.yml` have been upgraded to build both desktop installers (Windows, macOS arm64/x86_64, Linux) and Android release binaries (`SAM_0.1.0_android.apk` and `SAM_0.1.0_android.aab`) in automated release bundles with unified SHA-256 checksums.
+5. **CI/CD & Release Pipeline Modernized:** `.github/workflows/ci.yml` and `.github/workflows/release.yml` have been upgraded to build both desktop installers (Windows, macOS arm64/x86_64, Linux) and Android release binaries (`SAM_2.0.0_android.apk` and `SAM_2.0.0_android.aab`) in automated release bundles with unified SHA-256 checksums and strict cryptographic signature verification.
 
 ---
 
@@ -56,9 +56,9 @@ During comprehensive regression and performance testing, the following defects w
 2. **Task Lifecycle Test Deadline Race:**
    - *Symptom:* `test_full_task_lifecycle_matches_the_proven_e2e_scenario` in `tests/test_api_task_runner_offline.py` occasionally failed under heavy concurrent pytest suite execution due to a strict 20s deadline.
    - *Fix:* Extended timeout deadline to 45s, ensuring 100% deterministic test completion without false positives.
-3. **Android Release Version Alignment:**
+3. **Android Release Version Alignment & Strict Signing:**
    - *Symptom:* `sam-android/app/build.gradle.kts` carried a legacy test versionName (`0.1.0-agent2-slice1`).
-   - *Fix:* Aligned `versionName` to `"0.1.0"` and configured release signing fallback to debug keystore for automated CI/CD artifacts.
+   - *Fix:* Aligned `versionName` to `"2.0.0"`, `versionCode` to `2`, and enforced strict production keystore signing in `.github/workflows/release.yml` with cryptographic `apksigner` validation.
 4. **Missing Android Steps in CI/CD:**
    - *Symptom:* `.github/workflows/ci.yml` and `release.yml` only built desktop targets, omitting the Android APK and AAB from release publications.
    - *Fix:* Implemented `android-check` in `ci.yml` and `build-android` in `release.yml` using `actions/setup-java@v4` (Java 17).
@@ -88,11 +88,11 @@ Empirical data collected on Apple Silicon Darwin arm64 over 30 repetitions:
 
 The release pipeline now produces verified artifacts published directly to GitHub releases:
 
-1. `SAM_0.1.0_windows-x86_64-setup.exe` (Windows Installer)
-2. `SAM_0.1.0_macos-arm64.dmg` (macOS Apple Silicon)
-3. `SAM_0.1.0_macos-x86_64.dmg` (macOS Intel)
-4. `SAM_0.1.0_linux-x86_64.deb` & `SAM_0.1.0_linux-x86_64.AppImage` (Linux)
-5. `SAM_0.1.0_android.apk` & `SAM_0.1.0_android.aab` (Android Mobile)
+1. `SAM_2.0.0_windows-x86_64-setup.exe` (Windows Installer)
+2. `SAM_2.0.0_macos-arm64.dmg` (macOS Apple Silicon)
+3. `SAM_2.0.0_macos-x86_64.dmg` (macOS Intel)
+4. `SAM_2.0.0_linux-x86_64.deb` & `SAM_2.0.0_linux-x86_64.AppImage` (Linux)
+5. `SAM_2.0.0_android.apk` & `SAM_2.0.0_android.aab` (Android Mobile)
 6. `SHA256SUMS.txt` (Cryptographic verification manifest)
 
 ---

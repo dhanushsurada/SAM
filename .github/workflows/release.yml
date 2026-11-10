@@ -203,22 +203,16 @@ jobs:
       - name: Grant execute permission for gradlew
         working-directory: sam-android
         run: chmod +x gradlew
-      - name: Decode Android release keystore
+      - name: Validate and decode Android release keystore
         id: android_keystore
         run: |
-          if [[ -n "$SAM_ANDROID_KEYSTORE_BASE64" ]]; then
-            if [[ -z "$SAM_ANDROID_KEYSTORE_PASSWORD" || -z "$SAM_ANDROID_KEY_ALIAS" || -z "$SAM_ANDROID_KEY_PASSWORD" ]]; then
-              echo "Error: Incomplete Android signing secrets provided. All 4 SAM_ANDROID_* secrets must be configured together." >&2
-              exit 1
-            fi
-            echo "$SAM_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
-            echo "SIGNED_BUILD=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Notice: No Android release keystore configured. Building unsigned release artifacts."
-            echo "KEYSTORE_PATH=" >> "$GITHUB_OUTPUT"
-            echo "SIGNED_BUILD=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "$SAM_ANDROID_KEYSTORE_BASE64" || -z "$SAM_ANDROID_KEYSTORE_PASSWORD" || -z "$SAM_ANDROID_KEY_ALIAS" || -z "$SAM_ANDROID_KEY_PASSWORD" ]]; then
+            echo "Error: Production Android release requires all 4 secrets: SAM_ANDROID_KEYSTORE_BASE64, SAM_ANDROID_KEYSTORE_PASSWORD, SAM_ANDROID_KEY_ALIAS, and SAM_ANDROID_KEY_PASSWORD." >&2
+            echo "Failing production release build to prevent distributing unsigned or insecure Android artifacts." >&2
+            exit 1
           fi
+          echo "$SAM_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
       - name: Build Android Release APK and AAB
         working-directory: sam-android
         env:
@@ -228,6 +222,21 @@ jobs:
           SAM_ANDROID_KEY_PASSWORD: ${{ env.SAM_ANDROID_KEY_PASSWORD }}
         run: |
           ./gradlew assembleRelease bundleRelease --no-daemon
+      - name: Verify Android signature
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n1)"
+          if [[ -z "$APKSIGNER" ]]; then
+            echo "Error: apksigner tool not found in $ANDROID_HOME/build-tools" >&2
+            exit 1
+          fi
+          APK="$(find sam-android/app/build/outputs/apk/release -name "*.apk" | head -n1)"
+          if [[ -z "$APK" ]]; then
+            echo "Error: Release APK was not found after build." >&2
+            exit 1
+          fi
+          echo "Verifying cryptographic signature on $APK"
+          "$APKSIGNER" verify --verbose "$APK"
       - name: Collect Android artifacts
         shell: bash
         run: |

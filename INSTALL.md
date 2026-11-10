@@ -5,23 +5,44 @@ SAM installs like any other desktop app: download, double-click, done. You do
 runtime. The only separate piece is [Ollama](https://ollama.com) (the local
 model engine), which SAM's first-run screen guides you through installing.
 
-| | Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) |
-|---|---|---|---|
-| **Download** | `SAM_<ver>_windows-x86_64-setup.exe` | `SAM_<ver>_macos-arm64.dmg` (Apple silicon) or `…-x86_64.dmg` (Intel) | `SAM_<ver>_linux-x86_64.deb` (or `.AppImage`) |
-| **Install** | Double-click. No administrator prompt. | Open the DMG, drag **SAM** to Applications. | `.deb`: `sudo apt install ./SAM_*.deb`; AppImage: download and make executable, or use `scripts/install.sh`. |
-| **Start** | Start menu → SAM | Applications → SAM | `.deb`: Applications menu; AppImage: run `SAM.AppImage` (the script installs it at `~/.local/bin/SAM.AppImage`). |
+| | Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) | Android 8.0+ (API 26+) |
+|---|---|---|---|---|
+| **Download** | `SAM_<ver>_windows-x86_64-setup.exe` | `SAM_<ver>_macos-arm64.dmg` (Apple silicon) or `…-x86_64.dmg` (Intel) | `SAM_<ver>_linux-x86_64.deb` (or `.AppImage`) | `SAM_<ver>_android.apk` (or `.aab` for Play Store) |
+| **Install** | Double-click. No administrator prompt. | Open the DMG, drag **SAM** to Applications. | `.deb`: `sudo apt install ./SAM_*.deb`; AppImage: download and make executable, or use `scripts/install.sh`. | `adb install -r SAM_*.apk` or tap APK on phone |
+| **Start** | Start menu → SAM | Applications → SAM | `.deb`: Applications menu; AppImage: run `SAM.AppImage` (installed at `~/.local/bin/SAM.AppImage`). | App launcher → SAM |
 
 Get the files from the project's **Releases** page, or use the one-line
 installer, which also verifies the download's SHA-256 checksum:
 
 ```bash
-# macOS / Linux
+# macOS / Linux (Desktop)
 curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash
+
+# Android APK (downloads and installs via adb if phone connected)
+curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash -s -- --android
 ```
 ```powershell
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1 | iex
 ```
+
+## Android Mobile Installation & Cross-Device Pairing
+
+1. **Install Android APK:**
+   - Option A (USB/ADB): Connect phone with USB Debugging enabled, run:
+     ```bash
+     adb install -r SAM_2.0.0_android.apk
+     ```
+   - Option B (Direct on Phone): Download `SAM_2.0.0_android.apk` from GitHub Releases in your phone browser, tap the downloaded file, and confirm install.
+2. **Permissions:**
+   - On first launch, grant **Notifications** (required for task updates).
+   - To enable UI automation and app control, grant **Accessibility Service** in Android Settings.
+   - To enable phone notification summarization, grant **Notification Access** in Android Settings.
+3. **Pair with Desktop:**
+   - Ensure phone and desktop are on the same Wi-Fi network (or configure the secure remote relay).
+   - In Desktop SAM, navigate to **Settings → Connected Devices → Pair New Device** to display the QR code.
+   - In Android SAM, tap **Pair Device** and scan the QR code (or enter the pairing token).
+   - Both devices complete an Ed25519 mutual authentication handshake; status changes to **Connected**.
 
 ## First launch
 
@@ -105,7 +126,7 @@ Ollama and downloaded models are never touched by SAM's uninstallers.
 ## For developers: building the installers
 
 ```bash
-git tag v0.1.0 && git push --tags      # CI builds + smoke-tests all platforms, drafts a release
+git tag v2.0.0 && git push origin v2.0.0      # CI builds + smoke-tests all platforms, drafts a release
 ```
 
 or locally, on the target OS: `cd interfaces/desktop && npm ci && npm run package`.

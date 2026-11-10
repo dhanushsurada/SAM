@@ -1,8 +1,8 @@
-# SAM v0.1.0 Release Readiness & Packaging Report
+# SAM v2.0.0 Release Readiness & Packaging Report
 
 **Document ID:** `VAL-PHASE13-RELEASE-001`  
 **Date:** 2026-11-10  
-**Target Release:** `v0.1.0`  
+**Target Release:** `v2.0.0`  
 **Repository:** `dhanushsurada/SAM`  
 **Deployment Scope:** Desktop Installers (Win, Mac, Linux) + Mobile (Android APK & AAB)
 
@@ -10,17 +10,17 @@
 
 ## 1. Release Architecture & Artifact Manifest
 
-The SAM v0.1.0 release builds unified binary installers across all primary consumer desktop operating systems and Android:
+The SAM v2.0.0 release builds unified binary installers across all primary consumer desktop operating systems and Android:
 
 | Operating System | Architecture | Package Format | Output Filename | Generation Method |
 | :--- | :--- | :--- | :--- | :--- |
-| **Windows** | x86_64 | NSIS Installer (.exe) | `SAM_0.1.0_windows-x86_64-setup.exe` | Tauri v2 Bundler + UV Python Runtime |
-| **macOS** | Apple Silicon (arm64) | Apple Disk Image (.dmg) | `SAM_0.1.0_macos-arm64.dmg` | Tauri v2 Bundler + Signed Python Runtime |
-| **macOS** | Intel (x86_64) | Apple Disk Image (.dmg) | `SAM_0.1.0_macos-x86_64.dmg` | Tauri v2 Bundler + Python 3.12 Runtime |
-| **Linux** | x86_64 | Debian Package (.deb) | `SAM_0.1.0_linux-x86_64.deb` | Tauri v2 Linux Bundler |
-| **Linux** | x86_64 | Standalone AppImage | `SAM_0.1.0_linux-x86_64.AppImage` | Tauri v2 AppImage Bundler |
-| **Android** | arm64-v8a / armeabi-v7a | Android Application (.apk) | `SAM_0.1.0_android.apk` | Gradle `assembleRelease` (Debug keystore fallback) |
-| **Android** | Multi-arch Play Bundle | Android App Bundle (.aab) | `SAM_0.1.0_android.aab` | Gradle `bundleRelease` |
+| **Windows** | x86_64 | NSIS Installer (.exe) | `SAM_2.0.0_windows-x86_64-setup.exe` | Tauri v2 Bundler + UV Python Runtime |
+| **macOS** | Apple Silicon (arm64) | Apple Disk Image (.dmg) | `SAM_2.0.0_macos-arm64.dmg` | Tauri v2 Bundler + Signed Python Runtime |
+| **macOS** | Intel (x86_64) | Apple Disk Image (.dmg) | `SAM_2.0.0_macos-x86_64.dmg` | Tauri v2 Bundler + Python 3.12 Runtime |
+| **Linux** | x86_64 | Debian Package (.deb) | `SAM_2.0.0_linux-x86_64.deb` | Tauri v2 Linux Bundler |
+| **Linux** | x86_64 | Standalone AppImage | `SAM_2.0.0_linux-x86_64.AppImage` | Tauri v2 AppImage Bundler |
+| **Android** | arm64-v8a / armeabi-v7a | Android Application (.apk) | `SAM_2.0.0_android.apk` | Gradle `assembleRelease` (Production Keystore Verified) |
+| **Android** | Multi-arch Play Bundle | Android App Bundle (.aab) | `SAM_2.0.0_android.aab` | Gradle `bundleRelease` (Production Keystore Verified) |
 
 ---
 
@@ -32,7 +32,7 @@ The SAM v0.1.0 release builds unified binary installers across all primary consu
 3. **Rust Tauri Check (`rust-check`):** Verifies `src-tauri` cargo build on Ubuntu, Windows, and macOS runners.
 4. **Staged Runtime Smoke (`stage-and-smoke`):** Stages the Python runtime via `scripts/stage_runtime.py` and runs `scripts/smoke_test_runtime.py` on all 3 OS runners.
 5. **Installer Script Lint (`script-lint`):** Shellcheck and PowerShell AST parser verification for setup scripts.
-6. **Android Check (`android-check`) [NEWLY ADDED]:**
+6. **Android Check (`android-check`):**
    - Runner: `ubuntu-22.04`
    - Setup: `actions/setup-java@v4` (Java 17 Temurin, Gradle cache)
    - Commands: `./gradlew testDebugUnitTest --no-daemon` and `./gradlew assembleDebug --no-daemon`
@@ -40,10 +40,12 @@ The SAM v0.1.0 release builds unified binary installers across all primary consu
 
 ### B. Release Workflow (`.github/workflows/release.yml`)
 1. **Desktop Matrix (`build`):** Matrix build across Windows, macOS (arm64 + x86_64), and Linux.
-2. **Android Release Builder (`build-android`) [NEWLY ADDED]:**
+2. **Android Release Builder (`build-android`):**
    - Runner: `ubuntu-22.04` with Java 17.
-   - Builds both release APK and AAB: `./gradlew assembleRelease bundleRelease --no-daemon`.
-   - Renames outputs to standard naming convention: `SAM_0.1.0_android.apk` and `SAM_0.1.0_android.aab`.
+   - Enforces production signing credentials: fails if `SAM_ANDROID_KEYSTORE_*` secrets are missing.
+   - Builds release APK and AAB: `./gradlew assembleRelease bundleRelease --no-daemon`.
+   - Verifies cryptographic signature with `apksigner verify --verbose` before packaging.
+   - Collects verified artifacts: `SAM_2.0.0_android.apk` and `SAM_2.0.0_android.aab`.
    - Uploads artifact under `installers-android`.
 3. **Draft Release Publisher (`release`):**
    - Depends on: `[build, build-android]`.
@@ -58,16 +60,18 @@ The SAM v0.1.0 release builds unified binary installers across all primary consu
 - [x] **Repository Cleanliness:** No temporary files or leftover scratch artifacts committed.
 - [x] **Regression Suite:** 100% of offline unit and integration tests passing (486/486 passed).
 - [x] **Version Consistency:**
-  - `interfaces/desktop/src-tauri/tauri.conf.json`: `"0.1.0"`
-  - `sam-android/app/build.gradle.kts`: `versionCode = 1`, `versionName = "0.1.0"`
-  - Setup scripts: Aligned to `v0.1.0`.
-- [x] **Licensing & Headers:** Apache 2.0 license headers preserved.
+  - `interfaces/desktop/src-tauri/tauri.conf.json`: `"2.0.0"`
+  - `interfaces/desktop/package.json`: `"2.0.0"`
+  - `sam-android/app/build.gradle.kts`: `versionCode = 2`, `versionName = "2.0.0"`
+  - Setup scripts: Aligned to `v2.0.0`.
+- [x] **Licensing & Headers:** Apache 2.0 / AGPL v3 license headers preserved.
 - [x] **Security Approval Gating:** High-risk actions protected by user approval dialogs.
 - [x] **Cross-Device Coordination:** 60-second leased execution, replay prevention, and idempotency verified.
 - [x] **CI/CD Integration:** Android build and testing integrated into GitHub Actions.
+- [x] **Production Signing Enforcement:** Debug fallback removed; release fails without valid signing secrets.
 
 ---
 
 ## 4. Release Conclusion
 
-SAM v0.1.0 meets all production release readiness criteria for desktop and mobile distribution.
+SAM v2.0.0 meets all production release readiness criteria for desktop and mobile distribution.
