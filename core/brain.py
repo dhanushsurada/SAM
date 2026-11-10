@@ -77,13 +77,27 @@ class Brain:
         self.settings = settings
         self._model_loaded = False
         self._current_model = None
+        self._cached_models = []
+        self._cached_models_time = 0.0
+        self._cached_ollama_status = None
+        self._cached_ollama_time = 0.0
+        self._cache_ttl_seconds = 30.0
 
     def _check_ollama(self) -> bool:
-        """Check if Ollama is running."""
+        """Check if Ollama is running, with short-term caching to avoid redundant calls."""
+        import time
+        now = time.time()
+        if self._cached_ollama_status is not None and (now - self._cached_ollama_time) < self._cache_ttl_seconds:
+            return self._cached_ollama_status
         try:
             r = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=3)
-            return r.status_code == 200
+            status = (r.status_code == 200)
+            self._cached_ollama_status = status
+            self._cached_ollama_time = now
+            return status
         except Exception:
+            self._cached_ollama_status = False
+            self._cached_ollama_time = now
             return False
 
     def list_installed_models(self) -> list:
@@ -104,39 +118,51 @@ class Brain:
         if r.status_code != 200:
             raise RuntimeError(f"Ollama returned HTTP {r.status_code} when listing models")
         try:
-            return [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+            models = [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+            import time
+            self._cached_models = models
+            self._cached_models_time = time.time()
+            return models
         except Exception as e:
             raise RuntimeError(f"Ollama returned an unreadable model list: {e}") from e
 
     def _ensure_model(self) -> str:
-        """Ensure the right model is available. Returns model name to use."""
+        """Ensure the right model is available. Returns model name to use, with tag caching."""
         if not self._check_ollama():
             raise RuntimeError(
                 "Ollama is not running. Start it with: ollama serve"
             )
 
-        try:
-            r = requests.get(f"{self.settings.ollama_host}/api/tags")
-            models = [m["name"] for m in r.json().get("models", [])]
+        import time
+        now = time.time()
+        if self._cached_models and (now - self._cached_models_time) < self._cache_ttl_seconds:
+            models = self._cached_models
+        else:
+            try:
+                r = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=5)
+                models = [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+                self._cached_models = models
+                self._cached_models_time = now
+            except Exception as e:
+                raise RuntimeError(f"Model check failed: {e}")
 
-            if self.settings.primary_model in models:
-                return self.settings.primary_model
-            elif self.settings.fallback_model in models:
-                logger.warning(
-                    f"Primary model {self.settings.primary_model} not found. "
-                    f"Using fallback: {self.settings.fallback_model}"
-                )
-                return self.settings.fallback_model
-            else:
-                raise RuntimeError(
-                    f"No SAM models found in Ollama. Run: ollama pull {self.settings.primary_model}"
-                )
-        except Exception as e:
-            raise RuntimeError(f"Model check failed: {e}")
+        if self.settings.primary_model in models:
+            return self.settings.primary_model
+        elif self.settings.fallback_model in models:
+            logger.warning(
+                f"Primary model {self.settings.primary_model} not found. "
+                f"Using fallback: {self.settings.fallback_model}"
+            )
+            return self.settings.fallback_model
+        else:
+            raise RuntimeError(
+                f"No SAM models found in Ollama. Run: ollama pull {self.settings.primary_model}"
+            )
 
-    def process(self, session) -> BrainResponse:
+    def process(self, session, on_token=None) -> BrainResponse:
         """
         Send session context to LLM and get structured response.
+        Supports optional on_token callback for streaming TTFT.
         """
         model = self._ensure_model()
         self._current_model = model
@@ -147,29 +173,62 @@ class Brain:
         logger.info(f"Sending to {model}...")
 
         try:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "format": "json",
-                "options": {
-                    "temperature": self.settings.temperature,
-                    "num_predict": self.settings.max_tokens,
-                    "num_ctx": self.settings.model_context_length,
+            if on_token is not None:
+                # Streaming mode enabled
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": True,
+                    "format": "json",
+                    "options": {
+                        "temperature": self.settings.temperature,
+                        "num_predict": self.settings.max_tokens,
+                        "num_ctx": self.settings.model_context_length,
+                    }
                 }
-            }
+                response = requests.post(
+                    f"{self.settings.ollama_host}/api/chat",
+                    json=payload,
+                    stream=True,
+                    timeout=120
+                )
+                if response.status_code != 200:
+                    raise RuntimeError(f"Ollama returned {response.status_code}: {response.text}")
 
-            response = requests.post(
-                f"{self.settings.ollama_host}/api/chat",
-                json=payload,
-                timeout=120
-            )
+                full_content = []
+                for line in response.iter_lines():
+                    if line:
+                        chunk = json.loads(line.decode("utf-8"))
+                        msg_chunk = chunk.get("message", {}).get("content", "")
+                        if msg_chunk:
+                            full_content.append(msg_chunk)
+                            on_token(msg_chunk)
+                content = "".join(full_content)
+                raw = {"message": {"content": content}}
+            else:
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "format": "json",
+                    "options": {
+                        "temperature": self.settings.temperature,
+                        "num_predict": self.settings.max_tokens,
+                        "num_ctx": self.settings.model_context_length,
+                    }
+                }
 
-            if response.status_code != 200:
-                raise RuntimeError(f"Ollama returned {response.status_code}: {response.text}")
+                response = requests.post(
+                    f"{self.settings.ollama_host}/api/chat",
+                    json=payload,
+                    timeout=120
+                )
 
-            raw = response.json()
-            content = raw["message"]["content"]
+                if response.status_code != 200:
+                    raise RuntimeError(f"Ollama returned {response.status_code}: {response.text}")
+
+                raw = response.json()
+                content = raw["message"]["content"]
 
             # Parse JSON response
             parsed = json.loads(content)

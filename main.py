@@ -8,6 +8,7 @@ Start in text mode:  python main.py --text
 """
 
 import sys
+import time
 import signal
 import logging
 import argparse
@@ -52,6 +53,14 @@ from memory.identity import Identity
 from memory.retrieve import MemoryRetriever
 from founder_mode.manager import FounderModeManager
 from agent.react_loop import ReactLoop
+from core.tiered_router import TieredExecutionRouter, ExecutionTier
+from core.instrumentation import default_profiler
+from connect.core.device_registry import DeviceRegistry
+from connect.core.events import ConnectEventBus
+from connect.services.task_handoff import DeviceTaskRouter
+from connect.services.coordinator import UnifiedTaskCoordinator
+from connect.core.security_policy import SecurityPolicyEngine
+from connect.core.capabilities import APP_LAUNCH
 
 
 def run_task_with_optional_sovereign_mode(
@@ -154,6 +163,13 @@ class SAM:
         self.founder_mode = FounderModeManager(settings=self.settings)
         self.brain = Brain(self.settings)
         self.react_loop = ReactLoop(self.settings, founder_mode=self.founder_mode)
+        self.tiered_router = TieredExecutionRouter(self.settings)
+        self.profiler = default_profiler
+        self.event_bus = ConnectEventBus()
+        self.device_registry = DeviceRegistry()
+        self.task_router = DeviceTaskRouter(self.device_registry, self.event_bus)
+        self.coordinator = UnifiedTaskCoordinator(self.device_registry, self.task_router)
+        self.security_policy = SecurityPolicyEngine()
         self.tts = TextToSpeech(self.settings)
         self.stt = SpeechToText(self.settings)
         self.wake_word = WakeWordListener(self.settings, callback=self.on_wake_voice)
@@ -228,18 +244,70 @@ class SAM:
             if self._handle_command(user_input):
                 return
 
+            # Start performance telemetry turn
+            turn_ctx = self.profiler.start_turn(task_id=f"turn_{int(threading.get_ident())}_{int(threading.current_thread().ident or 0)}", user_input=user_input)
+
+            # Tier 1: Check deterministic execution bypass
+            route_decision = self.tiered_router.route(user_input)
+            turn_ctx.metrics.tier = route_decision.tier.value
+            turn_ctx.metrics.target_device = route_decision.target_device or "desktop"
+
+            if route_decision.tier == ExecutionTier.DIRECT and route_decision.action:
+                logger.info(f"Tier 1 Direct Execution activated: {route_decision.action} ({route_decision.reason})")
+                needs_approval, risk_level, reason = self.security_policy.requires_approval(
+                    route_decision.action, route_decision.action_payload
+                )
+                if needs_approval:
+                    msg = f"Action '{route_decision.action}' requires confirmation: {reason}"
+                    print(f"\nSAM: {msg}\n")
+                    if self.settings.tts_engine != "none":
+                        self.tts.speak(msg)
+                    turn_ctx.finish(success=False, error="Requires approval")
+                    return
+
+                if route_decision.target_device == "android":
+                    device_id, _ = self.coordinator.select_best_device_for_capability(APP_LAUNCH)
+                    if device_id:
+                        self.task_router.create(
+                            origin="desktop",
+                            target_device_id=device_id,
+                            action=route_decision.action,
+                            required_capability=APP_LAUNCH,
+                            payload=route_decision.action_payload or {}
+                        )
+                        result_msg = route_decision.suggested_text or "Dispatched task to your phone."
+                    else:
+                        result_msg = "No paired phone available to execute this."
+                else:
+                    start_exec = time.time()
+                    obs = self.react_loop.execute(route_decision.action, route_decision.action_payload or {})
+                    turn_ctx.record_tool_call(route_decision.action, (time.time() - start_exec) * 1000.0, success=True)
+                    result_msg = route_decision.suggested_text or obs
+
+                turn_ctx.finish(success=True)
+                print(f"\nSAM: {result_msg}\n")
+                if self.settings.tts_engine != "none":
+                    self.tts.speak(result_msg)
+                return
+
             # Build session context
+            start_mem = time.time()
+            memories = self.memory.retrieve(user_input, self.settings,
+                                             retention_days=self._memory_retention_days())
+            turn_ctx.record_memory_retrieval((time.time() - start_mem) * 1000.0)
+
             session = Session(
                 user_input=user_input,
                 identity=self.identity.load(),
-                memories=self.memory.retrieve(user_input, self.settings,
-                                               retention_days=self._memory_retention_days()),
+                memories=memories,
                 founder_context=self.founder_mode.get_context(),
                 settings=self.settings
             )
 
-            # Get response from Brain
-            response = self.brain.process(session)
+            # Get response from Brain with streaming TTFT tracking
+            start_llm = time.time()
+            response = self.brain.process(session, on_token=lambda chunk: turn_ctx.record_first_token())
+            turn_ctx.record_model_inference((time.time() - start_llm) * 1000.0)
             logger.info(f"Brain response — action: {response.action}")
 
             final_response = response
@@ -289,8 +357,11 @@ class SAM:
 
             # Founder Mode capture — same, sees the real outcome
             self.founder_mode.capture_if_relevant(user_input, final_response)
+            turn_ctx.finish(success=True)
 
         except Exception as e:
+            if 'turn_ctx' in locals():
+                turn_ctx.finish(success=False, error=str(e))
             logger.error(f"Processing error: {e}", exc_info=True)
             error_msg = "I hit an error. Check the logs."
             print(f"\nSAM: {error_msg}\n")
