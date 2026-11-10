@@ -184,9 +184,14 @@ class HttpSseSamTransport(
                         if (response.code == 401) _connectionState.value = ConnectionState.Error("Device trust expired or revoked: $detail")
                         return@withContext TransportResult.Failure("SAM Connect check failed: $detail")
                     }
-                    val heartbeat = json.decodeFromString(
-                        ConnectHeartbeat.serializer(), response.body?.string().orEmpty()
-                    )
+                    val bodyString = response.body?.string().orEmpty()
+                    val heartbeat = if (bodyString.isBlank()) {
+                        ConnectHeartbeat(deviceId = paired.device.deviceId, connectionState = "online", pendingTasks = emptyList())
+                    } else {
+                        json.decodeFromString(
+                            ConnectHeartbeat.serializer(), bodyString
+                        )
+                    }
                     if (heartbeat.deviceId != paired.device.deviceId) {
                         return@withContext TransportResult.Failure("SAM returned a heartbeat for a different device.")
                     }
