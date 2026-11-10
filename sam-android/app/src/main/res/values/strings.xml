@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SAM</string>
+    <string name="accessibility_service_description">Enables SAM to assist with user-directed UI navigation and task execution as explicitly requested.</string>
+    <string name="notification_listener_description">Allows SAM to read and summarize incoming notifications when requested by the user.</string>
 </resources>
