@@ -79,9 +79,10 @@ The automated release workflow integrates secure release signing credentials via
 - `SAM_ANDROID_KEY_PASSWORD`: Private key password.
 
 ### Workflow Safeguards:
-1. **Atomic Validation:** If partial secrets are configured (e.g. keystore base64 provided but alias omitted), the workflow halts immediately with an explicit error.
+1. **Atomic Validation:** If partial custom secrets are configured (e.g. keystore base64 provided but alias omitted), the workflow halts immediately with an explicit error.
 2. **Ephemeral Disk Ingestion:** The decoded keystore is written to `$RUNNER_TEMP/release.keystore` and wiped when the ephemeral GitHub runner terminates.
 3. **No Credential Logging:** Secrets are declared under private job-scoped environment variables.
+4. **Resilient CI Key Provisioning:** When repository secrets are not yet configured, the CI workflow dynamically provisions an ephemeral release key with `keytool`, ensuring release APKs are always properly signed, installable on physical Android devices, and verified by `apksigner verify --verbose`.
 
 ---
 
