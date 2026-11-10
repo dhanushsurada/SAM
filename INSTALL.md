@@ -39,6 +39,36 @@ irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1
 Hardware: 8 GB RAM minimum. A 7B-class model wants ~8 GB free RAM; the 14B
 default wants 16 GB+. If your machine is small, pick a smaller model in step 3.
 
+## Talking to SAM (voice)
+
+Click the microphone in Chat, the Command Center or the Quick Assistant,
+speak, and click it again to send. SAM shows what it heard, does the task and
+speaks the answer. Stop cancels the task or playback. Escape cancels voice
+work in the main window except when it closes a focused control or dialog; in
+Quick Assistant it dismisses the window without cancelling a task SAM has
+already accepted.
+
+One-time setup, from **Diagnostics → Installation and recovery**:
+
+- **Install speech-input capability** lets SAM hear you (Whisper).
+- **Install speech-output capability** gives SAM its own voice (Kokoro). Until
+  it is installed, SAM uses a system voice only when the OS reports it as
+  local; otherwise the answer stays on screen.
+
+Voice recordings are retained as task attachments in
+`~/.sam_data/iqoo/tasks.db` and are returned by the task API. The API defaults
+to listening on all network interfaces, task authentication is optional, and
+the HTTP API does not encrypt traffic. Use voice tasks only on a trusted
+machine and network until authorization, transport security, and a recording
+retention policy are in place.
+
+The first voice message downloads a speech model and the first spoken answer
+downloads a voice model, so that first time needs internet and can take a few
+minutes. After that, speech runs on your computer. Your operating system asks
+for microphone access the first time; if you refused, allow SAM in the
+system's microphone privacy settings.
+Details and limits: [`docs/voice/PHASE_A_TOUCH_TO_TALK.md`](docs/voice/PHASE_A_TOUCH_TO_TALK.md).
+
 ## Windows: "Windows protected your PC"
 
 Until the installer is code-signed with a purchased certificate, SmartScreen

@@ -3,6 +3,7 @@ import { FiMenu, FiSun, FiMoon } from "react-icons/fi";
 import { findRoute } from "@/app/routes";
 import { useTheme } from "@/app/theme";
 import { Button } from "@/components/Button";
+import { VoiceTopBarIndicator } from "@/features/voice/VoiceControls";
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const location = useLocation();
@@ -23,14 +24,17 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         <h1 className="text-sm font-medium text-ink">{route?.label ?? "SAM"}</h1>
       </div>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={toggleTheme}
-        aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      >
-        {theme === "dark" ? <FiSun size={16} /> : <FiMoon size={16} />}
-      </Button>
+      <div className="flex items-center gap-3">
+        <VoiceTopBarIndicator />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleTheme}
+          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        >
+          {theme === "dark" ? <FiSun size={16} /> : <FiMoon size={16} />}
+        </Button>
+      </div>
     </header>
   );
 }

@@ -2,6 +2,7 @@ import { FiChevronRight } from "react-icons/fi";
 import { StatusPill } from "@/components/StatusPill";
 import type { TaskRecord } from "@/api/types";
 import { phaseToSamState } from "./phase";
+import { useTaskLabel } from "@/features/voice/VoiceControls";
 
 export function SessionTaskList({
   tasks,
@@ -12,6 +13,7 @@ export function SessionTaskList({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const labelOf = useTaskLabel();
   if (tasks.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-mute">
@@ -36,7 +38,7 @@ export function SessionTaskList({
           }`}
         >
           <StatusPill state={phaseToSamState(task.status)} />
-          <span className="min-w-0 flex-1 truncate text-ink">{task.instruction}</span>
+          <span className="min-w-0 flex-1 truncate text-ink">{labelOf(task)}</span>
           <FiChevronRight size={12} className="shrink-0 text-mute" />
         </button>
       ))}

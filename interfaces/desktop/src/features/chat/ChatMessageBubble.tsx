@@ -1,3 +1,4 @@
+import { FiMic } from "react-icons/fi";
 import type { ChatMessage } from "./types";
 
 const ASSISTANT_TONE = {
@@ -15,6 +16,7 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
           isUser ? "bg-ember text-ember-ink" : `border ${ASSISTANT_TONE[message.tone ?? "default"]}`
         }`}
       >
+        {message.via === "voice" && <FiMic size={12} className="mr-1.5 inline align-[-1px]" aria-label="Spoken" />}
         {message.content}
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { useEffect, useState, type ChangeEvent } from "react";
-import { FiImage, FiMic, FiX, FiSend } from "react-icons/fi";
+import { FiImage, FiX, FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { fileToBase64Payload } from "@/lib/file";
+import { VoiceMicButton, VoiceSpeakToggle, VoiceStatusLine } from "@/features/voice/VoiceControls";
 import type { TaskCreateRequest } from "@/api/types";
 
 // Mirrors multimodal/media_validation.py exactly (checked directly, not
@@ -12,7 +13,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export interface TaskComposerProps {
-  onSubmit: (req: TaskCreateRequest) => Promise<void>;
+  onSubmit: (req: TaskCreateRequest) => Promise<unknown>;
   submitting: boolean;
 }
 
@@ -104,20 +105,14 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
               onChange={(e: ChangeEvent<HTMLInputElement>) => handleFile(e.target.files?.[0])}
             />
           </label>
-          <button
-            type="button"
-            disabled
-            title="Voice input isn't wired up in this build yet"
-            className="flex items-center gap-1.5 rounded-md p-2 text-mute/40 cursor-not-allowed"
-            aria-label="Voice input (not yet available)"
-          >
-            <FiMic size={16} />
-          </button>
+          <VoiceMicButton blockStart={submitting} />
+          <VoiceSpeakToggle />
         </div>
         <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!canSubmit} loading={submitting}>
           <FiSend size={14} /> Send
         </Button>
       </div>
+      <VoiceStatusLine showUnavailable />
     </Card>
   );
 }

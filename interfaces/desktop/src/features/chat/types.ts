@@ -14,4 +14,6 @@ export interface ChatMessage {
   timestamp: string;
   /** Visual treatment for an assistant reply that isn't a plain answer. */
   tone?: "default" | "danger" | "muted";
+  /** A message the person spoke: content is what SAM heard. */
+  via?: "voice";
 }
