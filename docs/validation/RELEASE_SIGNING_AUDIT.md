@@ -104,7 +104,7 @@ keytool -genkeypair -v \
 $ANDROID_HOME/build-tools/35.0.0/apksigner verify \
   --verbose \
   --print-certs \
-  dist/SAM_0.1.0_android.apk
+  dist/SAM_2.0.0_android.apk
 ```
 
 Expected verification output for release builds:

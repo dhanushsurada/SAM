@@ -121,9 +121,26 @@ def cmd_status(json_output: bool = False):
     if voice_pid and is_pid_alive(voice_pid) and pid_matches_expected(voice_pid, "main.py"):
         print(f"✅ SAM running (PID: {voice_pid})")
     else:
-        result = subprocess.run(["pgrep", "-f", "main.py"], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"✅ SAM running (PID: {result.stdout.strip()}, best-effort match — not started via `sam start`)")
+        found_pid = None
+        if sys.platform == "win32":
+            try:
+                cmd = ["powershell", "-NoProfile", "-Command",
+                       "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*main.py*' } | Select-Object -ExpandProperty ProcessId"]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if proc.returncode == 0 and proc.stdout.strip():
+                    found_pid = proc.stdout.strip().split()[0]
+            except Exception:
+                pass
+        else:
+            try:
+                proc = subprocess.run(["pgrep", "-f", "main.py"], capture_output=True, text=True)
+                if proc.returncode == 0 and proc.stdout.strip():
+                    found_pid = proc.stdout.strip().split()[0]
+            except Exception:
+                pass
+
+        if found_pid:
+            print(f"✅ SAM running (PID: {found_pid}, best-effort match — not started via `sam start`)")
         else:
             print("❌ SAM not running → python main.py")
 
@@ -367,28 +384,44 @@ def cmd_doctor(json_output: bool = False):
            "not checkable from the CLI")
 
     statuses = [check["status"] for check in checks]
+    fully_verified = statuses.count("FAIL") == 0 and statuses.count("UNVERIFIED") == 0 and statuses.count("WARN") == 0
+    diagnostic_status = "FAILED" if statuses.count("FAIL") > 0 else ("DEGRADED" if (statuses.count("WARN") > 0 or statuses.count("UNVERIFIED") > 0) else "HEALTHY")
     summary = {
         "pass": statuses.count("PASS"), "warn": statuses.count("WARN"),
         "fail": statuses.count("FAIL"), "unverified": statuses.count("UNVERIFIED"),
         "total": len(checks),
+        "fully_verified": fully_verified,
+        "diagnostic_status": diagnostic_status,
     }
     if json_output:
-        return _emit_json({"success": summary["fail"] == 0, "checks": checks, "summary": summary},
+        return _emit_json({"success": summary["fail"] == 0, "status": diagnostic_status, "checks": checks, "summary": summary},
                           0 if summary["fail"] == 0 else 1)
     print(f"\n{summary['pass']} pass, {summary['warn']} warn, {summary['fail']} fail, "
           f"{summary['unverified']} unverified ({summary['total']} checks)")
+    if summary["fail"] > 0:
+        print("Diagnostic Result: ❌ FAILURES DETECTED — resolve issues before running SAM.")
+    elif summary["warn"] > 0 or summary["unverified"] > 0:
+        print("Diagnostic Result: ⚠️  OPERATIONAL (some checks unverified or warning — see details above).")
+    else:
+        print("Diagnostic Result: ✅ ALL CHECKS VERIFIED & HEALTHY")
     print("────────────────────────────────────────────\n")
+    return 1 if summary["fail"] > 0 else 0
 
 
 # ─── Logs ─────────────────────────────────────────────────────────────────
 
 def cmd_logs(lines: int = 50):
-    import subprocess
     log_path = SAM_DATA_DIR / "logs" / "sam.log"
     if not log_path.exists():
         print("No logs yet.")
         return
-    subprocess.run(["tail", f"-{lines}", str(log_path)])
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+            for line in all_lines[-lines:]:
+                print(line, end="")
+    except Exception as e:
+        print(f"Error reading logs: {e}")
 
 
 # ─── Memory ───────────────────────────────────────────────────────────────

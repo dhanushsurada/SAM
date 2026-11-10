@@ -25,7 +25,7 @@ tauri build                     per-OS targets from tauri.<os>.conf.json
 scripts/install.sh|install.ps1  one-line bootstrap installers (checksum-verified)
 ```
 
-Release: `git tag v0.1.0 && git push --tags`. Locally on the target OS:
+Release: `git tag v2.0.0 && git push --tags`. Locally on the target OS:
 `cd interfaces/desktop && npm ci && npm run package`.
 
 Asset names (consumed by the bootstrap scripts): `SAM_<ver>_windows-x86_64-setup.exe`,

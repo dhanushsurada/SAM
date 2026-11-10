@@ -1,21 +1,23 @@
-# SAM — Personal AI Assistant
+# SAM 2.0 — Unified Cross-Device AI Assistant
 
-**Self-learning Autonomous Mind with Hermes Intelligence & Taste Heuristics Architecture**
+**Self-learning Autonomous Mind with Hermes Intelligence, Taste Heuristics & Cross-Device Coordination**
 
-> Fully local · Privacy-first · Voice-controlled · Self-improving · Founder Mode
+> Fully local · Privacy-first · Desktop + Android · Voice & Text · Zero Cloud Dependency
 
 ---
 
-## What SAM Does
+## What SAM 2.0 Does
 
-- Listens for your wake word 24/7 at near-zero CPU cost
-- Understands your speech via Whisper STT
-- Thinks with Qwen 2.5 14B running entirely on your machine
-- Speaks back with Kokoro TTS
-- Controls your Mac — mouse, keyboard, apps, browser, terminal
-- Remembers everything across sessions via ChromaDB + SQLite
-- Learns your taste, decisions, and reasoning via **Founder Mode**
-- Zero cloud. Zero API keys. Zero subscription.
+- **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android mobile device with shared memory and automatic capability routing.
+- **3-Tier Execution Architecture:**
+  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for calculations, app launches, browser navigation, and screenshots without unnecessary LLM calls.
+  - **Tier 2 (Fast Intent):** Fast single-step tool selection and routing using compact models.
+  - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, reflection, and recovery with Qwen 2.5 14B.
+- **Native Android Agent:** Native Kotlin Jetpack Compose app with on-device AI inference, Scoped Storage file sync, accessibility automation, and notification summarization.
+- **Cryptographic Security:** Mutual Ed25519 request signing, one-time QR pairing, sliding replay-prevention nonces, and user confirmation gating for destructive actions.
+- **Voice & Hands Automation:** openWakeWord 24/7 listening, Whisper STT, Kokoro TTS, Playwright browser agent, and AppleScript/system automation.
+- **Taste & Memory Layer:** ChromaDB + SQLite episodic memory with **Founder Mode** capturing your taste, decisions, and reasoning across sessions.
+- **Zero Cloud.** Zero API keys. Zero subscription fees.
 
 ---
 
@@ -23,8 +25,9 @@
 
 | Component | Minimum | Recommended |
 |---|---|---|
-| OS | Windows 10/11 · macOS 14+ · Ubuntu/Debian (x86_64) | latest |
-| Chip | Any 64-bit CPU (Apple silicon recommended on Mac) | M2/M3 or modern x86 |
+| Desktop OS | Windows 10/11 · macOS 14+ · Ubuntu/Debian (x86_64) | macOS Apple Silicon / Windows 11 |
+| Mobile OS | Android 8.0+ (API 26) | Android 12+ (Snapdragon / Tensor SoC) |
+| Desktop Chip | Any 64-bit CPU (Apple Silicon recommended on Mac) | M2/M3/M4 or modern x86-64 |
 | RAM | 8GB (small models) | 16GB+ (14B default model) |
 | Storage | 20GB free | 50GB+ for several models |
 
@@ -32,22 +35,27 @@
 
 ## Install
 
-**Download the installer for your OS — no Python, Node, Rust or Git needed.**
+**Download the installer for your platform — no Python, Node, Rust or Git needed.**
 
-| Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) |
-|---|---|---|
-| `…-setup.exe` — double-click | `.dmg` — drag to Applications | `.deb` — `sudo apt install ./SAM_*.deb` |
+| Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) | Android Mobile |
+|---|---|---|---|
+| `SAM_2.0.0_windows-x86_64-setup.exe` | `SAM_2.0.0_macos-arm64.dmg` / `…-x86_64.dmg` | `SAM_2.0.0_linux-x86_64.deb` | `SAM_2.0.0_android.apk` |
+| Double-click to install | Drag to Applications | `sudo apt install ./SAM_*.deb` | `adb install -r SAM_*.apk` or tap APK |
 
-Get them from the **Releases** page, or run the one-liner (verifies SHA-256):
+Get them from the **Releases** page, or use the one-line installer (verifies SHA-256):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash   # macOS / Linux
-irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1 | iex          # Windows
+# Desktop (macOS / Linux)
+curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash
+
+# Android (Downloads APK & installs via adb if phone connected)
+curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash -s -- --android
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1 | iex
 ```
 
-SAM bundles its own Python runtime; first launch guides you through installing
-Ollama and choosing a model. Full guide, first-run walkthrough, updating,
-uninstalling and troubleshooting: **[INSTALL.md](INSTALL.md)**.
+SAM bundles its own Python runtime. The only prerequisite is [Ollama](https://ollama.com) for local models. Full guide: **[INSTALL.md](INSTALL.md)**.
 
 ### Developers
 
@@ -131,24 +139,38 @@ python sam_cli.py export
 
 ## CLI Reference
 
+`sam_cli.py` provides complete runtime, diagnostic, process, memory, and device management:
+
 ```bash
-# Status check
-python sam_cli.py status
+# System Diagnostics & Health Check
+python sam_cli.py doctor                  # Run full diagnostic suite
+python sam_cli.py status                  # Inspect active SAM processes & Ollama health
 
-# View logs (last 50 lines)
-python sam_cli.py logs
+# Process Lifecycle Management
+python sam_cli.py start [voice|api|telegram]   # Start managed service (or all)
+python sam_cli.py stop [voice|api|telegram]    # Stop service gracefully
+python sam_cli.py restart [voice|api|telegram] # Restart service
 
-# View recent memories
-python sam_cli.py memory
+# Local Model & Ollama Control
+python sam_cli.py ollama status           # Check Ollama connection & pulled models
+python sam_cli.py ollama pull <model>     # Pull a new local LLM (e.g. qwen2.5:14b)
 
-# View Founder Mode
-python sam_cli.py founder
+# Cross-Device & Pairing Management
+python sam_cli.py devices                 # List trusted paired devices (phones, laptops)
+python sam_cli.py revoke-device <id>      # Instantly revoke trust for a paired device
 
-# List compiled skills
-python sam_cli.py skills
+# Memory & Founder Mode
+python sam_cli.py memory --limit 10       # View recent episodic memories
+python sam_cli.py founder                 # View Founder Mode decisions & taste profile
+python sam_cli.py skills                  # List auto-compiled task execution skills
 
-# Export Founder Mode to JSON
-python sam_cli.py export
+# Profile Portability & Maintenance
+python sam_cli.py export-profile <path>   # Export personal profile & memory archive
+python sam_cli.py import-profile <path>   # Restore personal profile
+python sam_cli.py sync-status             # Inspect cross-device sync state
+python sam_cli.py logs --lines 50         # View latest runtime logs
+python sam_cli.py reset-memory            # Clear episodic memory (retains identity)
+python sam_cli.py reset-all               # Factory reset SAM data
 ```
 
 ---
@@ -157,38 +179,51 @@ python sam_cli.py export
 
 ```
 SAM/
-├── main.py              ← Entry point
-├── sam_cli.py           ← CLI management tool
-├── setup.sh             ← One-command setup
-├── requirements.txt     ← Python dependencies
-├── config/
-│   ├── settings.py      ← All config with auto-detection
-│   └── settings.yaml    ← Override any setting here
-├── ears/
-│   ├── wake_word.py     ← openWakeWord (24/7, ~0% CPU)
-│   └── stt.py           ← Whisper STT (activates on wake)
+├── main.py                  ← Cross-device entry point & dispatch chokepoint
+├── sam_cli.py               ← Comprehensive CLI management & diagnostic tool
 ├── core/
-│   ├── brain.py         ← The selected local model via Ollama (default Qwen 2.5 14B)
-│   ├── model_manager.py ← Discover installed models, compatibility, validated selection
-│   └── session.py       ← Session context management
-├── mouth/
-│   └── tts.py           ← Kokoro TTS + Piper fallback
+│   ├── tiered_router.py     ← 3-tier execution optimizer (Tier 1 sub-5ms bypass)
+│   ├── brain.py             ← Ollama Brain integration (Qwen 2.5 14B default)
+│   ├── model_manager.py     ← Dynamic model discovery & RAM-tier selection
+│   ├── instrumentation.py   ← Performance telemetry (TTFT, LLM ms, tool ms)
+│   └── session.py           ← Context assembly & session state
+├── connect/
+│   ├── services/
+│   │   ├── coordinator.py   ← Cross-device coordinator with 60s execution leases
+│   │   ├── task_handoff.py  ← Device task router & handoff state machine
+│   │   └── workflows.py     ← End-to-end multi-device workflow recipes
+│   ├── transports/
+│   │   └── lan_http.py      ← Authenticated LAN HTTP & SSE with Ed25519 signatures
+│   ├── bridges/
+│   │   └── remote_relay.py  ← Outbound-only TLS 1.3 / WSS remote relay client
+│   └── core/
+│       ├── crypto.py        ← Asymmetric Ed25519 identity & canonical signing
+│       ├── security_policy.py ← 3-tier risk classification & approval gating
+│       ├── shared_memory.py ← Scoped memory sync with vector clocking
+│       └── capabilities.py  ← Central capability discovery & registry
+├── sam-android/             ← Native Android mobile agent (Kotlin + Jetpack Compose)
+│   ├── app/src/main/
+│   │   ├── ai/              ← On-device mobile AI (LiteRT / llama.cpp / GGUF)
+│   │   ├── automation/      ← AccessibilityService & NotificationListener
+│   │   ├── data/transport/  ← OkHttp SSE client & Ed25519 identity store
+│   │   └── ui/              ← Compose screens (Pairing, Chat, Diagnostics)
 ├── hands/
-│   ├── control/         ← PyAutoGUI + AppleScript
-│   ├── vision/          ← Moondream screen reader
-│   ├── browser/         ← Playwright browser agent
-│   └── terminal/        ← Sandboxed terminal runner
-├── memory/
-│   ├── identity.py      ← User profile (always loaded)
-│   ├── store.py         ← ChromaDB + SQLite write
-│   └── retrieve.py      ← Semantic memory search
+│   ├── control/             ← PyAutoGUI + AppleScript OS automation
+│   ├── vision/              ← Moondream screen reader & OCR
+│   ├── browser/             ← Playwright browser agent (with system fallback)
+│   └── terminal/            ← Sandboxed terminal runner
+├── ears/
+│   ├── wake_word.py         ← openWakeWord (24/7 background listener)
+│   └── stt.py               ← Whisper STT engine
+├── mouth/
+│   └── tts.py               ← Kokoro TTS + Piper fallback
 ├── founder_mode/
-│   └── manager.py       ← Decisions, rejections, taste profile
-├── agent/
-│   └── react_loop.py    ← ReAct multi-step task execution
-├── skills/
-│   └── compiler.py      ← Auto-compiles repeated tasks
-└── logs/                ← Runtime logs
+│   └── manager.py           ← Taste heuristics, decisions & permanent rejections
+├── memory/
+│   ├── store.py             ← ChromaDB embeddings + SQLite episodic storage
+│   └── retrieve.py          ← Semantic vector memory search
+└── interfaces/
+    └── desktop/             ← Tauri v2 cross-platform desktop frontend
 ```
 
 ---
