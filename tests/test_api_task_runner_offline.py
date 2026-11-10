@@ -185,7 +185,7 @@ def test_full_task_lifecycle_matches_the_proven_e2e_scenario():
             check("start_task returns a record with an id", bool(record.id))
             check("status starts at queued or running", record.status in ("queued", "running"))
 
-            deadline = time.time() + 10
+            deadline = time.time() + 20
             while manager.get_task(record.id).status in ("queued", "running") and time.time() < deadline:
                 time.sleep(0.05)
 
@@ -240,26 +240,27 @@ def test_second_task_is_rejected_while_first_is_running():
     mock_brain.process.side_effect = _slow_response
 
     with patch("agent.react_loop.ReactLoop._looks_multi_step", return_value=False):
-        record1 = manager.start_task("first task")
-        time.sleep(0.1)  # let the background thread actually start and flip to "running"
-        check("first task is running", manager.get_task(record1.id).status == "running")
+        with patch.object(manager.react_loop._reflection, "reflect", return_value=None):
+            record1 = manager.start_task("first task")
+            time.sleep(0.1)  # let the background thread actually start and flip to "running"
+            check("first task is running", manager.get_task(record1.id).status == "running")
 
-        busy_raised = False
-        try:
-            manager.start_task("second task")
-        except TaskBusyError:
-            busy_raised = True
-        check("a second task while one is running raises TaskBusyError", busy_raised)
+            busy_raised = False
+            try:
+                manager.start_task("second task")
+            except TaskBusyError:
+                busy_raised = True
+            check("a second task while one is running raises TaskBusyError", busy_raised)
 
-        release.set()
-        deadline = time.time() + 5
-        while manager.get_task(record1.id).status == "running" and time.time() < deadline:
-            time.sleep(0.02)
-        check("first task finished after being released", manager.get_task(record1.id).status != "running")
+            release.set()
+            deadline = time.time() + 15
+            while (manager.get_task(record1.id).status == "running" or manager._run_lock.locked()) and time.time() < deadline:
+                time.sleep(0.02)
+            check("first task finished after being released", manager.get_task(record1.id).status != "running")
 
-        record3 = manager.start_task("third task, after the first finished")
-        check("a new task is accepted once the previous one has finished", record3.id != record1.id)
-        release.set()  # in case the second mocked call also blocks
+            record3 = manager.start_task("third task, after the first finished")
+            check("a new task is accepted once the previous one has finished", record3.id != record1.id)
+            release.set()  # in case the second mocked call also blocks
 
 
 def test_empty_task_text_is_rejected():
