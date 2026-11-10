@@ -17,20 +17,39 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        val keystorePath = System.getenv("SAM_ANDROID_KEYSTORE_PATH")
+        if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SAM_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SAM_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("SAM_ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            val keystorePath = System.getenv("SAM_ANDROID_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // Secure production enforcement: NEVER fallback to debug signing for release.
+                // Builds without keystore environment variables produce unsigned artifacts.
+                signingConfig = null
+            }
+        }
+        debug {
+            // Debug builds use standard Android SDK debug keystore
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {
