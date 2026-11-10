@@ -64,7 +64,7 @@ data class ConnectDeviceTask(
     val action: String,
     val payload: JsonObject = buildJsonObject {},
     @SerialName("required_capability") val requiredCapability: String? = null,
-    val status: String,
+    val status: String = "queued",
     val result: JsonObject? = null,
     val error: String? = null,
     @SerialName("last_message") val lastMessage: String? = null,
@@ -72,8 +72,8 @@ data class ConnectDeviceTask(
     @SerialName("context_ref") val contextRef: String? = null,
     @SerialName("handoff_state") val handoffState: JsonObject? = null,
     @SerialName("handoff_of") val handoffOf: String? = null,
-    @SerialName("created_at") val createdAt: String,
-    @SerialName("updated_at") val updatedAt: String,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable

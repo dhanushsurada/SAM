@@ -16,7 +16,15 @@ class AndroidConnectTaskExecutorTest {
         val fakeTransport = FakeSamTransport()
         // Mock a failure return for failConnectTask
         fakeTransport.connectTaskUpdateResult = TransportResult.Success(
-            ConnectDeviceTask("task-1", "origin", "desktop", "unknown_action", "failed")
+            ConnectDeviceTask(
+                taskId = "task-1",
+                origin = "origin",
+                targetDeviceId = "desktop",
+                action = "unknown_action",
+                status = "failed",
+                createdAt = "2026-11-10T12:00:00Z",
+                updatedAt = "2026-11-10T12:00:00Z"
+            )
         )
 
         // Note: For unit testing in JVM without real Android Context, we verify protocol and rejection
@@ -25,7 +33,9 @@ class AndroidConnectTaskExecutorTest {
             origin = "desktop",
             targetDeviceId = "android-dev",
             action = "unsupported_xyz",
-            status = "dispatched"
+            status = "dispatched",
+            createdAt = "2026-11-10T12:00:00Z",
+            updatedAt = "2026-11-10T12:00:00Z"
         )
 
         // Verifies the contract: unknown action triggers rejection
@@ -43,7 +53,10 @@ class AndroidConnectTaskExecutorTest {
             origin = "desktop",
             targetDeviceId = "android-dev",
             action = AndroidConnectTaskExecutor.ACTION_APP_LAUNCH,
-            payload = payload
+            payload = payload,
+            status = "dispatched",
+            createdAt = "2026-11-10T12:00:00Z",
+            updatedAt = "2026-11-10T12:00:00Z"
         )
         assertEquals("Google Chrome", (task.payload["app"] as? kotlinx.serialization.json.JsonPrimitive)?.content)
     }
