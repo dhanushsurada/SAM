@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
 /**
  * SAM Connect pairing and authenticated device operations use the contract in
  * docs/architecture/CROSS_DEVICE_PROTOCOL.md. Phone-submitted work remains on
- * the existing /api/iqoo/* gateway; those routes are a separate Core-owned
+ * the existing /api/iqoo/ endpoints gateway; those routes are a separate Core-owned
  * flow. All HTTP details stay behind SamTransport for testability.
  */
 class HttpSseSamTransport(

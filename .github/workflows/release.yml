@@ -187,6 +187,11 @@ jobs:
   build-android:
     name: Build Android (APK & AAB)
     runs-on: ubuntu-22.04
+    env:
+      SAM_ANDROID_KEYSTORE_BASE64: ${{ secrets.SAM_ANDROID_KEYSTORE_BASE64 }}
+      SAM_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.SAM_ANDROID_KEYSTORE_PASSWORD }}
+      SAM_ANDROID_KEY_ALIAS: ${{ secrets.SAM_ANDROID_KEY_ALIAS }}
+      SAM_ANDROID_KEY_PASSWORD: ${{ secrets.SAM_ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 17
@@ -198,8 +203,29 @@ jobs:
       - name: Grant execute permission for gradlew
         working-directory: sam-android
         run: chmod +x gradlew
+      - name: Decode Android release keystore
+        id: android_keystore
+        run: |
+          if [[ -n "$SAM_ANDROID_KEYSTORE_BASE64" ]]; then
+            if [[ -z "$SAM_ANDROID_KEYSTORE_PASSWORD" || -z "$SAM_ANDROID_KEY_ALIAS" || -z "$SAM_ANDROID_KEY_PASSWORD" ]]; then
+              echo "Error: Incomplete Android signing secrets provided. All 4 SAM_ANDROID_* secrets must be configured together." >&2
+              exit 1
+            fi
+            echo "$SAM_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
+            echo "SIGNED_BUILD=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Notice: No Android release keystore configured. Building unsigned release artifacts."
+            echo "KEYSTORE_PATH=" >> "$GITHUB_OUTPUT"
+            echo "SIGNED_BUILD=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build Android Release APK and AAB
         working-directory: sam-android
+        env:
+          SAM_ANDROID_KEYSTORE_PATH: ${{ steps.android_keystore.outputs.KEYSTORE_PATH }}
+          SAM_ANDROID_KEYSTORE_PASSWORD: ${{ env.SAM_ANDROID_KEYSTORE_PASSWORD }}
+          SAM_ANDROID_KEY_ALIAS: ${{ env.SAM_ANDROID_KEY_ALIAS }}
+          SAM_ANDROID_KEY_PASSWORD: ${{ env.SAM_ANDROID_KEY_PASSWORD }}
         run: |
           ./gradlew assembleRelease bundleRelease --no-daemon
       - name: Collect Android artifacts

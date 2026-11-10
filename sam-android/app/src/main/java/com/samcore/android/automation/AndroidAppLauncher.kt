@@ -53,7 +53,7 @@ class AndroidAppLauncher(private val context: Context) {
             context.startActivity(intent)
             true
         } catch (e: Exception) {
-            Log.error(TAG, "Failed to open URL $url: ${e.message}")
+            Log.e(TAG, "Failed to open URL $url: ${e.message}", e)
             false
         }
     }
@@ -72,7 +72,7 @@ class AndroidAppLauncher(private val context: Context) {
             context.startActivity(chooser)
             true
         } catch (e: Exception) {
-            Log.error(TAG, "Failed to share content: ${e.message}")
+            Log.e(TAG, "Failed to share content: ${e.message}", e)
             false
         }
     }
