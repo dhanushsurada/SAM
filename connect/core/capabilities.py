@@ -25,19 +25,24 @@ view of that state.
 
 from typing import Dict
 
-# Canonical capability names. Deliberately a small, closed vocabulary
-# (matches the example structure in the Agent 3 execution prompt, section
-# 5) rather than a free-form string field — an unrecognized capability
-# name is a bug to catch at validation time, not a typo to silently route
-# tasks against.
+# Canonical capability names across desktop and mobile devices.
 VOICE = "voice"
 NOTIFICATIONS = "notifications"
 APP_LAUNCH = "app-launch"
 CAMERA = "camera"
 DEVICE_CONTROL = "device-control"
+MODEL_INFERENCE = "model-inference"
+FILE_TRANSFER = "file-transfer"
+ACCESSIBILITY = "accessibility"
+UI_INTERACTION = "ui-interaction"
+BROWSER = "browser"
+TERMINAL = "terminal"
+DOCUMENTS = "documents"
 
 KNOWN_CAPABILITIES = frozenset({
     VOICE, NOTIFICATIONS, APP_LAUNCH, CAMERA, DEVICE_CONTROL,
+    MODEL_INFERENCE, FILE_TRANSFER, ACCESSIBILITY, UI_INTERACTION,
+    BROWSER, TERMINAL, DOCUMENTS,
 })
 
 # A capability's reported state. "not_requested" is distinct from
