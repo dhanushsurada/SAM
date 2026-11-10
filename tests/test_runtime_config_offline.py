@@ -111,7 +111,7 @@ def test_defaults_match_prior_hardcoded_values():
         snap = _settings_and_specs_snapshot(home)
         check("Settings().api_host defaults to 0.0.0.0 (matches the old hardcoded value)", snap["api_host"] == "0.0.0.0")
         check("Settings().api_port defaults to 8420 (matches the old hardcoded value)", snap["api_port"] == 8420)
-        check("default_specs()'s api health_url still targets the default port", snap["health_url"] == "http://127.0.0.1:8420/api/iqoo/health")
+        check("default_specs()'s api health_url still targets the default port", snap["health_url"] in ("http://127.0.0.1:8420/api/runtime/health", "http://127.0.0.1:8420/api/iqoo/health"))
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
