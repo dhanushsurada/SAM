@@ -66,6 +66,10 @@ export interface ExecutionEvent {
    * for EventSource's native Last-Event-ID reconnect). Optional here since
    * it's a wire-format detail, not part of the Pydantic model proper. */
   seq?: number;
+  /** Structured detail some events carry (EventBus.publish(..., data=...)).
+   * Voice: the "perceiving" event published right after transcription has
+   * `transcript`, what SAM heard. Absent on every other event. */
+  data?: { transcript?: string };
 }
 
 export interface HealthStatus {

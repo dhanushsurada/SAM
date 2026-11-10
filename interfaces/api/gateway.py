@@ -524,6 +524,11 @@ class TaskGateway:
             if cancel_event.is_set():
                 raise PerceptionCancelled()
             spoken_text = self.audio_adapter.transcribe(audio_att)
+            # Voice Phase A: tell the client what was heard, so a
+            # mis-transcription is visible instead of silently steering the
+            # task. Structured (data.transcript), not parsed out of the message.
+            self.event_bus.publish(record["task_id"], "perceiving", "Heard your voice message",
+                                   data={"transcript": spoken_text})
 
         vision_context = None
         if image_att is not None and input_type in ("image", "image+text", "image+voice"):

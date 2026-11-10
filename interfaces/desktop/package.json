@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
     "tauri": "tauri",
     "stage:runtime": "node scripts/stage-runtime.mjs",
     "package": "npm run stage:runtime && tauri build",

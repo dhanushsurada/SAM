@@ -5,6 +5,7 @@ import { StatusPill } from "@/components/StatusPill";
 import type { TaskRecord, ExecutionEvent } from "@/api/types";
 import { TERMINAL_PHASES } from "@/api/types";
 import { phaseToSamState, phaseLabel } from "./phase";
+import { useTaskLabel } from "@/features/voice/VoiceControls";
 
 export interface ActiveTaskProps {
   task: TaskRecord;
@@ -27,6 +28,7 @@ function formatTime(iso: string): string {
 export function ActiveTask({ task, events, streamError, onCancel, onRetry, cancelling, retrying }: ActiveTaskProps) {
   // .at(-1) needs ES2022 lib; tsconfig targets ES2020, so index from length
   // instead rather than bumping the lib target for one call site.
+  const labelOf = useTaskLabel();
   const lastEvent = events.length > 0 ? events[events.length - 1] : undefined;
   const currentPhase = lastEvent?.phase ?? task.status;
   const currentMessage = lastEvent?.message;
@@ -36,7 +38,7 @@ export function ActiveTask({ task, events, streamError, onCancel, onRetry, cance
     <Card className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm text-ink">{task.instruction}</p>
+          <p className="truncate text-sm text-ink">{labelOf(task)}</p>
           <p className="mt-0.5 font-mono-data text-[11px] text-mute">{task.task_id}</p>
         </div>
         <StatusPill state={phaseToSamState(currentPhase)} label={currentMessage ?? phaseLabel(currentPhase)} live />

@@ -204,7 +204,7 @@ class EnvironmentCompatibilityManager:
         dependency_status = self.dependency_status()
         system_status = self.system_dependency_status()
         feature_groups = {}
-        for group in ("voice", "vision", "memory", "integrations"):
+        for group in ("voice", "speech-input", "speech-output", "vision", "memory", "integrations"):
             package_state = dependency_status.get(group, {"available": True, "missing": [], "incompatible": []})
             system_state = system_status.get(group, {"missing": [], "missing_libraries": [], "missing_tools": []})
             missing_os = system_state.get("missing", []) + system_state.get("missing_libraries", []) + system_state.get("missing_tools", [])

@@ -96,6 +96,19 @@ class HealthStatus(BaseModel):
     version: str = "iqoo-phase3a"
 
 
+# ─── Speech output (voice Phase A) ────────────────────────────────────────
+# POST /api/speech renders text to a WAV file with SAM's own TTS engines
+# (mouth/tts.py). SAM Core, deliberately NOT under /api/iqoo/. The cap keeps
+# one request from tying up the (CPU-bound) engine for minutes; the desktop
+# client speaks a short excerpt of long replies and shows the rest as text.
+
+MAX_SPEECH_CHARS = 2000
+
+
+class SpeechRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=MAX_SPEECH_CHARS)
+
+
 # ─── Brain / model selection (core/model_manager.py) ──────────────────────
 # Served at /api/models, deliberately NOT under /api/iqoo/: choosing the
 # Brain is SAM Core functionality, not part of the phone-task contract.

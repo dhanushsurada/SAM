@@ -5,6 +5,11 @@ import { StatusPill } from "@/components/StatusPill";
 import { Button } from "@/components/Button";
 import { phaseToSamState, phaseLabel } from "@/features/iqoo/phase";
 import { hideQuickAssistant } from "@/lib/native";
+import { VoiceProvider } from "@/features/voice/VoiceProvider";
+import { useTaskLabel, VoiceMicButton, VoiceStatusLine } from "@/features/voice/VoiceControls";
+import { useVoice } from "@/features/voice/VoiceProvider";
+import { isVoiceTask } from "@/features/voice/taskLabel";
+import { shouldStopOnQuickAssistantEscape } from "@/features/voice/voiceMachine";
 
 /**
  * The Quick Assistant palette — a second, small native window (global
@@ -19,8 +24,10 @@ import { hideQuickAssistant } from "@/lib/native";
  */
 function QuickAssistantInner() {
   const { submitTask, submitting, submitError, selectedTask, events } = useTaskSession();
+  const { state: voiceState, stop: stopVoice } = useVoice();
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const labelOf = useTaskLabel();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -28,11 +35,16 @@ function QuickAssistantInner() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void hideQuickAssistant();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      // Escape dismisses this palette without withdrawing a command SAM has
+      // already received. It still stops capture, submission, and playback.
+      if (shouldStopOnQuickAssistantEscape(voiceState)) stopVoice();
+      void hideQuickAssistant();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [voiceState, stopVoice]);
 
   const submit = async () => {
     const trimmed = value.trim();
@@ -44,7 +56,7 @@ function QuickAssistantInner() {
   const latestEvent = events[events.length - 1];
 
   return (
-    <div className="flex h-screen flex-col gap-3 bg-void p-3 text-ink" data-theme="dark">
+    <div className="flex h-screen flex-col gap-3 bg-void p-3 text-ink" data-theme="dark" data-quick-assistant>
       <div className="flex items-center gap-2 rounded-lg border border-line bg-surface p-2 shadow-panel">
         <input
           ref={inputRef}
@@ -56,6 +68,7 @@ function QuickAssistantInner() {
           placeholder="Ask SAM, or tell it what to do…"
           className="flex-1 bg-transparent px-2 py-1.5 text-sm text-ink placeholder:text-mute focus:outline-none"
         />
+        <VoiceMicButton blockStart={submitting} />
         <Button
           type="button"
           variant="primary"
@@ -69,6 +82,7 @@ function QuickAssistantInner() {
       </div>
 
       <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-surface p-3 text-sm">
+        <VoiceStatusLine showUnavailable />
         {submitError && <p className="text-danger">{submitError}</p>}
         {!submitError && selectedTask && (
           <>
@@ -77,6 +91,9 @@ function QuickAssistantInner() {
               label={phaseLabel(selectedTask.status)}
               live
             />
+            {isVoiceTask(selectedTask) && (
+              <p className="mt-2 text-xs text-mute">You said: “{labelOf(selectedTask)}”</p>
+            )}
             <p className="mt-2 whitespace-pre-wrap text-ink">
               {selectedTask.result_text ?? latestEvent?.message ?? "Working on it…"}
             </p>
@@ -93,7 +110,9 @@ function QuickAssistantInner() {
 export function QuickAssistantApp() {
   return (
     <TaskSessionProvider>
-      <QuickAssistantInner />
+      <VoiceProvider>
+        <QuickAssistantInner />
+      </VoiceProvider>
     </TaskSessionProvider>
   );
 }

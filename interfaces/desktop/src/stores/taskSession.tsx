@@ -32,10 +32,18 @@ interface TaskSessionValue {
 
   submitting: boolean;
   submitError: string | null;
-  submitTask: (req: TaskCreateRequest) => Promise<void>;
+  /** Resolves with the created task, or null when it could not be created
+   * (the reason is then in `submitError`). Never rejects. */
+  submitTask: (req: TaskCreateRequest) => Promise<TaskRecord | null>;
 
   cancelling: boolean;
   cancelSelected: () => Promise<void>;
+  /** Cancel a specific task (the voice controller cancels the task it
+   * started, which may no longer be the selected one). */
+  cancelTask: (taskId: string) => Promise<void>;
+  /** What SAM heard, by task id: the transcript a voice task's "perceiving"
+   * event carries. Kept in memory only, never persisted. */
+  transcripts: Record<string, string>;
   retrying: boolean;
   retrySelected: () => Promise<void>;
 
@@ -67,6 +75,7 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [transcripts, setTranscripts] = useState<Record<string, string>>({});
 
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -150,6 +159,16 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
     );
   }, [events, selectedTaskId]);
 
+  // A voice task's "perceiving" event carries what SAM heard. Only the
+  // selected task streams, so this fills in as each voice task is selected
+  // (the server replays a task's whole history when it is re-selected).
+  useEffect(() => {
+    const heard = events.find((e) => typeof e.data?.transcript === "string");
+    if (!heard) return;
+    const transcript = heard.data?.transcript as string;
+    setTranscripts((prev) => (prev[heard.task_id] === transcript ? prev : { ...prev, [heard.task_id]: transcript }));
+  }, [events]);
+
   const refreshHealth = useCallback(async () => {
     setHealthLoading(true);
     try {
@@ -168,17 +187,28 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [refreshHealth]);
 
-  const submitTask = async (req: TaskCreateRequest) => {
+  const submitTask = async (req: TaskCreateRequest): Promise<TaskRecord | null> => {
     setSubmitting(true);
     setSubmitError(null);
     try {
       const task = await iqooService.createTask(req);
       setSessionTasks((prev) => [...prev, task]);
       setSelectedTaskId(task.task_id);
+      return task;
     } catch (e) {
       setSubmitError(errorMessage(e));
+      return null;
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const cancelTask = async (taskId: string) => {
+    try {
+      const updated = await iqooService.cancelTask(taskId);
+      setSessionTasks((prev) => prev.map((t) => (t.task_id === updated.task_id ? updated : t)));
+    } catch (e) {
+      setSubmitError(errorMessage(e));
     }
   };
 
@@ -186,10 +216,7 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
     if (!selectedTaskId) return;
     setCancelling(true);
     try {
-      const updated = await iqooService.cancelTask(selectedTaskId);
-      setSessionTasks((prev) => prev.map((t) => (t.task_id === updated.task_id ? updated : t)));
-    } catch (e) {
-      setSubmitError(errorMessage(e));
+      await cancelTask(selectedTaskId);
     } finally {
       setCancelling(false);
     }
@@ -235,6 +262,8 @@ export function TaskSessionProvider({ children }: { children: ReactNode }) {
     submitTask,
     cancelling,
     cancelSelected,
+    cancelTask,
+    transcripts,
     retrying,
     retrySelected,
     resetting,

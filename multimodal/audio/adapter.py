@@ -50,10 +50,20 @@ class AudioAdapter:
         self._stt = None  # lazy ears.stt.SpeechToText instance, for model reuse only
 
     def _get_stt(self):
+        # An instance without a model was built while faster-whisper was
+        # missing. If it has been installed since (Diagnostics -> "Install
+        # speech-input"), build a fresh one instead of staying on the
+        # WAV-only fallback until SAM restarts.
+        if self._stt is not None and self._stt._model is None and self.whisper_installed():
+            self._stt = None
         if self._stt is None:
             from ears.stt import SpeechToText  # existing SAM STT, not duplicated
-            self._stt = SpeechToText(self.settings)
-            self._stt._load_model()  # reuse existing lazy-load/device-detection/fallback logic verbatim
+            stt = SpeechToText(self.settings)
+            stt._load_model()  # reuse existing lazy-load/device-detection/fallback logic verbatim
+            # Cached only once the load did not raise: a failed first-use
+            # model download (offline, say) must be retried on the next
+            # request, not remembered as a half-built instance.
+            self._stt = stt
         return self._stt
 
     def transcribe(self, attachment: dict) -> str:
@@ -73,7 +83,16 @@ class AudioAdapter:
         except Exception as e:
             raise PerceptionError(f"Could not decode audio attachment: {e}") from e
 
-        stt = self._get_stt()
+        try:
+            stt = self._get_stt()
+        except Exception as e:
+            # Most often the first-use Whisper model download failing. Say so
+            # (a PerceptionError is shown to the user as the reason; any
+            # other exception would surface as an "unhandled error").
+            raise PerceptionError(
+                f"Could not load the speech model: {e}. SAM downloads it the first "
+                f"time you use voice, so check your internet connection and try again."
+            ) from e
 
         suffix = AUDIO_MIME_SUFFIX.get(attachment.get("mime_type", ""), ".bin")
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:

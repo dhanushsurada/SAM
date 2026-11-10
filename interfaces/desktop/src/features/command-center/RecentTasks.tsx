@@ -3,6 +3,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { Card } from "@/components/Card";
 import type { TaskRecord } from "@/api/types";
 import { phaseToSamState } from "@/features/iqoo/phase";
+import { useTaskLabel } from "@/features/voice/VoiceControls";
 
 export function RecentTasks({
   tasks,
@@ -12,6 +13,7 @@ export function RecentTasks({
   onSelect: (id: string) => void;
 }) {
   const recent = [...tasks].reverse().slice(0, 3);
+  const labelOf = useTaskLabel();
 
   return (
     <Card className="space-y-2">
@@ -32,7 +34,7 @@ export function RecentTasks({
             className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs hover:bg-void"
           >
             <StatusPill state={phaseToSamState(task.status)} />
-            <span className="min-w-0 flex-1 truncate text-ink">{task.instruction}</span>
+            <span className="min-w-0 flex-1 truncate text-ink">{labelOf(task)}</span>
           </button>
         ))}
       </div>

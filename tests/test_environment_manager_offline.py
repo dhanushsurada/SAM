@@ -67,6 +67,45 @@ class EnvironmentManagerTests(unittest.TestCase):
         self.assertNotIn("faster-whisper", " ".join(plan["requirements"]).lower())
         self.assertIn("voice", load_manifest()["python"]["dependency_groups"])
 
+    def test_speech_groups_install_without_native_audio_capture_packages(self):
+        # Voice Phase A: the desktop app records audio in its webview, so
+        # server-side speech input/output must be installable without
+        # PyAudio (no macOS arm64 or Linux wheel on PyPI), openWakeWord or
+        # sounddevice. `voice` itself is deliberately left as it was.
+        groups = load_manifest()["python"]["dependency_groups"]
+        self.assertEqual(groups["speech-input"], ["faster-whisper"])
+        self.assertEqual(groups["speech-output"], ["kokoro"])
+        for name in ("speech-input", "speech-output"):
+            self.assertFalse({"pyaudio", "openwakeword", "sounddevice"} & set(groups[name]), name)
+        self.assertIn("pyaudio", groups["voice"])
+        # Optional: never part of the default/required install.
+        python = load_manifest()["python"]
+        for name in ("speech-input", "speech-output"):
+            self.assertNotIn(name, python["default_groups"])
+            self.assertNotIn(name, python["required_groups"])
+
+    def test_speech_groups_resolve_to_only_their_own_requirement_lines(self):
+        manager = EnvironmentCompatibilityManager(manifest=load_manifest())
+        stt = manager.dependency_plan(["speech-input"])["requirements"]
+        tts = manager.dependency_plan(["speech-output"])["requirements"]
+        self.assertEqual(len(stt), 1)
+        self.assertTrue(stt[0].lower().startswith("faster-whisper"), stt)
+        self.assertEqual(len(tts), 1)
+        self.assertTrue(tts[0].lower().startswith("kokoro"), tts)
+
+    def test_capability_probe_lists_speech_groups_as_features(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_args): pass
+            def read(self): return b'{"models":[]}'
+
+        manager = EnvironmentCompatibilityManager(
+            manifest=load_manifest(), opener=lambda *_args, **_kwargs: Response())
+        features = manager.capabilities({})["features"]
+        for name in ("voice", "speech-input", "speech-output"):
+            self.assertIn(name, features)
+            self.assertIn("available", features[name])
+
 
 class SettingsMigrationTests(unittest.TestCase):
     def test_old_settings_are_backed_up_and_user_values_preserved(self):

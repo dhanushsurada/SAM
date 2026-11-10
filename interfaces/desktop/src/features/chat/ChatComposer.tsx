@@ -1,6 +1,7 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
+import { VoiceMicButton, VoiceSpeakToggle } from "@/features/voice/VoiceControls";
 
 export function ChatComposer({
   onSend,
@@ -35,6 +36,8 @@ export function ChatComposer({
         rows={1}
         className="max-h-32 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink placeholder:text-mute focus:outline-none"
       />
+      <VoiceSpeakToggle />
+      <VoiceMicButton blockStart={disabled} />
       <Button variant="primary" size="sm" onClick={submit} disabled={!value.trim() || disabled} aria-label="Send message">
         <FiSend size={14} />
       </Button>

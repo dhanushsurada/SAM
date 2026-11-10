@@ -9,6 +9,8 @@ import { useTaskSession } from "@/stores/taskSession";
 import { phaseLabel, phaseToSamState } from "@/features/iqoo/phase";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ChatComposer } from "./ChatComposer";
+import { useTaskLabel, VoiceStatusLine } from "@/features/voice/VoiceControls";
+import { isVoiceTask } from "@/features/voice/taskLabel";
 import type { ChatMessage } from "./types";
 
 function isTerminal(status: string): boolean {
@@ -58,6 +60,7 @@ export function ChatPage() {
     cancelSelected,
   } = useTaskSession();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const labelOf = useTaskLabel();
 
   const latest = sessionTasks.length > 0 ? sessionTasks[sessionTasks.length - 1] : null;
   const latestId = latest ? latest.task_id : null;
@@ -109,7 +112,13 @@ export function ChatPage() {
           return (
             <div key={task.task_id} className="space-y-3">
               <ChatMessageBubble
-                message={{ id: task.task_id, role: "user", content: task.instruction, timestamp: task.created_at }}
+                message={{
+                  id: task.task_id,
+                  role: "user",
+                  content: labelOf(task),
+                  timestamp: task.created_at,
+                  via: isVoiceTask(task) ? "voice" : undefined,
+                }}
               />
               {reply ? (
                 <ChatMessageBubble message={reply} />
@@ -138,6 +147,9 @@ export function ChatPage() {
       )}
       <div className="pt-3">
         <ChatComposer onSend={handleSend} disabled={running} />
+        <div className="px-1 pt-2">
+          <VoiceStatusLine showUnavailable />
+        </div>
       </div>
     </div>
   );

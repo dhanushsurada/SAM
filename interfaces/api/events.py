@@ -53,7 +53,12 @@ class EventBus:
                 self._history[task_id] = []
             return self._conditions[task_id]
 
-    def publish(self, task_id: str, phase: str, message: str) -> Optional[dict]:
+    def publish(self, task_id: str, phase: str, message: str,
+                data: Optional[dict] = None) -> Optional[dict]:
+        """`data` is optional structured detail for the client (voice Phase A
+        uses it to deliver what SAM heard: {"transcript": "..."}). It is
+        added to the event only when given, so every existing event keeps
+        exactly the shape it had."""
         cond = self._get_condition(task_id)
         with cond:
             history = self._history[task_id]
@@ -75,6 +80,8 @@ class EventBus:
                 "message": message,
                 "timestamp": datetime.now().isoformat(),
             }
+            if data:
+                event["data"] = dict(data)
             history.append(event)
             cond.notify_all()
         logger.debug(f"[{task_id}] #{seq} {phase}: {message}")

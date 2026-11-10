@@ -31,21 +31,23 @@ async function endpoint(path: string, base: string): Promise<string> {
   return `${base}${path}`;
 }
 
+async function apiError(res: Response): Promise<ApiError> {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // body wasn't JSON — statusText stands.
+  }
+  return new ApiError(res.status, detail);
+}
+
 async function request<T>(path: string, init?: RequestInit, base: string = BASE): Promise<T> {
   const res = await fetch(await endpoint(path, base), {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // body wasn't JSON — statusText stands.
-    }
-    throw new ApiError(res.status, detail);
-  }
+  if (!res.ok) throw await apiError(res);
   return res.json() as Promise<T>;
 }
 
@@ -126,6 +128,22 @@ export interface EnvironmentReport {
     features: Record<string, { available: boolean; missing_packages: string[]; incompatible_packages: unknown[]; missing_system_prerequisites: string[]; reason: string }>;
   };
   setup: { journey: { state: string; selected_model: string | null }; installation: { steps?: Record<string, { state: string; detail?: string }>; state?: string }; dependency_repair_supported?: boolean };
+}
+
+/** SAM's own voice (Kokoro, then Piper) rendered to a complete WAV file.
+ * Rejects with an ApiError: 409 speech is turned off (stay silent), 501 no
+ * installed engine can return audio (the caller may use the web view's own
+ * voice), 422 nothing to say. The first request after install can be slow:
+ * Kokoro loads, and downloads, its model then. `signal` aborts the wait. */
+export async function synthesizeSpeech(text: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const res = await fetch(await endpoint("/speech", CORE_BASE), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal,
+  });
+  if (!res.ok) throw await apiError(res);
+  return res.arrayBuffer();
 }
 
 export function getEnvironmentReport(): Promise<EnvironmentReport> {

@@ -25,20 +25,26 @@ Serves:
                                         installed models + compatibility (core/model_manager.py)
 - POST   /api/models/select             make an installed model the Brain (409 while a task runs)
 - POST   /api/models/pull               stream model-download progress (loopback only)
+- POST   /api/speech                    render text to a WAV file with SAM's own voice
+                                        (Kokoro, then Piper; mouth/tts.py) -- loopback only
+                                        (voice Phase A: the desktop app plays the reply)
 - /                                     the phone client (interfaces/web/)
 
-(The /api/models routes are SAM Core, not phone-task API, so they sit beside
-/api/iqoo/* rather than under it -- the /api/iqoo/* contract is unchanged.)
+(The /api/models and /api/speech routes are SAM Core, not phone-task API, so
+they sit beside /api/iqoo/* rather than under it -- the /api/iqoo/* contract
+is unchanged.)
 """
 
 import asyncio
+import importlib
 import json
 import logging
 import math
+import threading
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,7 +61,9 @@ from interfaces.api.gateway import (
 from interfaces.api.task_store import TERMINAL_STATUSES
 from interfaces.api.schemas import (
     TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest, ModelPullRequest,
+    SpeechRequest,
 )
+from mouth.tts import TextToSpeech, TTSDisabledError, TTSUnavailableError
 # agent/cross-device: /api/connect/* — device pairing, trust, capabilities
 # and cross-device task routing. Pure addition; every /api/iqoo/* route
 # above and below this import is unchanged. See
@@ -237,13 +245,18 @@ def repair_environment(request: EnvironmentRepairRequest):
     if not groups:
         raise HTTPException(status_code=422, detail="groups must be a non-empty list of dependency group names")
     try:
-        return EnvironmentCompatibilityManager().repair_dependencies(groups)
+        repaired = EnvironmentCompatibilityManager().repair_dependencies(groups)
     except Exception as exc:
         from runtime.compatibility import CompatibilityError
         if isinstance(exc, CompatibilityError):
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.exception("Dependency repair failed")
         raise HTTPException(status_code=500, detail="Dependency repair failed; see local SAM logs") from exc
+    # Voice Phase A: a speech engine installed just now must be usable without
+    # restarting SAM (the speech engine remembers "not installed" for the life
+    # of the process otherwise).
+    _reset_tts()
+    return repaired
 
 
 @app.on_event("startup")
@@ -505,6 +518,67 @@ async def pull_model(req: ModelPullRequest, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ─── Speech output (voice Phase A) ───────────────────────────────────────
+#
+# The desktop app records and plays audio inside its own webview, so it needs
+# SAM's voice as data rather than as sound from this machine's speakers
+# (which is all TextToSpeech.speak() does, for the legacy main.py voice
+# process). Loopback only, like the other desktop/Core-initiated routes: it
+# spends CPU on the user's machine and is not part of the phone contract.
+
+_tts: Optional[TextToSpeech] = None
+_tts_lock = threading.Lock()
+
+
+def get_tts() -> TextToSpeech:
+    """One TextToSpeech per API process, built on first use. It keeps the
+    live settings object, so a voice, speed or engine change made in Settings
+    applies to the next request. It leaves an engine that just failed alone
+    for a minute (mouth/tts.py SYNTH_RETRY_SECONDS); _reset_tts() clears
+    that at once."""
+    global _tts
+    settings = _settings_instance()
+    with _tts_lock:
+        if _tts is None:
+            _tts = TextToSpeech(settings)
+        else:
+            _tts.settings = settings
+        return _tts
+
+
+def _reset_tts() -> None:
+    """Forget which engines just failed, so the next request tries them at
+    once instead of after the retry time. Called after a successful
+    dependency repair; also makes Python notice packages that did not exist
+    when the process started."""
+    global _tts
+    with _tts_lock:
+        _tts = None
+    importlib.invalidate_caches()
+
+
+@app.post("/api/speech", dependencies=[Depends(require_local_caller)])
+def render_speech(req: SpeechRequest):
+    """Render text to a mono 16-bit WAV file. Each refusal has its own status
+    so the client can react: 409 the user turned speech off (stay silent),
+    501 no installed engine can return audio, e.g. nothing installed yet or
+    the "system" voice (the desktop app falls back to its webview's voice),
+    422 nothing to say (empty text, or text a working engine cannot voice,
+    such as a lone emoji). The 501 detail names each engine with a fixed
+    reason; the engines' own error text can hold file paths, so it is only
+    logged. The first request after install can take a while -- Kokoro loads
+    (and downloads) its model then."""
+    try:
+        wav = get_tts().synthesize_wav(req.text)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except TTSDisabledError as e:  # before its base class
+        raise HTTPException(status_code=409, detail=str(e))
+    except TTSUnavailableError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    return Response(content=wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 # ─── Phone client (mounted last so it never shadows /api routes) ────────
