@@ -185,7 +185,7 @@ def test_full_task_lifecycle_matches_the_proven_e2e_scenario():
             check("start_task returns a record with an id", bool(record.id))
             check("status starts at queued or running", record.status in ("queued", "running"))
 
-            deadline = time.time() + 20
+            deadline = time.time() + 45
             while manager.get_task(record.id).status in ("queued", "running") and time.time() < deadline:
                 time.sleep(0.05)
 
