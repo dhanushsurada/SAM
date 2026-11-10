@@ -820,7 +820,17 @@ class ReactLoop:
         browser = self._get_browser()
         url = payload.get("url", "")
         task = payload.get("task", "")
-        return browser.execute(url=url, task=task)
+        try:
+            return browser.execute(url=url, task=task)
+        except Exception as e:
+            if url:
+                import webbrowser
+                try:
+                    webbrowser.open(url)
+                    return f"Opened {url} in system browser (Playwright fallback)."
+                except Exception:
+                    pass
+            raise
 
     def _execute_terminal(self, payload: Dict) -> str:
         terminal = self._get_terminal()
