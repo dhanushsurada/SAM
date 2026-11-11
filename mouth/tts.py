@@ -91,6 +91,8 @@ class TextToSpeech:
     def speak(self, text: str):
         if not text or not text.strip():
             return
+        if os.environ.get("SAM_TEST_MODE") == "1":
+            return
         text = self._clean_for_speech(text)
         logger.info(f"Speaking: {text[:80]}...")
 

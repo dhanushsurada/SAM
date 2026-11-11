@@ -123,21 +123,25 @@ class UnifiedTaskCoordinator:
             devices = self.registry.list_devices()
             online_supported = [
                 d for d in devices
-                if d.get("is_trusted") and d.get("connection_state") == "online"
+                if (d.get("is_trusted") or d.get("status") == "trusted") and d.get("connection_state") == "online"
                 and device_supports(d.get("capabilities", {}), capability)
             ]
             if online_supported:
                 chosen = online_supported[0]
-                return chosen["device_id"], f"Selected online mobile device '{chosen.get('name')}' for {capability}"
+                dev_id = chosen.get("device_id") or chosen.get("external_id")
+                dev_name = chosen.get("name") or chosen.get("device_name", dev_id)
+                return dev_id, f"Selected online mobile device '{dev_name}' for {capability}"
             
             # If no online device, look for trusted paired device even if offline (will queue)
             paired = [
                 d for d in devices
-                if d.get("is_trusted") and device_supports(d.get("capabilities", {}), capability)
+                if (d.get("is_trusted") or d.get("status") == "trusted") and device_supports(d.get("capabilities", {}), capability)
             ]
             if paired:
                 chosen = paired[0]
-                return chosen["device_id"], f"Selected mobile device '{chosen.get('name')}' (currently offline, will queue)"
+                dev_id = chosen.get("device_id") or chosen.get("external_id")
+                dev_name = chosen.get("name") or chosen.get("device_name", dev_id)
+                return dev_id, f"Selected mobile device '{dev_name}' (currently offline, will queue)"
             
             return None, f"No paired mobile device supports capability '{capability}'"
 

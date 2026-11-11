@@ -120,6 +120,11 @@ class TerminalRunner:
                     logger.warning(f"BLOCKED dangerous command: {command}")
                     return f"Blocked: This command ({blocked}) is not allowed for safety reasons."
 
+            # Comprehensive pattern check for destructive root/home recursive removal
+            if re.search(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+([/~]|\/\*)", sub) or re.search(r":\(\)\s*\{\s*:\|:&\s*\};:", sub):
+                logger.warning(f"BLOCKED dangerous root/home deletion or fork bomb: {command}")
+                return "Blocked: Destructive system deletion or fork bomb command is not allowed for safety reasons."
+
             if not self._allow_risky:
                 for risky in REQUIRES_CONFIRMATION:
                     if risky in sub:

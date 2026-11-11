@@ -94,6 +94,12 @@ class Brain:
             status = (r.status_code == 200)
             self._cached_ollama_status = status
             self._cached_ollama_time = now
+            if status:
+                try:
+                    self._cached_models = [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+                    self._cached_models_time = now
+                except Exception:
+                    pass
             return status
         except Exception:
             self._cached_ollama_status = False
@@ -230,8 +236,25 @@ class Brain:
                 raw = response.json()
                 content = raw["message"]["content"]
 
-            # Parse JSON response
-            parsed = json.loads(content)
+            # Parse JSON response with markdown fence stripping and substring fallback
+            raw_text = content.strip()
+            if raw_text.startswith("```"):
+                lines = raw_text.splitlines()
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                raw_text = "\n".join(lines).strip()
+
+            try:
+                parsed = json.loads(raw_text)
+            except json.JSONDecodeError:
+                m = re.search(r'(\{[\s\S]*\})', raw_text)
+                if m:
+                    parsed = json.loads(m.group(1))
+                else:
+                    raise
+
             return BrainResponse(
                 text=parsed.get("text", "I didn't get a proper response."),
                 action=parsed.get("action"),
