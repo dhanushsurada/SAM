@@ -109,3 +109,26 @@ def verify(public_key: Ed25519PublicKey, message: bytes, signature: bytes) -> bo
         return True
     except InvalidSignature:
         return False
+    except Exception:
+        return False
+
+
+def generate_device_id() -> str:
+    """Generates a cryptographically secure device or message identifier."""
+    import secrets
+    return f"dev_{secrets.token_hex(12)}"
+
+
+def sign_message(private_key_pem: str, message: bytes) -> bytes:
+    """Signs message bytes using an Ed25519 private key in PEM format."""
+    key = load_private_key(private_key_pem)
+    return sign(key, message)
+
+
+def verify_signature(public_key_pem: str, message: bytes, signature: bytes) -> bool:
+    """Verifies a signature using an Ed25519 public key in PEM format."""
+    try:
+        key = load_public_key(public_key_pem)
+        return verify(key, message, signature)
+    except Exception:
+        return False

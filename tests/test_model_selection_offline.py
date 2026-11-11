@@ -19,13 +19,28 @@ Usage:
     HOME=/tmp/sam_smoke_model_selection python3 tests/test_model_selection_offline.py
 """
 
+import os
 import io
 import sys
 import tempfile
+import atexit
+import shutil
+import site
 import threading
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+user_site = site.getusersitepackages()
+if user_site not in sys.path:
+    sys.path.append(user_site)
+
+if "sam_smoke_" not in os.environ.get("HOME", ""):
+    _temp_home = tempfile.mkdtemp(prefix="sam_smoke_model_selection_")
+    os.environ["HOME"] = _temp_home
+    atexit.register(lambda: shutil.rmtree(_temp_home, ignore_errors=True))
+
+os.environ["SAM_TEST_MODE"] = "1"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

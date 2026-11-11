@@ -316,7 +316,19 @@ class DeviceRegistry:
         device = dict(zip(cols, row))
         device["capabilities"] = json.loads(device["capabilities"] or "{}")
         device["connection_state"] = connection_state_for(device)
+        device["device_id"] = device["external_id"]
+        device["name"] = device["device_name"]
+        device["is_trusted"] = (device["status"] == "trusted")
         return device
+
+    def get_device(self, device_id: str, channel: str = DIRECT_CHANNEL) -> Optional[Dict]:
+        """Convenience lookup by external_id across channels."""
+        dev = self.get_device_by_external_id(device_id, channel=channel)
+        if dev:
+            return dev
+        if channel == DIRECT_CHANNEL:
+            return self.get_device_by_external_id(device_id, channel="telegram")
+        return None
 
     def verify_signature(self, external_id: str, message: bytes, signature: bytes,
                           channel: str = DIRECT_CHANNEL) -> bool:
@@ -418,6 +430,9 @@ class DeviceRegistry:
         for device in devices:
             device["capabilities"] = json.loads(device["capabilities"] or "{}")
             device["connection_state"] = connection_state_for(device)
+            device["device_id"] = device["external_id"]
+            device["name"] = device["device_name"]
+            device["is_trusted"] = (device["status"] == "trusted")
         return devices
 
     def revoke(self, device_id: int) -> bool:

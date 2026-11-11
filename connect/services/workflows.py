@@ -49,12 +49,22 @@ class CrossDeviceWorkflowRunner:
         3. Dispatch transfer to mobile device
         4. Confirm receipt
         """
-        # Step 1: Desktop file discovery
+        # Step 1: Desktop file discovery (sanitized & bounded)
+        safe_query = os.path.basename(query).replace("..", "").strip()
         matched_files = []
         if search_dir.exists():
-            for p in search_dir.rglob(f"*{query}*"):
-                if p.is_file():
-                    matched_files.append(p)
+            count = 0
+            try:
+                for p in search_dir.rglob(f"*{safe_query}*"):
+                    count += 1
+                    if count > 500:
+                        break
+                    if p.is_file() and not p.name.startswith("."):
+                        matched_files.append(p)
+                        if len(matched_files) >= 5:
+                            break
+            except Exception as e:
+                logger.debug(f"Search directory traversal error: {e}")
 
         if not matched_files:
             return {
@@ -63,9 +73,23 @@ class CrossDeviceWorkflowRunner:
             }
 
         target_file = matched_files[0]
-        file_bytes = target_file.read_bytes()
-        file_sha256 = hashlib.sha256(file_bytes).hexdigest()
-        file_size = len(file_bytes)
+        file_size = target_file.stat().st_size
+        max_size = 100 * 1024 * 1024  # 100MB transfer limit
+        if file_size > max_size:
+            return {
+                "success": False,
+                "error": f"File '{target_file.name}' ({file_size} bytes) exceeds maximum transfer size limit (100MB)."
+            }
+
+        # Compute SHA256 in chunks for memory durability
+        hasher = hashlib.sha256()
+        with open(target_file, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        file_sha256 = hasher.hexdigest()
 
         # Step 2: Create coordinated task
         task = self.coordinator.create_coordinated_task(

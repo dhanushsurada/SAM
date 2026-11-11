@@ -18,10 +18,24 @@ Usage:
     HOME=/tmp/sam_smoke_task_stagnation python3 tests/test_task_request_and_stagnation_offline.py
 """
 
+import os
 import sys
 import json
+import tempfile
+import atexit
+import shutil
+import site
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+user_site = site.getusersitepackages()
+if user_site not in sys.path:
+    sys.path.append(user_site)
+
+if "sam_smoke_" not in os.environ.get("HOME", ""):
+    _temp_home = tempfile.mkdtemp(prefix="sam_smoke_stagnation_")
+    os.environ["HOME"] = _temp_home
+    atexit.register(lambda: shutil.rmtree(_temp_home, ignore_errors=True))
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
