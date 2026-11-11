@@ -1,7 +1,7 @@
 {
   "name": "sam-desktop",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "SAM desktop product UI (Phase 5) + native shell (Agent 1, src-tauri/). Not VEDA (frontend/), not the iQOO phone client (interfaces/web/).",
   "type": "module",
   "scripts": {
