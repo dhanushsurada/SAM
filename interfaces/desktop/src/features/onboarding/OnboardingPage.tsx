@@ -8,9 +8,15 @@ import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
 import { isNative, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
-import { getEnvironmentReport, type EnvironmentReport } from "@/api/client";
+import { getEnvironmentReport, repairEnvironment, type EnvironmentReport } from "@/api/client";
 
 const STEPS = ["Welcome", "System check", "Model & voice", "Permissions", "Configuration", "Ready"] as const;
+
+const RECOMMENDED_MODELS = [
+  { name: "qwen2.5:14b", label: "Qwen 2.5 14B", desc: "Recommended · Advanced reasoning & tool execution", size: "9.0 GB" },
+  { name: "qwen2.5:7b", label: "Qwen 2.5 7B", desc: "Balanced · Fast responses & efficient", size: "4.7 GB" },
+  { name: "llama3.2:3b", label: "Llama 3.2 3B", desc: "Lightweight · Fast intent & low RAM", size: "2.0 GB" },
+] as const;
 
 export function OnboardingPage() {
   const [step, setStep] = useState(0);
@@ -25,13 +31,15 @@ export function OnboardingPage() {
   const [confirmPull, setConfirmPull] = useState(false);
   const [ollamaActionMessage, setOllamaActionMessage] = useState<string | null>(null);
   const [runtimeRepairMessage, setRuntimeRepairMessage] = useState<string | null>(null);
+  const [voiceInstalling, setVoiceInstalling] = useState(false);
+  const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!native) return;
     void runtime.refreshModels();
   }, [native, runtime.refreshModels]);
   useEffect(() => {
-    if (!native || step !== 1) return;
+    if (!native || (step !== 1 && step !== 2)) return;
     let active = true;
     getEnvironmentReport().then((report) => { if (active) { setEnvironment(report); setEnvironmentError(null); } })
       .catch((error: unknown) => { if (active) setEnvironmentError(error instanceof Error ? error.message : "Environment status is unavailable."); });
@@ -82,6 +90,26 @@ export function OnboardingPage() {
     }
   };
   const installedModel = Boolean(runtime.models?.models.some((model) => model.name === modelName));
+
+  const installVoice = async () => {
+    setVoiceInstalling(true);
+    setVoiceMessage(null);
+    try {
+      await repairEnvironment(["speech-input", "speech-output"]);
+      const updated = await getEnvironmentReport();
+      setEnvironment(updated);
+      setVoiceMessage("Voice touch-to-talk & TTS capabilities installed successfully.");
+    } catch (error) {
+      setVoiceMessage(error instanceof Error ? error.message : "Voice installation failed.");
+    } finally {
+      setVoiceInstalling(false);
+    }
+  };
+
+  const voiceReady = Boolean(
+    environment?.dependencies?.["speech-input"]?.available &&
+    environment?.dependencies?.["speech-output"]?.available
+  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-void px-4 py-10 text-ink">
@@ -165,9 +193,9 @@ export function OnboardingPage() {
             <div className="space-y-3">
               <h2 className="text-base font-medium">Model & voice</h2>
               {!native && <p className="text-xs text-mute">Runtime controls are available in the installed SAM desktop app.</p>}
-              <p className="text-sm text-mute">Ollama and the installed models are read from SAM's shared runtime state. Downloads may be several GB; review the model name before starting one.</p>
+              <p className="text-sm text-mute">Choose a local LLM model and enable the voice speech engine so SAM is completely ready.</p>
               {environment && <p className={`text-xs ${environment.environment.hardware.disk.free_gb !== null && environment.environment.hardware.disk.free_gb < 15 ? "text-warn" : "text-mute"}`}>
-                {environment.environment.hardware.disk.free_gb ?? "Unknown"} GB free on the home volume. Model size varies; Ollama reports byte progress after you start a download. Downloads are always started by your explicit action.
+                {environment.environment.hardware.disk.free_gb ?? "Unknown"} GB free on the home volume. Model size varies; Ollama reports byte progress after you start a download.
               </p>}
               {runtime.snapshot?.ollama && <p className="text-xs text-mute">Ollama: {runtime.snapshot.ollama.state} — {runtime.snapshot.ollama.detail}</p>}
               {runtime.snapshot?.ollama.state === "NOT_INSTALLED" && <div className="space-y-2 rounded-md border border-line bg-void p-3">
@@ -181,6 +209,38 @@ export function OnboardingPage() {
               </div>}
               {runtime.snapshot?.ollama.state === "READY" && runtime.models?.models.length === 0 && <p className="text-xs text-warn">No model is installed. Model-backed chat, planning, and other Brain features stay unavailable until you choose and download a model.</p>}
               {ollamaActionMessage && <p role="status" className="text-xs text-mute">{ollamaActionMessage}</p>}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-mute">Recommended Models</label>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+                  {RECOMMENDED_MODELS.map((m) => {
+                    const isSelected = modelName === m.name;
+                    const isInstalled = Boolean(runtime.models?.models.some((installed) => installed.name === m.name));
+                    return (
+                      <button
+                        key={m.name}
+                        type="button"
+                        onClick={() => setModelName(m.name)}
+                        className={`flex flex-col items-start rounded-md border p-2 text-left transition-colors ${
+                          isSelected
+                            ? "border-ember bg-ember/10 text-ink"
+                            : "border-line bg-void hover:border-line-hover text-mute"
+                        }`}
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-xs font-semibold text-ink">{m.label}</span>
+                          <span className="text-[10px] text-mute">{m.size}</span>
+                        </div>
+                        <span className="mt-1 text-[11px] leading-tight text-mute">{m.desc}</span>
+                        {isInstalled && (
+                          <span className="mt-1.5 text-[10px] font-medium text-success">✓ Installed</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <input aria-label="Model name" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="e.g. qwen2.5:14b" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm" />
                 <Button variant="secondary" size="sm" onClick={() => void runtime.refreshModels()} loading={runtime.modelsLoading}>Refresh</Button>
@@ -194,7 +254,33 @@ export function OnboardingPage() {
               {runtime.pullError && <p className="text-xs text-danger">{runtime.pullError}</p>}
               {runtime.modelsError && <p className="text-xs text-danger">{runtime.modelsError}</p>}
               <p className="text-xs text-mute">Configured primary: {runtime.models?.selected_model ?? "loading"}; installed: {runtime.models?.models.map((m) => m.name).join(", ") || "none detected"}.</p>
-              <p className="text-xs text-mute">Voice permissions and wake-word controls are managed separately by macOS and SAM's runtime.</p>
+
+              <div className="space-y-2 rounded-md border border-line bg-void p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-ink">Touch-to-Talk Voice Engine</span>
+                    <span className="text-[10px] text-mute">(Whisper STT + Kokoro TTS)</span>
+                  </div>
+                  <StatusPill state={voiceReady ? "SUCCESS" : "UNAVAILABLE"} label={voiceReady ? "Ready" : "Not Installed"} />
+                </div>
+                <p className="text-xs text-mute">
+                  Enables microphone voice messages and spoken responses without third-party cloud audio services.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={voiceInstalling || voiceReady}
+                    loading={voiceInstalling}
+                    onClick={() => void installVoice()}
+                  >
+                    {voiceReady ? "Voice Ready" : "Download & Enable Voice"}
+                  </Button>
+                  {voiceMessage && (
+                    <span className="text-xs text-mute truncate">{voiceMessage}</span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

@@ -291,7 +291,21 @@ class EnvironmentCompatibilityManager:
             raise CompatibilityError("In-app dependency repair is unavailable in this runtime. "
                                      "No supported writable package location or pip is available. "
                                      "Repair the app installation or use the supported source setup route.")
-        plan = self.dependency_plan(groups)
+        # Resolve groups, gracefully adapting legacy voice requests on macOS if PortAudio C headers are absent
+        effective_groups = list(groups)
+        if platform.system() == "Darwin" and "voice" in effective_groups:
+            has_portaudio = any(
+                (Path(p) / "portaudio.h").exists()
+                for p in ["/opt/homebrew/include", "/usr/local/include", "/usr/include"]
+            )
+            if not has_portaudio:
+                # Fall back to touch-to-talk speech groups that use prebuilt wheels and don't need portaudio
+                effective_groups = [g for g in effective_groups if g != "voice"]
+                for g in ("speech-input", "speech-output"):
+                    if g not in effective_groups:
+                        effective_groups.append(g)
+
+        plan = self.dependency_plan(effective_groups)
         if not plan["requirements"]:
             raise CompatibilityError("The selected dependency groups contain no declared requirements")
         self.record_setup_step("dependency-repair", "started",
@@ -307,9 +321,29 @@ class EnvironmentCompatibilityManager:
             shutil.copytree(install_target, staged_target, dirs_exist_ok=True)
             command.extend(["--upgrade", "--target", str(staged_target)])
         command.extend(plan["requirements"])
+
+        pip_env = os.environ.copy()
+        if platform.system() == "Darwin":
+            brew_bin = "/opt/homebrew/bin"
+            if Path(brew_bin).exists() and brew_bin not in pip_env.get("PATH", ""):
+                pip_env["PATH"] = f"{brew_bin}:{pip_env.get('PATH', '')}"
+            homebrew_prefix = Path("/opt/homebrew") if Path("/opt/homebrew").exists() else Path("/usr/local")
+            if homebrew_prefix.exists():
+                inc = str(homebrew_prefix / "include")
+                lib = str(homebrew_prefix / "lib")
+                cpath = pip_env.get("CPATH", "")
+                pip_env["CPATH"] = f"{inc}:{cpath}" if cpath else inc
+                lib_path = pip_env.get("LIBRARY_PATH", "")
+                pip_env["LIBRARY_PATH"] = f"{lib}:{lib_path}" if lib_path else lib
+                cflags = pip_env.get("CFLAGS", "")
+                pip_env["CFLAGS"] = f"-I{inc} {cflags}".strip()
+                ldflags = pip_env.get("LDFLAGS", "")
+                pip_env["LDFLAGS"] = f"-L{lib} {ldflags}".strip()
+
         try:
             result = self.runner(command,
-                                 capture_output=True, text=True, timeout=1800, check=False)
+                                 capture_output=True, text=True, timeout=1800, check=False,
+                                 env=pip_env)
         except (OSError, subprocess.SubprocessError) as exc:
             if staged_target:
                 shutil.rmtree(staged_target, ignore_errors=True)
