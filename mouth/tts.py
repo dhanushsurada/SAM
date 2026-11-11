@@ -91,8 +91,6 @@ class TextToSpeech:
     def speak(self, text: str):
         if not text or not text.strip():
             return
-        if os.environ.get("SAM_TEST_MODE") == "1":
-            return
         text = self._clean_for_speech(text)
         logger.info(f"Speaking: {text[:80]}...")
 
@@ -327,6 +325,8 @@ class TextToSpeech:
     # ─── System TTS ───────────────────────────────────────────────────────
 
     def _speak_system(self, text: str):
+        if os.environ.get("SAM_TEST_MODE") == "1":
+            return
         if IS_MAC:
             subprocess.run(["say", text], timeout=60, check=True)
         elif IS_WIN:
@@ -335,6 +335,8 @@ class TextToSpeech:
             raise RuntimeError("No system TTS on this platform")
 
     def _speak_pyttsx3(self, text: str):
+        if os.environ.get("SAM_TEST_MODE") == "1":
+            return
         if self._pyttsx3_engine is None:
             import pyttsx3
             self._pyttsx3_engine = pyttsx3.init()
@@ -347,6 +349,8 @@ class TextToSpeech:
     # ─── Audio Playback ───────────────────────────────────────────────────
 
     def _play_audio_array(self, audio, sample_rate: int):
+        if os.environ.get("SAM_TEST_MODE") == "1":
+            return
         try:
             import sounddevice as sd
             sd.play(audio, sample_rate)
@@ -365,6 +369,8 @@ class TextToSpeech:
             raise RuntimeError(f"Audio playback failed: {e}")
 
     def _play_audio_file(self, path: str):
+        if os.environ.get("SAM_TEST_MODE") == "1":
+            return
         if IS_MAC:
             subprocess.run(["afplay", path], timeout=120, check=True)
         elif IS_WIN:
