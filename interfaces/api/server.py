@@ -40,9 +40,28 @@ import importlib
 import json
 import logging
 import math
+import site
 import threading
 from pathlib import Path
 from typing import AsyncGenerator, Optional
+
+_user_pkgs = Path.home() / ".sam_data" / "python-packages"
+if _user_pkgs.exists():
+    try:
+        site.addsitedir(str(_user_pkgs))
+    except Exception:
+        pass
+
+# When running inside packaged SAM.app bundle:
+_cur = Path(__file__).resolve().parent
+for _ in range(5):
+    if (_cur / "site-packages").is_dir():
+        try:
+            site.addsitedir(str(_cur / "site-packages"))
+        except Exception:
+            pass
+        break
+    _cur = _cur.parent
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware

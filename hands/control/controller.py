@@ -240,19 +240,29 @@ class ComputerController:
             path = candidate
 
         try:
+            saved = False
             if self._pyautogui:
-                self._pyautogui.screenshot(path)
-            elif IS_MAC:
-                result = subprocess.run(
-                    [SCREENCAPTURE_BIN, "-x", path],
-                    capture_output=True, text=True,
-                )
-                if result.returncode != 0:
-                    diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
-                    raise RuntimeError(
-                        f"screencapture failed (exit {result.returncode}): {diagnostic}")
-            elif IS_WIN:
-                self._screenshot_windows(path)
+                try:
+                    img = self._pyautogui.screenshot(path)
+                    if not os.path.exists(path) and hasattr(img, "save"):
+                        img.save(path)
+                    if os.path.exists(path):
+                        saved = True
+                except Exception:
+                    pass
+
+            if not saved:
+                if IS_MAC:
+                    result = subprocess.run(
+                        [SCREENCAPTURE_BIN, "-x", path],
+                        capture_output=True, text=True,
+                    )
+                    if result.returncode != 0:
+                        diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
+                        raise RuntimeError(
+                            f"screencapture failed (exit {result.returncode}): {diagnostic}")
+                elif IS_WIN:
+                    self._screenshot_windows(path)
         except Exception as e:
             if IS_MAC:
                 raise RuntimeError(

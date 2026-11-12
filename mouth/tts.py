@@ -171,7 +171,7 @@ class TextToSpeech:
                     nothing_to_say = True
                     failures.append(f"{label}: no audio for this text")
                     continue
-                except Exception as e:
+                except (Exception, SystemExit) as e:
                     logger.warning(f"TTS synthesis engine failed ({name}): {e} "
                                    f"— leaving it alone for {int(SYNTH_RETRY_SECONDS)} s")
                     self._synth_failed_at[name] = self._clock()
@@ -290,8 +290,10 @@ class TextToSpeech:
 
         audio_chunks = []
         for result in self._kokoro_pipeline(text, voice=voice, speed=speed):
-            # Kokoro yields (graphemes, phonemes, audio) tuples
-            if isinstance(result, (tuple, list)):
+            # Kokoro yields Result objects with .audio (torch.Tensor) or (graphemes, phonemes, audio) tuples
+            if hasattr(result, "audio"):
+                chunk = result.audio
+            elif isinstance(result, (tuple, list)):
                 chunk = result[-1]
             else:
                 chunk = result
@@ -301,6 +303,10 @@ class TextToSpeech:
 
             # Ensure it's a proper 1D numpy array
             try:
+                if hasattr(chunk, "cpu"):
+                    chunk = chunk.cpu()
+                if hasattr(chunk, "numpy"):
+                    chunk = chunk.numpy()
                 chunk = np.array(chunk, dtype=np.float32).flatten()
                 if chunk.size > 0:
                     audio_chunks.append(chunk)

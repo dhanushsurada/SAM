@@ -42,6 +42,16 @@ if _user_pkgs.exists():
     except Exception:
         pass
 
+_cur = Path(__file__).resolve().parent
+for _ in range(5):
+    if (_cur / "site-packages").is_dir():
+        try:
+            site.addsitedir(str(_cur / "site-packages"))
+        except Exception:
+            pass
+        break
+    _cur = _cur.parent
+
 
 def _emit_json(payload: dict, exit_code: int = 0) -> int:
     """Write exactly one machine-readable line to stdout."""

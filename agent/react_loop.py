@@ -479,6 +479,21 @@ class ReactLoop:
                     "just repeat the same action — re-check what's actually on screen "
                     "and choose a different approach, or say there's nothing more you "
                     "can do if no reasonable alternative exists.")
+            else:
+                # Fast finish for self-contained direct actions (e.g. YouTube playback, screenshot, app launch/close)
+                is_direct_action = (
+                    (response.action_payload and (
+                        response.action_payload.get("use_system_browser")
+                        or response.action_payload.get("destination") == "desktop"
+                        or response.action_payload.get("type") in ("close_app", "screenshot")
+                    ))
+                    or (response.action == "launch_app")
+                )
+                if is_direct_action:
+                    completion_text = response.text or observation
+                    self._safe_reflect(task, observations, completion_text)
+                    return TaskOutcome(completion_text, STATUS_SUCCESS)
+
             response = None  # force fresh reasoning on the next iteration
 
             if self._is_stagnant(observations) or self._is_repeating_failed_action(observations):
@@ -660,14 +675,17 @@ class ReactLoop:
 
     def _safe_reflect(self, task: str, observations: list, outcome: str):
         """Reflection must never break or delay the response the user is
-        waiting on — always call this after the result is already decided.
-        Passes self.founder_mode through (may be None) so high-confidence
-        lessons can bridge into Founder Mode when it's available."""
-        try:
-            self._reflection.reflect(task=task, steps=observations, outcome=outcome,
-                                      founder_mode=self.founder_mode)
-        except Exception as e:
-            logger.debug(f"Reflection call skipped: {e}")
+        waiting on — run in background thread so user response is immediate."""
+        def _do_reflect():
+            try:
+                self._reflection.reflect(task=task, steps=observations, outcome=outcome,
+                                          founder_mode=self.founder_mode)
+            except Exception as e:
+                logger.debug(f"Reflection call skipped: {e}")
+
+        import threading
+        t = threading.Thread(target=_do_reflect, daemon=True, name="reflection-worker")
+        t.start()
 
     def _build_planned_step_prompt(self, task: str, plan: list, current_step: Dict, observations: list) -> str:
         plan_text = "\n".join(

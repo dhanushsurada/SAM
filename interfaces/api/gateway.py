@@ -507,13 +507,13 @@ class TaskGateway:
                 self.event_bus.publish(task_id, "cancelled", "Cancelled during execution")
                 return
 
+            self.task_store.update_status(task_id, final_status, result_text=final_response.text)
+            self.event_bus.publish(task_id, final_status, final_response.text)
+
             if not self.settings.incognito:
                 session.save(user_input=instruction, response=final_response,
                              memory_store=self.memory.get_store(self.settings))
             self.founder_mode.capture_if_relevant(instruction, final_response)
-
-            self.task_store.update_status(task_id, final_status, result_text=final_response.text)
-            self.event_bus.publish(task_id, final_status, final_response.text)
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)

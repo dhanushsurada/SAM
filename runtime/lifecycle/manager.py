@@ -166,10 +166,37 @@ class SAMRuntime:
         log_path = self._process_log_path(name)
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
+            proc_env = dict(os.environ)
+            py_paths = []
+            _cur = Path(__file__).resolve().parent
+            _bundled_pkgs = None
+            for _ in range(5):
+                if (_cur / "site-packages").is_dir():
+                    _bundled_pkgs = _cur / "site-packages"
+                    break
+                _cur = _cur.parent
+            if _bundled_pkgs and _bundled_pkgs.is_dir():
+                py_paths.append(str(_bundled_pkgs))
+            _user_pkgs = Path.home() / ".sam_data" / "python-packages"
+            if _user_pkgs.exists():
+                py_paths.append(str(_user_pkgs))
+            existing_py_path = proc_env.get("PYTHONPATH", "")
+            if existing_py_path:
+                py_paths.append(existing_py_path)
+            if py_paths:
+                proc_env["PYTHONPATH"] = os.pathsep.join(py_paths)
+
+            extra_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
+            existing_path = proc_env.get("PATH", "")
+            paths_to_add = [p for p in extra_paths if p not in existing_path and Path(p).is_dir()]
+            if paths_to_add:
+                proc_env["PATH"] = os.pathsep.join(paths_to_add + ([existing_path] if existing_path else []))
+
             with log_path.open("ab", buffering=0) as process_log:
                 proc = subprocess.Popen(
                     spec.command,
                     cwd=str(spec.cwd),
+                    env=proc_env,
                     stdout=process_log,
                     stderr=subprocess.STDOUT,
                     start_new_session=(platform.system() != "Windows"),
