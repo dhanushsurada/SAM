@@ -56,8 +56,8 @@ function QuickAssistantInner() {
   const latestEvent = events[events.length - 1];
 
   return (
-    <div className="flex h-screen flex-col gap-3 bg-void p-3 text-ink" data-theme="dark" data-quick-assistant>
-      <div className="flex items-center gap-2 rounded-lg border border-line bg-surface p-2 shadow-panel">
+    <div className="flex h-screen flex-col gap-3 bg-void/95 p-3 text-ink backdrop-blur-2xl" data-theme="dark" data-quick-assistant>
+      <div className="flex items-center gap-2 rounded-xl border border-line/70 bg-surface/90 p-2 shadow-panel focus-within:border-ember/50 focus-within:ring-1 focus-within:ring-ember/20 transition-all">
         <input
           ref={inputRef}
           value={value}
@@ -65,8 +65,8 @@ function QuickAssistantInner() {
           onKeyDown={(e) => {
             if (e.key === "Enter") void submit();
           }}
-          placeholder="Ask SAM, or tell it what to do…"
-          className="flex-1 bg-transparent px-2 py-1.5 text-sm text-ink placeholder:text-mute focus:outline-none"
+          placeholder="Ask SAM anything, or tell it to perform a task…"
+          className="flex-1 bg-transparent px-2 py-1 text-sm text-ink placeholder:text-mute/60 focus:outline-none"
         />
         <VoiceMicButton blockStart={submitting} />
         <Button
@@ -76,14 +76,15 @@ function QuickAssistantInner() {
           onClick={() => void submit()}
           disabled={!value.trim() || submitting}
           aria-label="Send"
+          className="h-8 px-3"
         >
-          <FiSend size={14} />
+          <FiSend size={13} />
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-surface p-3 text-sm">
+      <div className="flex-1 overflow-y-auto rounded-xl border border-line/70 bg-surface/80 p-3 text-sm shadow-panel">
         <VoiceStatusLine showUnavailable />
-        {submitError && <p className="text-danger">{submitError}</p>}
+        {submitError && <p className="text-danger text-xs">{submitError}</p>}
         {!submitError && selectedTask && (
           <>
             <StatusPill
@@ -94,13 +95,16 @@ function QuickAssistantInner() {
             {isVoiceTask(selectedTask) && (
               <p className="mt-2 text-xs text-mute">You said: “{labelOf(selectedTask)}”</p>
             )}
-            <p className="mt-2 whitespace-pre-wrap text-ink">
+            <p className="mt-2 whitespace-pre-wrap text-ink text-xs">
               {selectedTask.result_text ?? latestEvent?.message ?? "Working on it…"}
             </p>
           </>
         )}
         {!submitError && !selectedTask && (
-          <p className="text-mute">Press Enter to send. Esc to dismiss.</p>
+          <div className="flex flex-col items-center justify-center h-full text-center py-6 text-xs text-mute/70 space-y-1">
+            <p className="font-medium text-ink/80">Autonomous Quick Assistant</p>
+            <p>Press Enter to dispatch. Esc to dismiss.</p>
+          </div>
         )}
       </div>
     </div>

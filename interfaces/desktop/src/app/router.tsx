@@ -45,6 +45,7 @@ function FirstRunRedirect({ children }: { children: ReactNode }) {
 const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/": CommandCenterPage,
   "/projects": ProjectsPage,
+  "/companion": IqooPage,
   "/iqoo": IqooPage,
   "/connect": ConnectPage,
   "/chat": ChatPage,

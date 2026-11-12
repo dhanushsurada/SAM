@@ -16,6 +16,7 @@ import { useTaskSession } from "@/stores/taskSession";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ChatComposer } from "./ChatComposer";
 import { useTaskLabel, VoiceStatusLine } from "@/features/voice/VoiceControls";
+import { useVoice } from "@/features/voice/VoiceProvider";
 import { isVoiceTask } from "@/features/voice/taskLabel";
 import type { ChatMessage, ChatConversation } from "./types";
 
@@ -51,6 +52,7 @@ function replyFor(task: TaskRecord): ChatMessage | null {
 
 export function ChatPage() {
   const { sessionTasks } = useTaskSession();
+  const { speakReplies, speak } = useVoice();
   const bottomRef = useRef<HTMLDivElement>(null);
   const labelOf = useTaskLabel();
   const [isChatThinking, setIsChatThinking] = useState(false);
@@ -345,6 +347,10 @@ export function ChatPage() {
           return conv;
         })
       );
+
+      if (speakReplies && res.reply) {
+        void speak(res.reply);
+      }
     } catch (e: unknown) {
       const errMsg: ChatMessage = {
         id: `msg-${Date.now()}-err`,
@@ -373,29 +379,31 @@ export function ChatPage() {
     <div className="flex h-full gap-4">
       {/* ─── Conversations Sidebar (Parallel Chats) ───────────────────────── */}
       {sidebarOpen && (
-        <aside className="flex w-60 flex-col rounded-lg border border-line bg-surface p-3 text-sm">
-          <div className="flex items-center justify-between pb-3 border-b border-line">
-            <span className="font-semibold text-ink flex items-center gap-1.5">
-              <FiMessageSquare size={16} className="text-ember" /> Chats
+        <aside className="flex w-60 flex-col rounded-xl border border-line/70 bg-surface/80 backdrop-blur-md p-3 text-sm shadow-panel">
+          <div className="flex items-center justify-between pb-2.5 border-b border-line/40">
+            <span className="font-semibold text-xs tracking-tight text-ink flex items-center gap-1.5">
+              <FiMessageSquare size={14} className="text-ember" /> Threads
             </span>
-            <Button variant="secondary" size="sm" onClick={handleCreateNewChat} title="New Chat">
-              <FiPlus size={14} /> New
+            <Button variant="secondary" size="sm" onClick={handleCreateNewChat} title="New Chat" className="h-7 px-2 text-xs">
+              <FiPlus size={13} /> New
             </Button>
           </div>
 
-          <div className="flex-1 space-y-1.5 overflow-y-auto py-2">
+          <div className="flex-1 space-y-1 overflow-y-auto py-2">
             {conversations.map((conv) => {
               const isActive = conv.id === activeConvId;
               return (
                 <div
                   key={conv.id}
                   onClick={() => setActiveConvId(conv.id)}
-                  className={`group flex items-center justify-between rounded-md px-2.5 py-2 cursor-pointer transition-colors ${
-                    isActive ? "bg-void border border-ember/40 text-ink font-medium" : "hover:bg-void/60 text-mute hover:text-ink"
+                  className={`group flex items-center justify-between rounded-lg px-2.5 py-1.5 cursor-pointer transition-all ${
+                    isActive
+                      ? "bg-void border border-ember/40 text-ink font-medium shadow-sm"
+                      : "hover:bg-void/50 text-mute hover:text-ink border border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <FiMessageSquare size={13} className={isActive ? "text-ember shrink-0" : "shrink-0"} />
+                    <FiMessageSquare size={12} className={isActive ? "text-ember shrink-0" : "shrink-0 opacity-60"} />
                     <span className="truncate text-xs">{conv.title || "Untitled Chat"}</span>
                   </div>
                   <button
@@ -490,7 +498,7 @@ export function ChatPage() {
                     key={starter.text}
                     type="button"
                     onClick={() => void handleSend(starter.text)}
-                    className="rounded-full border border-line bg-surface hover:border-ember/60 px-3 py-1.5 text-xs text-ink hover:text-ember transition-colors shadow-sm"
+                    className="flex items-center gap-1.5 rounded-xl border border-line/70 bg-surface/80 px-3 py-1.5 text-xs text-ink hover:border-ember/40 hover:bg-surface hover:text-ember-text transition-all shadow-sm cursor-pointer active:scale-95"
                   >
                     {starter.label}
                   </button>

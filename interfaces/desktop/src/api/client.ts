@@ -581,3 +581,15 @@ export function testMCPServer(id: string): Promise<{ ok: boolean; message?: stri
     CORE_BASE
   );
 }
+
+export interface SkillItem {
+  name: string;
+  description: string;
+  compiled: boolean;
+  use_count: number;
+  last_used: string | null;
+}
+
+export function listSkills(): Promise<{ skills: SkillItem[] }> {
+  return request<{ skills: SkillItem[] }>("/skills", undefined, CORE_BASE);
+}

@@ -107,12 +107,12 @@ export const CAPABILITIES: HandsCapability[] = [
     ],
   },
   {
-    id: "office-kit",
-    name: "Office Kit device control",
+    id: "device-companion",
+    name: "Companion device control",
     summary: "Screen mirroring, shared clipboard, file transfer and remote control between phone and PC.",
     abilities: [],
-    needs: "No integration exists in this repository. The phone reaches SAM over HTTP; nothing here talks to Office Kit.",
-    source: "docs/iqoo/OFFICE_KIT.md",
+    needs: "Cross-device pairing over local network or USB reverse proxy. Managed from Device Connect.",
+    source: "docs/connect/DEVICE_CONNECT.md",
     availability: "not-implemented",
   },
 ];

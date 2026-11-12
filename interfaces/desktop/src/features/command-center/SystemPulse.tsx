@@ -32,9 +32,11 @@ export function SystemPulse({
       </div>
       {error && <p className="text-xs text-danger">{error}</p>}
       {health && !error && (
-        <p className="font-mono-data text-xs text-mute">
-          queue {health.queue_depth} · gateway only — see Diagnostics for the rest, once it's real
-        </p>
+        <div className="flex items-center justify-between font-mono text-[11px] text-mute/80 border-t border-line/40 pt-2">
+          <span>Queue: {health.queue_depth} tasks</span>
+          <span>Worker: {health.worker_alive ? "Active" : "Idle"}</span>
+          <span>Vision: {health.vision_model_available ? "Ready" : "Off"}</span>
+        </div>
       )}
     </Card>
   );

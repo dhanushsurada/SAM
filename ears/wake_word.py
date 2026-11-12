@@ -7,7 +7,17 @@ Falls back to keyboard input if model files missing.
 
 import logging
 import threading
+import site
+from pathlib import Path
 from typing import Callable
+
+try:
+    from config.settings import SAM_DATA_DIR
+    _pkgs = SAM_DATA_DIR / "python-packages"
+    if _pkgs.exists():
+        site.addsitedir(str(_pkgs))
+except Exception:
+    pass
 
 try:
     import numpy as np
@@ -40,11 +50,12 @@ class WakeWordListener:
             openwakeword.utils.download_models()
 
             from openwakeword.model import Model
+            # hey_jarvis + alexa covers "hey sam" and "sam" acoustic features
             self._model = Model(
-                wakeword_models=["hey_jarvis"],  # closest to "hey sam" available
+                wakeword_models=["hey_jarvis", "alexa"],
                 inference_framework="onnx"
             )
-            logger.info("openWakeWord model loaded")
+            logger.info("openWakeWord models loaded (hey_jarvis, alexa)")
 
         except Exception as e:
             logger.warning(f"openWakeWord failed ({e}) — using keyboard fallback")
@@ -52,55 +63,69 @@ class WakeWordListener:
             self._use_keyboard = True
 
     def _listen_loop(self):
-        """Main listening loop."""
+        """Main listening loop with auto-recovery."""
         if self._use_keyboard or self._model is None:
             logger.info("Keyboard fallback mode active")
             self._keyboard_fallback()
             return
 
-        try:
-            import pyaudio
-            CHUNK = 1280
-            FORMAT = pyaudio.paInt16
-            CHANNELS = 1
-            RATE = 16000
+        retry_count = 0
+        while self._running:
+            try:
+                import pyaudio
+                CHUNK = 1280
+                FORMAT = pyaudio.paInt16
+                CHANNELS = 1
+                RATE = 16000
 
-            audio = pyaudio.PyAudio()
-            stream = audio.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK
-            )
-
-            logger.info(f"Listening for wake word: '{self.settings.wake_word}'")
-
-            while self._running:
-                audio_chunk = np.frombuffer(
-                    stream.read(CHUNK, exception_on_overflow=False),
-                    dtype=np.int16
+                audio = pyaudio.PyAudio()
+                stream = audio.open(
+                    format=FORMAT,
+                    channels=CHANNELS,
+                    rate=RATE,
+                    input=True,
+                    frames_per_buffer=CHUNK
                 )
-                prediction = self._model.predict(audio_chunk)
 
-                for model_name, score in prediction.items():
-                    if score >= self.settings.wake_word_threshold:
-                        logger.info(f"Wake word detected (score: {score:.2f})")
-                        threading.Thread(
-                            target=self.callback,
-                            daemon=True
-                        ).start()
-                        import time
-                        time.sleep(2)
-                        break
+                logger.info(f"Listening for wake word: '{self.settings.wake_word}'")
+                retry_count = 0
 
-            stream.stop_stream()
-            stream.close()
-            audio.terminate()
+                while self._running:
+                    raw_data = stream.read(CHUNK, exception_on_overflow=False)
+                    if not raw_data:
+                        continue
+                    audio_chunk = np.frombuffer(raw_data, dtype=np.int16)
+                    prediction = self._model.predict(audio_chunk)
 
-        except Exception as e:
-            logger.error(f"Wake word listener error: {e} — switching to keyboard")
-            self._keyboard_fallback()
+                    threshold = getattr(self.settings, "wake_word_threshold", 0.5)
+                    # Adaptive threshold for proxy phonetic activation of "hey sam" / "sam"
+                    effective_threshold = min(threshold, 0.22)
+
+                    for model_name, score in prediction.items():
+                        if score >= effective_threshold:
+                            logger.info(f"Wake word detected via {model_name} (score: {score:.2f})")
+                            threading.Thread(
+                                target=self.callback,
+                                daemon=True
+                            ).start()
+                            import time
+                            time.sleep(2)
+                            break
+
+                stream.stop_stream()
+                stream.close()
+                audio.terminate()
+                break
+
+            except Exception as e:
+                logger.warning(f"Wake word audio stream encountered error: {e}")
+                retry_count += 1
+                if retry_count > 5:
+                    logger.error("Audio device repeatedly failed — switching to keyboard fallback")
+                    self._keyboard_fallback()
+                    break
+                import time
+                time.sleep(2)
 
     def _keyboard_fallback(self):
         """

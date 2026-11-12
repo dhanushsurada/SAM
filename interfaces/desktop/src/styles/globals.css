@@ -18,6 +18,37 @@
   body {
     @apply bg-void text-ink font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Subtle ambient lighting effect at top of app */
+  body::before {
+    content: "";
+    position: fixed;
+    top: -120px;
+    left: 20%;
+    right: 20%;
+    height: 340px;
+    background: radial-gradient(ellipse 65% 50% at 50% 0%, rgb(var(--sam-ember) / 0.08), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Custom sleek scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--sam-line) / 0.8);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--sam-mute) / 0.5);
   }
 
   code,

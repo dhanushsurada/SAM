@@ -107,7 +107,7 @@ export const ROUTES: RouteMeta[] = [
     description: "Pair trusted mobile devices, set up Wi-Fi or USB tunnels, and troubleshoot phone connection.",
   },
   {
-    path: "/iqoo",
+    path: "/companion",
     label: "Mobile Companion",
     icon: FiSmartphone,
     group: "workspaces",

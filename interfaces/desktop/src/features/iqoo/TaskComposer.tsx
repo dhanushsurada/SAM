@@ -1,7 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { FiImage, FiX, FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
 import { fileToBase64Payload } from "@/lib/file";
 import { VoiceMicButton, VoiceSpeakToggle, VoiceStatusLine } from "@/features/voice/VoiceControls";
 import type { TaskCreateRequest } from "@/api/types";
@@ -15,13 +14,22 @@ const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 export interface TaskComposerProps {
   onSubmit: (req: TaskCreateRequest) => Promise<unknown>;
   submitting: boolean;
+  presetText?: string;
+  onClearPreset?: () => void;
 }
 
-export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
+export function TaskComposer({ onSubmit, submitting, presetText, onClearPreset }: TaskComposerProps) {
   const [instruction, setInstruction] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (presetText !== undefined && presetText !== "") {
+      setInstruction(presetText);
+      onClearPreset?.();
+    }
+  }, [presetText, onClearPreset]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -76,36 +84,35 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
   };
 
   return (
-    <Card className="space-y-3">
+    <div className="rounded-xl border border-line/70 bg-surface/90 p-3 shadow-panel transition-all focus-within:border-ember/50 focus-within:ring-1 focus-within:ring-ember/20">
       <textarea
         value={instruction}
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstruction(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="What should SAM do? (Press Enter to send, Shift+Enter for new line)"
+        placeholder="Ask SAM anything or give an action (e.g. 'take a screenshot and save to desktop', 'open browser')..."
         rows={3}
         maxLength={4000}
-        className="w-full resize-none rounded-md border border-line bg-void px-3 py-2 text-sm text-ink placeholder:text-mute focus:border-ember/50"
+        className="w-full resize-none bg-transparent px-2 py-1 text-sm text-ink placeholder:text-mute/60 focus:outline-none"
       />
 
       {previewUrl && (
-        <div className="flex items-center gap-2">
-          <img src={previewUrl} alt="Attached" className="h-14 w-14 rounded-md border border-line object-cover" />
+        <div className="flex items-center gap-2 p-1.5">
+          <img src={previewUrl} alt="Attached" className="h-14 w-14 rounded-lg border border-line object-cover" />
           <button
             type="button"
             onClick={() => setImageFile(null)}
-            className="flex items-center gap-1 text-xs text-mute hover:text-ink"
+            className="flex items-center gap-1 text-xs text-mute hover:text-danger transition-colors"
           >
-            <FiX size={12} /> Remove
+            <FiX size={13} /> Remove
           </button>
         </div>
       )}
-      {imageError && <p className="text-xs text-danger">{imageError}</p>}
+      {imageError && <p className="px-2 text-xs text-danger">{imageError}</p>}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-md p-2 text-mute hover:bg-void hover:text-ink">
-            <FiImage size={16} />
-            <span className="sr-only">Attach image</span>
+      <div className="mt-2 flex items-center justify-between border-t border-line/40 pt-2.5">
+        <div className="flex items-center gap-1.5">
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg p-1.5 text-mute hover:bg-void hover:text-ink transition-colors" title="Attach Image">
+            <FiImage size={15} />
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -116,11 +123,16 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
           <VoiceMicButton blockStart={submitting} />
           <VoiceSpeakToggle />
         </div>
-        <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!canSubmit} loading={submitting}>
-          <FiSend size={14} /> Send
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <span className="hidden sm:inline font-mono text-[10px] text-mute/60">
+            ↵ to run · ⇧↵ for newline
+          </span>
+          <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!canSubmit} loading={submitting}>
+            <FiSend size={13} /> Run
+          </Button>
+        </div>
       </div>
       <VoiceStatusLine showUnavailable />
-    </Card>
+    </div>
   );
 }

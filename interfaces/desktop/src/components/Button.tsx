@@ -14,20 +14,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium " +
-  "transition-colors duration-[var(--sam-motion-state)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-lg font-medium " +
+  "transition-all duration-150 active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 select-none";
 
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
+  sm: "h-8 px-3 text-xs",
+  md: "h-9 px-4 text-sm",
 };
 
 const variants: Record<Variant, string> = {
-  primary: "bg-ember text-ember-ink hover:bg-ember/90 active:bg-ember/80",
+  primary: "bg-ember text-ember-ink font-semibold shadow-sm hover:brightness-110 active:brightness-95",
   secondary:
-    "bg-surface text-ink border border-line hover:border-mute/60 active:bg-surface/80",
-  ghost: "text-mute hover:text-ink hover:bg-surface",
-  danger: "bg-danger text-ink hover:bg-danger/90 active:bg-danger/80",
+    "bg-surface text-ink border border-line/80 shadow-sm hover:border-mute/50 hover:bg-surface/80 active:bg-surface/60",
+  ghost: "text-mute hover:text-ink hover:bg-surface/70",
+  danger: "bg-danger text-white shadow-sm hover:bg-danger/90 active:bg-danger/80",
 };
 
 export function Button({

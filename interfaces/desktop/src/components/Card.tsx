@@ -35,7 +35,7 @@ export function Card({ as = "div", padding = "sm", className = "", children, ...
   const Tag = as;
   return (
     <Tag
-      className={`rounded-lg border border-line bg-surface shadow-panel ${PADDING[padding]} ${className}`.trim()}
+      className={`rounded-xl border border-line/70 bg-surface/90 backdrop-blur-md shadow-card transition-all duration-200 hover:border-line ${PADDING[padding]} ${className}`.trim()}
       {...rest}
     >
       {children}

@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { useState } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import { ModeBadge } from "@/components/ModeBadge";
@@ -49,21 +48,16 @@ export function IqooPage() {
     <div className="mx-auto max-w-3xl space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-ink">Mobile Companion Workspace</h1>
+          <h1 className="text-lg font-bold tracking-tight text-ink">Mobile Companion</h1>
           <ModeBadge mode="live" />
         </div>
         <Button variant="ghost" size="sm" onClick={() => setConfirmingReset(true)} loading={resetting}>
-          <FiTrash2 size={14} /> Clear state
+          <FiTrash2 size={13} /> Clear state
         </Button>
       </div>
 
-      <p className="text-sm text-mute">
-        Phone to PC: a phone sends a task to this computer's gateway, SAM runs it here and reports back. Tasks
-        follow the same pipeline as{" "}
-        <Link to="/tasks" className="text-ember-text hover:underline">
-          Tasks
-        </Link>
-        .
+      <p className="text-xs text-mute/80">
+        Cross-device companion: dispatch tasks remotely from any connected phone or tablet to this computer's gateway. SAM executes them with full desktop capabilities and reports progress back in real time.
       </p>
 
       <TaskComposer onSubmit={submitTask} submitting={submitting} />

@@ -35,33 +35,37 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
   const pulse = gatewayPulse(health, healthLoading, healthError);
 
   const content = (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-4 py-4">
-        <span className="h-2 w-2 rounded-full bg-ember" aria-hidden="true" />
-        <span className="text-sm font-semibold tracking-wide text-ink">SAM</span>
-        <span className="font-mono-data text-[10px] text-mute">local</span>
+    <div className="flex h-full flex-col bg-void/60 backdrop-blur-xl">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-line/40">
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-ember/15 border border-ember/30 text-ember font-bold text-xs shadow-sm">
+            S
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-ember" />
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-semibold tracking-tight text-ink">SAM</span>
+              <span className="rounded-md bg-surface border border-line/70 px-1.5 py-0.5 font-mono text-[9px] text-mute">2.0</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full border border-line/60 bg-surface/80 px-2 py-0.5 text-[11px]" title={pulse.label}>
+          <span className={`h-1.5 w-1.5 rounded-full ${pulse.dotClass}`} />
+          <span className={`text-[10px] font-medium ${pulse.textClass}`}>
+            {pulse.label.replace("Gateway ", "")}
+          </span>
+        </div>
       </div>
 
-      {/* Live system-status pulse (PHASE5_PLAN.md §E) — was deferred pending
-          the typed API client from §H step 3, which now exists; reusing its
-          shared poll here rather than fetching again. Steady, not animated:
-          only "actively in progress" states pulse elsewhere (StatusPill) —
-          an idle health readout animating forever would be exactly the
-          decorative motion the brief says to avoid. */}
-      <div className="flex items-center gap-2 px-4 pb-3 text-xs">
-        <span className={`h-1.5 w-1.5 rounded-full ${pulse.dotClass}`} aria-hidden="true" />
-        <span className={pulse.textClass}>{pulse.label}</span>
-      </div>
-
-      <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-2">
+      <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
         <NavItem to="/" end label="Command Center" icon={ROUTES[0].icon} onNavigate={onCloseMobile} />
 
         {MAIN_GROUPS.map((group) => {
           const items = ROUTES.filter((r) => r.group === group && r.path !== "/");
           if (items.length === 0) return null;
           return (
-            <div key={group}>
-              <p className="px-2.5 pb-1.5 font-mono-data text-[10px] uppercase tracking-wider text-mute/70">
+            <div key={group} className="space-y-1">
+              <p className="px-2.5 pb-1 font-mono text-[10px] font-medium uppercase tracking-wider text-mute/60">
                 {GROUP_LABELS[group]}
               </p>
               <div className="space-y-0.5">
@@ -74,15 +78,18 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         })}
       </nav>
 
-      <div className="border-t border-line px-3 py-3 space-y-0.5">
+      <div className="border-t border-line/60 p-3 space-y-1">
         <NavItem to={settingsRoute.path} label={settingsRoute.label} icon={settingsRoute.icon} onNavigate={onCloseMobile} />
-        <Link
-          to="/onboarding"
-          onClick={onCloseMobile}
-          className="block px-2.5 py-1.5 text-xs text-mute hover:text-ink"
-        >
-          Setup guide
-        </Link>
+        <div className="flex items-center justify-between px-2.5 py-1 text-[11px] text-mute">
+          <Link
+            to="/onboarding"
+            onClick={onCloseMobile}
+            className="hover:text-ink transition-colors"
+          >
+            Setup Guide
+          </Link>
+          <span className="font-mono text-[10px] bg-surface/80 px-1.5 py-0.5 rounded border border-line/60">Local First</span>
+        </div>
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ import {
 import type { VoiceEnvironment } from "./voiceText";
 import { createWebviewVoice } from "./webviewVoice";
 import type { UtteranceLike } from "./webviewVoice";
+import { replyToSpeak } from "./speechText";
 
 /**
  * Touch-to-talk for the desktop app: the React side. The behaviour lives in
@@ -117,6 +118,8 @@ export interface VoiceValue {
   dismissError: () => void;
   speakReplies: boolean;
   setSpeakReplies: (on: boolean) => void;
+  /** Explicitly speak a text snippet out loud using SAM's voice */
+  speak: (text: string) => Promise<void>;
   /** A quiet, one-off message that is not an error; null when there is none. */
   notice: string | null;
   dismissNotice: () => void;
@@ -242,6 +245,40 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     writeSpeakReplies(on);
   }, []);
 
+  const speakText = useCallback(
+    async (text: string) => {
+      if (!text || !text.trim()) return;
+      try {
+        const audio = await speechService.synthesize(text);
+        await player.play(audio);
+      } catch {
+        if (webviewSpeak) {
+          try {
+            await webviewSpeak(text, new AbortController().signal);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    },
+    [player, webviewSpeak]
+  );
+
+  // Spoken replies for completed tasks in the session when speakReplies is on
+  const spokenTaskIds = useRef(new Set<string>());
+  useEffect(() => {
+    if (!speakReplies) return;
+    for (const task of sessionTasks) {
+      if (TERMINAL_PHASES.has(task.status as never) && !spokenTaskIds.current.has(task.task_id)) {
+        spokenTaskIds.current.add(task.task_id);
+        const reply = replyToSpeak(task);
+        if (reply) {
+          void speakText(reply);
+        }
+      }
+    }
+  }, [sessionTasks, speakReplies, speakText]);
+
   const value = useMemo<VoiceValue>(
     () => ({
       state,
@@ -254,10 +291,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       dismissError: controller.dismissError,
       speakReplies,
       setSpeakReplies,
+      speak: speakText,
       notice,
       dismissNotice: () => setNotice(null),
     }),
-    [state, unavailableReason, phase, taskMessage, slow, controller, speakReplies, setSpeakReplies, notice],
+    [state, unavailableReason, phase, taskMessage, slow, controller, speakReplies, setSpeakReplies, speakText, notice],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

@@ -778,6 +778,36 @@ def reject_founder_capture(req: FounderReviewRequest):
     return {"ok": True}
 
 
+# ─── Live Skills Endpoint ──────────────────────────────────────────────────
+
+@app.get("/api/skills", dependencies=[Depends(require_local_caller)])
+def list_skills():
+    """List compiled skills from ~/.sam_data/skills/compiled."""
+    from config.settings import SAM_DATA_DIR
+    skills_dir = SAM_DATA_DIR / "skills" / "compiled"
+    skills = []
+    if skills_dir.exists():
+        for f in sorted(skills_dir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                skills.append({
+                    "name": data.get("name", f.stem),
+                    "description": data.get("description", "Compiled autonomous execution path"),
+                    "compiled": True,
+                    "use_count": data.get("use_count", 1),
+                    "last_used": data.get("last_used", None),
+                })
+            except Exception:
+                skills.append({
+                    "name": f.stem,
+                    "description": "Compiled autonomous execution path",
+                    "compiled": True,
+                    "use_count": 1,
+                    "last_used": None,
+                })
+    return {"skills": skills}
+
+
 # ─── Model Context Protocol (MCP) & Plugins ──────────────────────────────
 
 @app.get("/api/mcp/servers", dependencies=[Depends(require_local_caller)])
