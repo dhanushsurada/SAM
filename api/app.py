@@ -88,7 +88,7 @@ def get_status() -> StatusResponse:
     identity_data = _identity.load()
     return StatusResponse(
         product=state.PRODUCT_NAME,
-        assistant_display_name=identity_data.get("assistant_name", "VEDA"),
+        assistant_display_name=identity_data.get("assistant_name", "SAM"),
         sovereign_mode=_settings.sovereign_mode,
         ollama_reachable=_brain._check_ollama(),
         uptime_seconds=time.monotonic() - _STARTED_AT,

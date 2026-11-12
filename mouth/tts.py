@@ -206,6 +206,62 @@ class TextToSpeech:
             return [self._synth_piper, self._synth_kokoro]
         return [self._synth_kokoro, self._synth_piper]
 
+    def _synth_system(self, text: str) -> bytes:
+        """Synthesize text to WAV using OS built-in speech (say on macOS, SAPI on Windows)."""
+        if IS_MAC:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+                tmp_path = tf.name
+            try:
+                rate_flag = []
+                speed = getattr(self.settings, "speech_rate", 1.0)
+                if speed and speed != 1.0:
+                    rate_flag = ["-r", str(int(175 * speed))]
+                subprocess.run(
+                    ["/usr/bin/say", "-o", tmp_path, "--data-format=LEI16@24000", *rate_flag, text],
+                    check=True,
+                    capture_output=True,
+                    timeout=10.0
+                )
+                with open(tmp_path, "rb") as f:
+                    data = f.read()
+                if not data:
+                    raise _NoAudio("System speech produced 0 bytes")
+                return data
+            except Exception as e:
+                raise RuntimeError(f"macOS say synthesis failed: {e}") from e
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+        elif IS_WIN:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+                tmp_path = tf.name
+            try:
+                ps_script = f"""
+                Add-Type -AssemblyName System.Speech
+                $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+                $synth.SetOutputToWaveFile('{tmp_path}')
+                $synth.Speak('{text.replace("'", "''")}')
+                $synth.Dispose()
+                """
+                subprocess.run(["powershell", "-Command", ps_script], check=True, capture_output=True, timeout=10.0)
+                with open(tmp_path, "rb") as f:
+                    data = f.read()
+                if not data:
+                    raise _NoAudio("Windows SAPI produced 0 bytes")
+                return data
+            except Exception as e:
+                raise RuntimeError(f"Windows speech synthesis failed: {e}") from e
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+        raise _EngineMissing("System speech synthesis not supported on this OS")
+
     @staticmethod
     def _pcm16_wav(samples, sample_rate: int) -> bytes:
         """float32 samples in [-1, 1] -> mono 16-bit PCM WAV bytes."""

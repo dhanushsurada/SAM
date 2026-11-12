@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { FiImage, FiX, FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -68,12 +68,20 @@ export function TaskComposer({ onSubmit, submitting }: TaskComposerProps) {
     setImageFile(null);
   };
 
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.key === "Enter" && !e.shiftKey) || ((e.metaKey || e.ctrlKey) && e.key === "Enter")) {
+      e.preventDefault();
+      void handleSubmit();
+    }
+  };
+
   return (
     <Card className="space-y-3">
       <textarea
         value={instruction}
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstruction(e.target.value)}
-        placeholder="What should SAM do?"
+        onKeyDown={handleKeyDown}
+        placeholder="What should SAM do? (Press Enter to send, Shift+Enter for new line)"
         rows={3}
         maxLength={4000}
         className="w-full resize-none rounded-md border border-line bg-void px-3 py-2 text-sm text-ink placeholder:text-mute focus:border-ember/50"

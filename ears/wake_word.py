@@ -107,6 +107,14 @@ class WakeWordListener:
         Press ENTER to trigger SAM.
         This is the active mode until openWakeWord models are confirmed working.
         """
+        import sys
+        if not sys.stdin or not hasattr(sys.stdin, "isatty") or not sys.stdin.isatty():
+            logger.info("Non-interactive daemon environment detected; keyboard fallback waiting passively.")
+            while self._running:
+                import time
+                time.sleep(1)
+            return
+
         print("\n" + "="*50)
         print("SAM KEYBOARD MODE")
         print("Press ENTER to speak to SAM")

@@ -13,6 +13,7 @@ import signal
 import logging
 import argparse
 import threading
+import site
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,6 +21,13 @@ from pathlib import Path
 # already exists (config/settings.py's _ensure_data_dirs() runs at import
 # time) before FileHandler tries to open a file inside it below.
 from config.settings import SAM_DATA_DIR
+
+_user_pkgs = SAM_DATA_DIR / "python-packages"
+if _user_pkgs.exists():
+    try:
+        site.addsitedir(str(_user_pkgs))
+    except Exception:
+        pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -147,17 +155,15 @@ class SAM:
         #   no setup_completed key, assistant_name == "SAM" -> not first-run
         #     (a pre-existing install from before this flow existed --
         #     don't force a legacy SAM install into a naming prompt)
-        #   no setup_completed key, anything else -> first-run (the
-        #     untouched DEFAULT_IDENTITY a brand new install starts with,
-        #     assistant_name == "VEDA")
+        #   no setup_completed key, anything else -> first-run
         identity_data = self.identity.load()
         if identity_data.get("setup_completed") is True:
             self._is_first_run = False
         elif identity_data.get("setup_completed") is False:
             self._is_first_run = True
         else:
-            self._is_first_run = identity_data.get("assistant_name") != "SAM"
-        self._display_name = identity_data.get("assistant_name") or "VEDA"
+            self._is_first_run = False
+        self._display_name = identity_data.get("assistant_name") or "SAM"
         self._name_overridden_via_cli = False
         self.memory = MemoryRetriever()
         self.founder_mode = FounderModeManager(settings=self.settings)
@@ -478,14 +484,14 @@ class SAM:
         else:
             chosen = None
             for _ in range(5):
-                raw = input("What would you like to call your assistant? [VEDA]: ").strip() or "VEDA"
+                raw = input("What would you like to call your assistant? [SAM]: ").strip() or "SAM"
                 try:
                     chosen = validate_assistant_name(raw)
                     break
                 except ValueError as e:
                     print(f"  {e} — try again.")
             if chosen is None:
-                chosen = "VEDA"
+                chosen = "SAM"
         self._display_name = chosen
         self.identity.update({"assistant_name": chosen, "setup_completed": True})
         self._is_first_run = False

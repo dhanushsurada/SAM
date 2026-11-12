@@ -130,6 +130,7 @@ class TaskGateway:
         from core.brain import Brain
         from core.model_manager import ModelManager
         from agent.react_loop import ReactLoop
+        from core.tiered_router import TieredExecutionRouter
 
         self.identity = Identity()
         self.memory = MemoryRetriever()
@@ -141,6 +142,7 @@ class TaskGateway:
         # "the active model" to keep in sync.
         self.model_manager = ModelManager(settings, self.brain)
         self.react_loop = ReactLoop(settings, founder_mode=self.founder_mode)
+        self.tiered_router = TieredExecutionRouter(settings)
 
         self.task_store = TaskStore()
         self.event_bus = EventBus()
@@ -431,6 +433,7 @@ class TaskGateway:
         self.event_bus.publish(task_id, "understanding", "Reading your request")
 
         from core.session import Session
+        from core.tiered_router import ExecutionTier
         from licensing.tier import get_tier, PRO, FREE_TIER_MEMORY_RETENTION_DAYS
 
         try:
@@ -443,7 +446,32 @@ class TaskGateway:
                 settings=self.settings,
             )
 
-            response = self.brain.process(session)
+            # Performance: Tier 1 Direct Execution (sub-millisecond bypass for greetings, app control, calculation, and media)
+            route_decision = self.tiered_router.route(instruction)
+            if route_decision.tier == ExecutionTier.DIRECT:
+                if route_decision.action == "greet":
+                    result_text = route_decision.suggested_text or "Hey! I'm SAM."
+                    from core.brain import BrainResponse
+                    mock_resp = BrainResponse(text=result_text, action="none")
+                    if not self.settings.incognito:
+                        session.save(user_input=instruction, response=mock_resp,
+                                     memory_store=self.memory.get_store(self.settings))
+                    self.founder_mode.capture_if_relevant(instruction, mock_resp)
+                    self.task_store.update_status(task_id, "completed", result_text=result_text)
+                    self.event_bus.publish(task_id, "completed", result_text)
+                    return
+
+                elif route_decision.action:
+                    from core.brain import BrainResponse
+                    response = BrainResponse(
+                        text=route_decision.suggested_text or "",
+                        action=route_decision.action,
+                        action_payload=route_decision.action_payload or {}
+                    )
+                else:
+                    response = self.brain.process(session)
+            else:
+                response = self.brain.process(session)
 
             if cancel_event.is_set():
                 self.task_store.update_status(task_id, "cancelled", result_text="Cancelled.")

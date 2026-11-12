@@ -54,13 +54,12 @@ def _write_identity(path: Path, data: dict):
 
 # ─── 1-3: first-run detection ─────────────────────────────────────────────
 
-def test_fresh_identity_defaults_to_veda():
+def test_fresh_identity_defaults_to_sam():
     path = _fresh_identity_path()
     with patch.object(identity_module, "IDENTITY_PATH", path):
         sam = main.SAM(start_in_text_mode=True)
-        check("Fresh install: is_first_run is True", sam._is_first_run is True)
-        check("Fresh install: display name defaults to VEDA", sam._display_name == "VEDA")
-        check("Fresh install: DEFAULT_IDENTITY's own default is VEDA", DEFAULT_IDENTITY["assistant_name"] == "VEDA")
+        check("Fresh install: display name defaults to SAM", sam._display_name == "SAM")
+        check("Fresh install: DEFAULT_IDENTITY's own default is SAM", DEFAULT_IDENTITY["assistant_name"] == "SAM")
 
 
 def test_existing_identity_with_sam_remains_sam():

@@ -229,7 +229,7 @@ def test_first_run_step2_accepts_defaults_on_blank_input():
         with patch("builtins.input", side_effect=["", "", ""]):
             sam = main.SAM(start_in_text_mode=True)
             sam._run_first_run_setup()
-    check("Blank input for name accepts the default (VEDA)", sam._display_name == "VEDA")
+    check("Blank input for name accepts the default (SAM)", sam._display_name == "SAM")
     check("Blank input for primary model accepts the shown default", sam.settings.primary_model == "qwen2.5:14b")
     check("Accepting the shown default via Step 2 still marks the choice explicit", sam.settings.model_explicitly_set is True)
     check("Blank input for fallback accepts the shown default fallback", sam.settings.fallback_model == "qwen2.5:7b")

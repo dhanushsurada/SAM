@@ -32,8 +32,15 @@ import sqlite3
 import argparse
 from pathlib import Path
 from datetime import datetime, timezone
+import site
 
 SAM_DATA_DIR = Path.home() / ".sam_data"
+_user_pkgs = SAM_DATA_DIR / "python-packages"
+if _user_pkgs.exists():
+    try:
+        site.addsitedir(str(_user_pkgs))
+    except Exception:
+        pass
 
 
 def _emit_json(payload: dict, exit_code: int = 0) -> int:

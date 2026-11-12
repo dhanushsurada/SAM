@@ -71,12 +71,12 @@ function makeWebviewVoice() {
       cancel: () => synth.cancel(),
     },
     (text) => {
-      // speechSynthesis may expose cloud-backed voices. Only use a voice the
-      // operating system reports as local; otherwise leave the reply on screen.
-      const localVoice = synth.getVoices().find((voice) => voice.localService);
-      if (!localVoice) throw new Error("No local speech synthesis voice is available");
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = localVoice;
+      const voices = synth.getVoices();
+      if (voices.length > 0) {
+        const localVoice = voices.find((voice) => voice.localService) || voices.find((voice) => voice.lang.startsWith("en")) || voices[0];
+        if (localVoice) utterance.voice = localVoice;
+      }
       return utterance as unknown as UtteranceLike;
     },
   );

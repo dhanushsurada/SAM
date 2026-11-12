@@ -811,15 +811,38 @@ class ReactLoop:
                     f"be loading, or the name may not match exactly.")
 
         elif action_type == "screenshot":
-            path = controller.screenshot()
+            target_path = payload.get("path")
+            dest = payload.get("destination")
+            if not target_path and dest == "desktop":
+                import time
+                from pathlib import Path
+                desktop = Path.home() / "Desktop"
+                desktop.mkdir(parents=True, exist_ok=True)
+                timestamp = time.strftime("%Y-%m-%d_at_%H.%M.%S")
+                target_path = str(desktop / f"Screenshot_{timestamp}.png")
+            path = controller.screenshot(target_path)
             return f"Screenshot saved to {path}"
+
+        elif action_type == "close_app":
+            app = payload.get("app", "")
+            controller.close_app(app)
+            return f"Closed {app}."
 
         return f"Unknown control action: {action_type}"
 
     def _execute_browser(self, payload: Dict) -> str:
-        browser = self._get_browser()
         url = payload.get("url", "")
         task = payload.get("task", "")
+        use_system_browser = payload.get("use_system_browser", False)
+        # Direct system browser launch for media and direct user navigation (avoids slow test sandboxes)
+        if use_system_browser or "youtube.com" in url or "spotify.com" in url:
+            import webbrowser
+            try:
+                webbrowser.open(url)
+                return f"Playing in default browser: {url}"
+            except Exception as e:
+                logger.warning(f"Could not open default browser: {e}")
+        browser = self._get_browser()
         try:
             return browser.execute(url=url, task=task)
         except Exception as e:

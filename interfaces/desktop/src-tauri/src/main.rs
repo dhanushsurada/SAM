@@ -158,6 +158,10 @@ fn main() {
                 if let Err(error) = runtime::runtime_start(Some("api".to_string())) {
                     eprintln!("SAM: backend startup failed: {error}");
                 }
+                // Attempt to start the background voice service (wake word & TTS)
+                if let Err(error) = runtime::runtime_start(Some("voice".to_string())) {
+                    eprintln!("SAM: background voice startup notice: {error}");
+                }
             });
 
             // Registered at runtime rather than only declared, so a

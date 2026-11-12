@@ -17,3 +17,11 @@ export interface ChatMessage {
   /** A message the person spoke: content is what SAM heard. */
   via?: "voice";
 }
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  taskIds: string[];
+}

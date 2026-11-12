@@ -26,8 +26,16 @@ import http.client
 import subprocess
 import time
 import urllib.parse
+import site
 from dataclasses import dataclass
 from pathlib import Path
+
+_user_pkgs = Path.home() / ".sam_data" / "python-packages"
+if _user_pkgs.exists():
+    try:
+        site.addsitedir(str(_user_pkgs))
+    except Exception:
+        pass
 
 from runtime.health.status import RuntimeStatus, compute_health, compute_status
 from runtime.lifecycle.specs import ProcessSpec, default_specs

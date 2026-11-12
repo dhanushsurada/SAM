@@ -14,12 +14,20 @@ import platform
 import shutil
 import subprocess
 import sys
+import site
 import datetime
 import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
+
+_user_pkgs = Path.home() / ".sam_data" / "python-packages"
+if _user_pkgs.exists():
+    try:
+        site.addsitedir(str(_user_pkgs))
+    except Exception:
+        pass
 
 try:  # direct script execution and package import are both supported
     from .compatibility import (
@@ -35,6 +43,18 @@ except ImportError:  # pragma: no cover - exercised by setup.sh subprocess
     )
 
 
+def _platform_which(cmd: str, fallback_which: Optional[Callable[[str], Optional[str]]] = None) -> Optional[str]:
+    path = fallback_which(cmd) if fallback_which else shutil.which(cmd)
+    if path:
+        return path
+    if platform.system() == "Darwin":
+        for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
+            candidate = os.path.join(prefix, cmd)
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+    return None
+
+
 class EnvironmentCompatibilityManager:
     """Discover SAM's local environment and produce actionable diagnostics."""
 
@@ -44,7 +64,7 @@ class EnvironmentCompatibilityManager:
                  opener: Callable = urllib.request.urlopen):
         self.manifest = manifest or load_manifest()
         self.root = Path(root) if root else Path(__file__).resolve().parents[1]
-        self.which = which
+        self.which = lambda cmd: _platform_which(cmd, which)
         self.runner = runner
         self.opener = opener
         self._discovery_cache = None
@@ -523,6 +543,11 @@ class EnvironmentCompatibilityManager:
             missing = []
             if manager == "brew":
                 brew = self.which("brew")
+                if not brew:
+                    for cand in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+                        if Path(cand).exists():
+                            brew = cand
+                            break
                 if not brew:
                     missing = list(packages)
                 elif packages:

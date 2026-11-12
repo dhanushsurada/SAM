@@ -81,8 +81,8 @@ class ComputerController:
             pyautogui.PAUSE = 0.1
             self._pyautogui = pyautogui
             logger.info("PyAutoGUI loaded")
-        except ImportError:
-            logger.warning("PyAutoGUI not installed — pip install pyautogui")
+        except (ImportError, Exception) as e:
+            logger.warning(f"PyAutoGUI not available ({e}) — pip install pyautogui")
 
     def _load_winauto(self):
         try:
