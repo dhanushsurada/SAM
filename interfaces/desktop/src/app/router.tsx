@@ -10,6 +10,7 @@ import { ChatPage } from "@/features/chat/ChatPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { FounderModePage } from "@/features/founder-mode/FounderModePage";
 import { SkillsPage } from "@/features/skills/SkillsPage";
+import { PluginsPage } from "@/features/plugins/PluginsPage";
 import { BrainPage } from "@/features/brain/BrainPage";
 import { HandsPage } from "@/features/hands/HandsPage";
 import { TasksPage } from "@/features/tasks/TasksPage";
@@ -51,6 +52,7 @@ const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/memory": MemoryPage,
   "/founder-mode": FounderModePage,
   "/skills": SkillsPage,
+  "/plugins": PluginsPage,
   "/diagnostics": DiagnosticsPage,
   "/licensing": LicensingPage,
   "/settings": SettingsPage,

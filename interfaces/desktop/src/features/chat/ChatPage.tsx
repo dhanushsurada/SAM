@@ -1,32 +1,27 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { FiPlus, FiMessageSquare, FiTrash2, FiSidebar, FiCompass } from "react-icons/fi";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { ModeBadge } from "@/components/ModeBadge";
-import { StatusPill } from "@/components/StatusPill";
-import { TERMINAL_PHASES } from "@/api/types";
 import type { TaskRecord } from "@/api/types";
+import { sendChatMessage } from "@/api/client";
 import { useTaskSession } from "@/stores/taskSession";
-import { phaseLabel, phaseToSamState } from "@/features/iqoo/phase";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ChatComposer } from "./ChatComposer";
 import { useTaskLabel, VoiceStatusLine } from "@/features/voice/VoiceControls";
 import { isVoiceTask } from "@/features/voice/taskLabel";
 import type { ChatMessage, ChatConversation } from "./types";
 
-const CONVERSATIONS_STORAGE_KEY = "sam.desktop.chat.conversations.v2";
-const ACTIVE_CONV_STORAGE_KEY = "sam.desktop.chat.active_conversation.v2";
+const CONVERSATIONS_STORAGE_KEY = "sam.desktop.chat.conversations.v3";
+const ACTIVE_CONV_STORAGE_KEY = "sam.desktop.chat.active_conversation.v3";
 
 const STARTER_PROMPTS = [
-  { label: "🎵 Play Aya Sher on YouTube", text: "play aya sher song on youtube" },
-  { label: "📸 Take screenshot to Desktop", text: "take a screenshot and save it on desktop" },
-  { label: "🌐 Open Google Chrome", text: "open Google Chrome" },
   { label: "💡 Who are you?", text: "who are you and what can you do?" },
-  { label: "🧮 Calculate 25 * 40", text: "calculate 25 * 40" },
+  { label: "⚡ How do I run fast with Groq / Cloud?", text: "how do I add a Groq or Gemini API key for instant responses?" },
+  { label: "🔌 What plugins & MCP are available?", text: "what MCP plugins and integrations can I connect?" },
+  { label: "🧠 How does Founder Mode work?", text: "how does founder mode learn my preferences?" },
+  { label: "💻 Help me write a script", text: "write a python script to monitor folder changes and log files" },
 ];
-
-function isTerminal(status: string): boolean {
-  return TERMINAL_PHASES.has(status as never);
-}
 
 function replyFor(task: TaskRecord): ChatMessage | null {
   const base = {
@@ -48,19 +43,10 @@ function replyFor(task: TaskRecord): ChatMessage | null {
 }
 
 export function ChatPage() {
-  const {
-    sessionTasks,
-    selectedTaskId,
-    selectTask,
-    events,
-    submitting,
-    submitError,
-    submitTask,
-    cancelling,
-    cancelSelected,
-  } = useTaskSession();
+  const { sessionTasks } = useTaskSession();
   const bottomRef = useRef<HTMLDivElement>(null);
   const labelOf = useTaskLabel();
+  const [isChatThinking, setIsChatThinking] = useState(false);
 
   // ─── Multiple Parallel Conversations State ─────────────────────────────
   const [conversations, setConversations] = useState<ChatConversation[]>(() => {
@@ -78,6 +64,7 @@ export function ChatPage() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         taskIds: [],
+        messages: [],
       },
     ];
   });
@@ -117,6 +104,7 @@ export function ChatPage() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           taskIds: [],
+          messages: [],
         };
         setConversations([newConv]);
         setActiveConvId(newId);
@@ -129,29 +117,40 @@ export function ChatPage() {
     [conversations, activeConvId]
   );
 
-  // Tasks belonging to the active conversation
+  // Tasks belonging to the active conversation (legacy task fallback)
   const activeTasks = useMemo(() => {
     if (!activeConv || activeConv.taskIds.length === 0) {
-      if (conversations.length === 1 && sessionTasks.length > 0) {
-        return sessionTasks;
-      }
       return [];
     }
     const taskIdSet = new Set(activeConv.taskIds);
     return sessionTasks.filter((t) => taskIdSet.has(t.task_id));
-  }, [activeConv, sessionTasks, conversations.length]);
+  }, [activeConv, sessionTasks]);
 
-  const latest = activeTasks.length > 0 ? activeTasks[activeTasks.length - 1] : null;
-  const latestId = latest ? latest.task_id : null;
-  const running = submitting || (latest !== null && !isTerminal(latest.status));
-
-  useEffect(() => {
-    if (latestId && selectedTaskId !== latestId) selectTask(latestId);
-  }, [latestId, selectedTaskId, selectTask]);
+  const currentMessages: ChatMessage[] = useMemo(() => {
+    if (activeConv?.messages && activeConv.messages.length > 0) {
+      return activeConv.messages;
+    }
+    if (activeTasks.length > 0) {
+      const msgs: ChatMessage[] = [];
+      for (const t of activeTasks) {
+        msgs.push({
+          id: t.task_id,
+          role: "user",
+          content: labelOf(t),
+          timestamp: t.created_at,
+          via: isVoiceTask(t) ? "voice" : undefined,
+        });
+        const rep = replyFor(t);
+        if (rep) msgs.push(rep);
+      }
+      return msgs;
+    }
+    return [];
+  }, [activeConv, activeTasks, labelOf]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeTasks.length, events.length]);
+  }, [currentMessages.length, isChatThinking]);
 
   const handleCreateNewChat = () => {
     const newId = `conv-${Date.now()}`;
@@ -161,6 +160,7 @@ export function ChatPage() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       taskIds: [],
+      messages: [],
     };
     setConversations((prev) => [newConv, ...prev]);
     setActiveConvId(newId);
@@ -177,6 +177,7 @@ export function ChatPage() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           taskIds: [],
+          messages: [],
         },
       ]);
       setActiveConvId(newId);
@@ -190,27 +191,86 @@ export function ChatPage() {
   };
 
   const handleSend = async (text: string) => {
-    const task = await submitTask({ instruction: text, input_type: "text", attachments: [] });
-    if (task) {
+    if (!text.trim() || isChatThinking) return;
+
+    const userMsg: ChatMessage = {
+      id: `msg-${Date.now()}-user`,
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+
+    setConversations((prev) =>
+      prev.map((conv) => {
+        if (conv.id === activeConvId) {
+          const prevMsgs = conv.messages || [];
+          const isFirst = prevMsgs.length === 0 || conv.title === "New Chat" || conv.title === "Main Chat";
+          const newTitle = isFirst ? text.slice(0, 32) + (text.length > 32 ? "…" : "") : conv.title;
+          return {
+            ...conv,
+            title: newTitle,
+            updatedAt: new Date().toISOString(),
+            messages: [...prevMsgs, userMsg],
+          };
+        }
+        return conv;
+      })
+    );
+
+    setIsChatThinking(true);
+
+    try {
+      const active = conversations.find((c) => c.id === activeConvId);
+      const history = (active?.messages || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      // Call dedicated pure conversational chat endpoint
+      const res = await sendChatMessage(text, activeConvId, history);
+
+      const assistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}-assistant`,
+        role: "assistant",
+        content: res.reply || "Done.",
+        timestamp: new Date().toISOString(),
+      };
+
       setConversations((prev) =>
         prev.map((conv) => {
           if (conv.id === activeConvId) {
-            const isFirst = conv.taskIds.length === 0 || conv.title === "New Chat" || conv.title === "Main Chat";
-            const newTitle = isFirst ? text.slice(0, 32) + (text.length > 32 ? "…" : "") : conv.title;
             return {
               ...conv,
-              title: newTitle,
               updatedAt: new Date().toISOString(),
-              taskIds: [...conv.taskIds, task.task_id],
+              messages: [...(conv.messages || []), assistantMsg],
             };
           }
           return conv;
         })
       );
+    } catch (e: unknown) {
+      const errMsg: ChatMessage = {
+        id: `msg-${Date.now()}-err`,
+        role: "assistant",
+        content: e instanceof Error ? e.message : "Error connecting to Brain.",
+        timestamp: new Date().toISOString(),
+        tone: "danger",
+      };
+      setConversations((prev) =>
+        prev.map((conv) => {
+          if (conv.id === activeConvId) {
+            return {
+              ...conv,
+              messages: [...(conv.messages || []), errMsg],
+            };
+          }
+          return conv;
+        })
+      );
+    } finally {
+      setIsChatThinking(false);
     }
   };
-
-  const lastEvent = events.length > 0 ? events[events.length - 1] : undefined;
 
   return (
     <div className="flex h-full gap-4">
@@ -282,15 +342,15 @@ export function ChatPage() {
 
         {/* Message Thread */}
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-          {activeTasks.length === 0 && (
+          {currentMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-4">
               <div className="p-3 bg-surface border border-line rounded-full text-ember">
                 <FiCompass size={28} />
               </div>
               <div>
-                <h3 className="text-base font-medium text-ink">What can SAM do for you?</h3>
+                <h3 className="text-base font-medium text-ink">Conversational Chat with SAM</h3>
                 <p className="text-xs text-mute mt-1 max-w-md">
-                  SAM executes actions directly on this computer: launch and close apps, play music, search the web, take screenshots, or answer questions.
+                  Ask questions, discuss topics, write code, or explore ideas. Instant conversational replies without OS task delays.
                 </p>
               </div>
 
@@ -310,50 +370,28 @@ export function ChatPage() {
             </div>
           )}
 
-          {activeTasks.map((task) => {
-            const reply = replyFor(task);
-            const isLive = task.task_id === selectedTaskId;
-            const phase = isLive && lastEvent ? lastEvent.phase : task.status;
-            return (
-              <div key={task.task_id} className="space-y-3">
-                <ChatMessageBubble
-                  message={{
-                    id: task.task_id,
-                    role: "user",
-                    content: labelOf(task),
-                    timestamp: task.created_at,
-                    via: isVoiceTask(task) ? "voice" : undefined,
-                  }}
-                />
-                {reply ? (
-                  <ChatMessageBubble message={reply} />
-                ) : (
-                  <div className="flex justify-start">
-                    <StatusPill
-                      state={phaseToSamState(phase)}
-                      label={(isLive && lastEvent ? lastEvent.message : null) ?? phaseLabel(phase)}
-                      live={isLive}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {currentMessages.map((msg) => (
+            <ChatMessageBubble key={msg.id} message={msg} />
+          ))}
+
+          {isChatThinking && (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-mute border border-line bg-surface rounded-lg max-w-[170px]">
+              <span className="w-2 h-2 rounded-full bg-ember animate-ping" />
+              <span>SAM is replying…</span>
+            </div>
+          )}
+
           <div ref={bottomRef} />
         </div>
 
         {/* Footer / Composer */}
-        {submitError && <p className="pt-2 text-xs text-danger">{submitError}</p>}
-        {running && !submitting && (
-          <div className="flex justify-end pt-2">
-            <Button variant="ghost" size="sm" onClick={cancelSelected} loading={cancelling}>
-              Cancel this task
-            </Button>
-          </div>
-        )}
-        <div className="pt-3">
-          <ChatComposer onSend={handleSend} disabled={running} />
-          <div className="px-1 pt-2">
+        <div className="pt-3 space-y-2">
+          <ChatComposer onSend={handleSend} disabled={isChatThinking} />
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-mute">
+            <div className="flex items-center gap-1.5">
+              <span>💬 Fast conversational mode.</span>
+              <span>To execute computer tasks, switch to <Link to="/tasks" className="text-ember hover:underline font-medium">Tasks</Link> or <Link to="/" className="text-ember hover:underline font-medium">Command Center</Link>.</span>
+            </div>
             <VoiceStatusLine showUnavailable />
           </div>
         </div>

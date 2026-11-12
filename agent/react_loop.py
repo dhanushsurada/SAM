@@ -803,22 +803,22 @@ class ReactLoop:
             text = payload.get("text", "")
             controller.type_text(text)
 
-            # Phase 1 (Hands reliability): give the next reasoning step
-            # something real to look at instead of only its own request
-            # echoed back. Previously this always returned a bare
-            # "Typed: {text}" regardless of whether anything on screen
-            # actually reflected it — with no observation of the
-            # resulting state, the loop had no way to tell "it typed, now
-            # click the result" from "nothing happened, try again", which
-            # is exactly what produced the repeated "Typed: VS Code" loop
-            # seen in testing.
-            vision = self._get_vision()
-            screen_state = vision.read(
-                "Briefly describe what is currently visible on screen, "
-                "especially any search box contents, search results, menu "
-                "items, or dialogs. One or two sentences."
-            )
-            return f"Typed: {text}. Screen now shows: {screen_state}"
+            # Verification optimization: only invoke heavy vision if explicitly requested
+            if payload.get("verify_with_vision", False):
+                try:
+                    vision = self._get_vision()
+                    screen_state = vision.read(
+                        "Briefly describe what is currently visible on screen. One or two sentences."
+                    )
+                    return f"Typed: {text}. Screen now shows: {screen_state}"
+                except Exception as e:
+                    logger.debug(f"Vision screen check failed: {e}")
+            return f"Typed: {text}."
+
+        elif action_type in ("send_message", "text_message", "whatsapp"):
+            recipient = payload.get("recipient", "")
+            msg = payload.get("message", payload.get("text", ""))
+            return controller.send_whatsapp_message(recipient, msg)
 
         elif action_type == "hotkey":
             keys = payload.get("keys", [])

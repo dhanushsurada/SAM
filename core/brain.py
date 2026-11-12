@@ -11,7 +11,7 @@ import json
 import re
 import requests
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger("SAM.Brain")
 
@@ -361,6 +361,76 @@ class Brain:
         messages.append({"role": "user", "content": session.user_input})
 
         return messages
+
+    def chat(self, message: str, history: Optional[List[Dict[str, str]]] = None,
+             identity: Optional[Dict] = None, founder_context: str = "") -> str:
+        """
+        Pure conversational chat interface. Sub-second response, keeping conversational
+        context, without triggering OS automation tools.
+        """
+        from core.tiered_router import GREETING_RESPONSES
+        clean_msg = re.sub(r"[^\w\s]", "", (message or "").lower()).strip()
+        if clean_msg in GREETING_RESPONSES:
+            return GREETING_RESPONSES[clean_msg]
+
+        assistant_name = (identity or {}).get("assistant_name") or "SAM"
+        user_name = (identity or {}).get("user_name") or "User"
+
+        sys_content = (
+            f"You are {assistant_name}, a helpful, brilliant, concise, and friendly personal AI assistant. "
+            f"You are conversing with {user_name}. Keep your responses clear, helpful, direct, and conversational. "
+            f"Do not format your response as JSON tool actions — reply naturally in plain text and markdown."
+        )
+        if founder_context and not self.settings.incognito:
+            sys_content += f"\nUser Preferences & Style:\n{founder_context}"
+
+        messages = [{"role": "system", "content": sys_content}]
+        if history:
+            for h in history[-8:]:
+                if h.get("role") in ("user", "assistant") and h.get("content"):
+                    messages.append({"role": h["role"], "content": h["content"]})
+        messages.append({"role": "user", "content": message})
+
+        provider = getattr(self.settings, "model_provider", "ollama") or "ollama"
+        model = self.settings.primary_model
+        cloud_provider = None
+        cloud_model = model
+
+        if ":" in model and model.split(":")[0].lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+            cloud_provider, cloud_model = model.split(":", 1)
+        elif provider in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+            cloud_provider = provider
+
+        try:
+            if cloud_provider:
+                from core.cloud_providers import call_cloud_chat
+                chat_msgs = [m for m in messages if m["role"] != "system"]
+                return call_cloud_chat(
+                    provider=cloud_provider,
+                    model=cloud_model,
+                    messages=chat_msgs,
+                    system_prompt=sys_content,
+                    temperature=0.7,
+                    max_tokens=self.settings.max_tokens,
+                )
+            else:
+                model_to_use = self._ensure_model()
+                resp = requests.post(
+                    f"{self.settings.ollama_host}/api/chat",
+                    json={
+                        "model": model_to_use,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"temperature": 0.7, "num_predict": 500},
+                    },
+                    timeout=45,
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("message", {}).get("content", "").strip()
+                raise RuntimeError(f"Ollama returned HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Chat error: {e}")
+            return f"I ran into an issue connecting to the model: {e}"
 
     def unload(self):
         """Signal that SAM is sleeping — model can be freed from RAM."""

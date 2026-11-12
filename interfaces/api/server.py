@@ -87,10 +87,15 @@ from interfaces.api.gateway import (
 from interfaces.api.task_store import TERMINAL_STATUSES
 from interfaces.api.schemas import (
     TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest, ModelPullRequest,
-    SpeechRequest, TaskFeedbackRequest, ProviderKeyRequest,
+    SpeechRequest, TaskFeedbackRequest, ProviderKeyRequest, ChatRequest, ChatResponse,
+    MCPServerCreateRequest, MCPServerToggleRequest,
 )
 from core.cloud_providers import (
     get_providers_status, save_api_key, delete_api_key, get_model_update_notifications,
+)
+from core.mcp_hub import (
+    list_servers, get_catalog, add_or_update_server, toggle_server, delete_server,
+    test_server_connection,
 )
 from mouth.tts import TextToSpeech, TTSDisabledError, TTSUnavailableError
 # agent/cross-device: /api/connect/* — device pairing, trust, capabilities
@@ -550,6 +555,82 @@ def remove_provider_key(provider: str):
 def model_updates():
     """Get latest model release and upgrade recommendations."""
     return {"notifications": get_model_update_notifications()}
+
+
+# ─── Conversational Chat ──────────────────────────────────────────────────
+
+@app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_local_caller)])
+def conversational_chat(req: ChatRequest):
+    """
+    Dedicated instant conversational chat endpoint.
+    Processes messages conversationally without triggering autonomous OS tasks,
+    providing lightning-fast response times and natural dialogue.
+    """
+    gateway = get_gateway()
+    identity = gateway.identity.load()
+    founder_ctx = gateway.founder_mode.get_context()
+
+    reply = gateway.brain.chat(
+        message=req.message,
+        history=req.history,
+        identity=identity,
+        founder_context=founder_ctx,
+    )
+    active_model = gateway.brain.settings.primary_model
+    return ChatResponse(
+        reply=reply,
+        model=active_model,
+        conversation_id=req.conversation_id,
+    )
+
+
+# ─── Model Context Protocol (MCP) & Plugins ──────────────────────────────
+
+@app.get("/api/mcp/servers", dependencies=[Depends(require_local_caller)])
+def get_mcp_servers():
+    """List installed MCP servers and catalog templates for integrations (GitHub, Google, Slack, etc.)."""
+    return {
+        "servers": list_servers(),
+        "catalog": get_catalog(),
+    }
+
+
+@app.post("/api/mcp/servers", dependencies=[Depends(require_local_caller)])
+def configure_mcp_server(req: MCPServerCreateRequest):
+    """Add or update an MCP server configuration."""
+    server = add_or_update_server(
+        server_id=req.id,
+        name=req.name,
+        description=req.description or "",
+        command=req.command or "npx",
+        args=req.args or [],
+        url=req.url or "",
+        transport=req.transport or "stdio",
+        env=req.env or {},
+        enabled=req.enabled if req.enabled is not None else True,
+    )
+    return {"ok": True, "server": server}
+
+
+@app.patch("/api/mcp/servers/{server_id}", dependencies=[Depends(require_local_caller)])
+def update_mcp_server_toggle(server_id: str, req: MCPServerToggleRequest):
+    """Enable or disable an MCP server connection."""
+    success = toggle_server(server_id, req.enabled)
+    return {"ok": success}
+
+
+@app.delete("/api/mcp/servers/{server_id}", dependencies=[Depends(require_local_caller)])
+def delete_mcp_server(server_id: str):
+    """Delete an MCP server configuration."""
+    success = delete_server(server_id)
+    return {"ok": success}
+
+
+@app.post("/api/mcp/servers/{server_id}/test", dependencies=[Depends(require_local_caller)])
+def test_mcp_server(server_id: str):
+    """Test connection and credential validity for an MCP server."""
+    result = test_server_connection(server_id)
+    return result
 
 
 async def _next_from_sync_gen(gen):

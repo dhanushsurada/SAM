@@ -26,4 +26,5 @@ export interface ChatConversation {
   createdAt: string;
   updatedAt: string;
   taskIds: string[];
+  messages?: ChatMessage[];
 }

@@ -273,3 +273,114 @@ export function deleteProviderKey(provider: string): Promise<{ ok: boolean }> {
 export function getModelUpdates(): Promise<{ notifications: ModelNotification[] }> {
   return request<{ notifications: ModelNotification[] }>("/models/updates", undefined, CORE_BASE);
 }
+
+export interface ChatResponsePayload {
+  reply: string;
+  model: string;
+  conversation_id?: string;
+}
+
+export function sendChatMessage(
+  message: string,
+  conversationId?: string,
+  history?: Array<{ role: string; content: string }>
+): Promise<ChatResponsePayload> {
+  return request<ChatResponsePayload>(
+    "/chat",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        history: history || [],
+      }),
+    },
+    CORE_BASE
+  );
+}
+
+export interface MCPServer {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  command: string;
+  args: string[];
+  url: string;
+  transport: string;
+  masked_env: Record<string, string>;
+  tools_count: number;
+  status: string;
+}
+
+export interface MCPCatalogItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: string;
+  auth_type: string;
+  token_label?: string;
+  docs_url?: string;
+  command: string;
+  args: string[];
+  env_keys: string[];
+  installed: boolean;
+  enabled: boolean;
+}
+
+export function getMCPServers(): Promise<{ servers: MCPServer[]; catalog: MCPCatalogItem[] }> {
+  return request<{ servers: MCPServer[]; catalog: MCPCatalogItem[] }>("/mcp/servers", undefined, CORE_BASE);
+}
+
+export function configureMCPServer(data: {
+  id: string;
+  name: string;
+  description?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  transport?: string;
+  env?: Record<string, string>;
+  enabled?: boolean;
+}): Promise<{ ok: boolean; server: MCPServer }> {
+  return request<{ ok: boolean; server: MCPServer }>(
+    "/mcp/servers",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+    CORE_BASE
+  );
+}
+
+export function toggleMCPServer(id: string, enabled: boolean): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/mcp/servers/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    },
+    CORE_BASE
+  );
+}
+
+export function deleteMCPServer(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/mcp/servers/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+    },
+    CORE_BASE
+  );
+}
+
+export function testMCPServer(id: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  return request<{ ok: boolean; message?: string; error?: string }>(
+    `/mcp/servers/${encodeURIComponent(id)}/test`,
+    {
+      method: "POST",
+    },
+    CORE_BASE
+  );
+}

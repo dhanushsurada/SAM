@@ -176,3 +176,31 @@ class TaskFeedbackRequest(BaseModel):
 class ProviderKeyRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=50)
     api_key: str = Field(..., min_length=1, max_length=500)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    conversation_id: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    model: str
+    conversation_id: Optional[str] = None
+
+
+class MCPServerCreateRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = ""
+    command: Optional[str] = "npx"
+    args: Optional[List[str]] = Field(default_factory=list)
+    url: Optional[str] = ""
+    transport: Optional[str] = "stdio"
+    env: Optional[Dict[str, str]] = Field(default_factory=dict)
+    enabled: Optional[bool] = True
+
+
+class MCPServerToggleRequest(BaseModel):
+    enabled: bool

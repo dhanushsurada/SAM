@@ -281,7 +281,15 @@ class EnvironmentCompatibilityManager:
             target = Path(configured).expanduser().resolve()
             return target if target == expected else None
         source_venv = (self.root / ".venv").resolve()
-        return source_venv if Path(sys.prefix).resolve() == source_venv else None
+        if Path(sys.prefix).resolve() == source_venv:
+            return source_venv
+
+        # Packaged SAM runtime fallback: consumer packages live in ~/.sam_data/python-packages
+        expected = (Path.home() / ".sam_data" / "python-packages").resolve()
+        if "sam-runtime" in sys.executable or expected.is_dir():
+            expected.mkdir(parents=True, exist_ok=True)
+            return expected
+        return None
 
     def dependency_plan(self, groups: Optional[list[str]] = None) -> dict:
         """Resolve manifest groups to currently declared requirements lines."""
@@ -332,7 +340,7 @@ class EnvironmentCompatibilityManager:
         self.record_setup_step("dependency-repair", "started",
                                "Installing groups: " + ", ".join(plan["groups"]))
         command = [sys.executable, "-m", "pip", "install"]
-        user_packages = bool(os.environ.get("SAM_USER_PACKAGES_DIR"))
+        user_packages = bool(os.environ.get("SAM_USER_PACKAGES_DIR")) or install_target != (self.root / ".venv").resolve()
         staged_target = None
         if user_packages:
             install_target.mkdir(parents=True, exist_ok=True)

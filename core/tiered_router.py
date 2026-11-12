@@ -153,6 +153,16 @@ SCREENSHOT_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Messaging patterns (e.g. 'open whatsapp and text “Rey” to Steve pn clg', 'text "hello" to John', 'text Alice "Good morning"')
+MESSAGING_PATTERN_TO = re.compile(
+    r"^(?:open\s+(?:whatsapp|messages)\s+and\s+)?(?:text|send\s+(?:a\s+)?(?:whatsapp\s+)?message(?:\s+to)?|message)\s+(?:[\"“'](.+?)[\"”']|([^\s].+?))\s+to\s+(.+?)(?:\s+on\s+(?:whatsapp|messages))?$",
+    re.IGNORECASE
+)
+MESSAGING_PATTERN_DIRECT = re.compile(
+    r"^(?:open\s+(?:whatsapp|messages)\s+and\s+)?(?:text|message)\s+([a-zA-Z0-9\s]+?)(?:\s+on\s+(?:whatsapp|messages))?(?:\s+(?:saying|with|that))?\s+[\"“'](.+?)[\"”'](?:\s+on\s+(?:whatsapp|messages))?$",
+    re.IGNORECASE
+)
+
 # Device target indicators
 ANDROID_PREFIX_PATTERNS = [
     re.compile(r"^(?:on\s+(?:my\s+)?(?:phone|android|mobile)|phone|android):\s*(.+)$", re.IGNORECASE),
@@ -257,7 +267,36 @@ class TieredExecutionRouter:
                     suggested_text=f"Playing '{clean_query}' on YouTube: {direct_url}"
                 )
 
-        # 3. Calculation
+        # 3. Direct Messaging (WhatsApp / Messages)
+        msg_match = MESSAGING_PATTERN_TO.match(command_body)
+        msg_content = ""
+        recipient = ""
+        if msg_match:
+            msg_content = (msg_match.group(1) or msg_match.group(2) or "").strip()
+            recipient = (msg_match.group(3) or "").strip()
+        else:
+            dir_match = MESSAGING_PATTERN_DIRECT.match(command_body)
+            if dir_match:
+                recipient = (dir_match.group(1) or "").strip()
+                msg_content = (dir_match.group(2) or "").strip()
+
+        if msg_content and recipient:
+            return RouteDecision(
+                tier=ExecutionTier.DIRECT,
+                action="control",
+                action_payload={
+                    "type": "send_message",
+                    "app": "WhatsApp",
+                    "recipient": recipient,
+                    "message": msg_content,
+                },
+                target_device="desktop",
+                confidence=1.0,
+                reason="Deterministic WhatsApp messaging",
+                suggested_text=f"Sent WhatsApp message '{msg_content}' to {recipient}."
+            )
+
+        # 4. Calculation
         calc_match = CALC_PATTERN.match(command_body)
         if calc_match:
             expr = calc_match.group(1).strip()

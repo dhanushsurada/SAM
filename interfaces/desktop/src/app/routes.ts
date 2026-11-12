@@ -13,6 +13,7 @@ import {
   FiSettings,
   FiKey,
   FiShield,
+  FiBox,
 } from "react-icons/fi";
 
 export type SamIcon = FC<{ className?: string; size?: number | string }>;
@@ -127,6 +128,14 @@ export const ROUTES: RouteMeta[] = [
     group: "understanding",
     plannedStep: "Step 7",
     description: "Compiled skills library and status.",
+  },
+  {
+    path: "/plugins",
+    label: "Plugins & MCP",
+    icon: FiBox,
+    group: "understanding",
+    plannedStep: "Step 7",
+    description: "Model Context Protocol connections: GitHub, Google Workspace, Slack, filesystem, and external tools.",
   },
   {
     path: "/diagnostics",

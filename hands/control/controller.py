@@ -448,6 +448,57 @@ class ComputerController:
             subprocess.run(["taskkill", "/IM", f"{app_name}.exe", "/F"],
                            capture_output=True)
 
+    def send_whatsapp_message(self, recipient: str, message: str) -> str:
+        """
+        Sends a WhatsApp message on macOS by activating WhatsApp, searching
+        the recipient, opening their chat, and sending the message.
+        """
+        self.open_app("WhatsApp")
+        time.sleep(0.7)
+
+        # Focus contact search (Cmd+F in WhatsApp Desktop)
+        try:
+            self.hotkey("command", "f")
+        except Exception:
+            if IS_MAC:
+                self._applescript('tell application "System Events" to keystroke "f" using command down')
+        time.sleep(0.4)
+
+        # Type contact name
+        try:
+            self.type_text(recipient)
+        except Exception:
+            if IS_MAC:
+                safe_rec = _escape_applescript_string(recipient)
+                self._applescript(f'tell application "System Events" to keystroke "{safe_rec}"')
+        time.sleep(0.5)
+
+        # Press Return to open chat
+        try:
+            self.press("return")
+        except Exception:
+            if IS_MAC:
+                self._applescript('tell application "System Events" to key code 36')
+        time.sleep(0.5)
+
+        # Type message
+        try:
+            self.type_text(message)
+        except Exception:
+            if IS_MAC:
+                safe_msg = _escape_applescript_string(message)
+                self._applescript(f'tell application "System Events" to keystroke "{safe_msg}"')
+        time.sleep(0.3)
+
+        # Press Return to send
+        try:
+            self.press("return")
+        except Exception:
+            if IS_MAC:
+                self._applescript('tell application "System Events" to key code 36')
+
+        return f"Sent WhatsApp message '{message}' to {recipient}."
+
     def _win_open_app(self, app_name: str):
         """Open app on Windows via start command."""
         # Map common app names to Windows executables
