@@ -8,6 +8,7 @@ Handles model loading status, fallback, and agent routing.
 
 import logging
 import json
+import re
 import requests
 from dataclasses import dataclass
 from typing import Optional
@@ -255,10 +256,22 @@ class Brain:
                 else:
                     raise
 
+            action = parsed.get("action")
+            action_payload = parsed.get("action_payload") or {}
+            if isinstance(action, dict):
+                dict_action = action
+                action_type = dict_action.get("type") or dict_action.get("action")
+                payload = {k: v for k, v in dict_action.items() if k not in ("type", "action")}
+                action = str(action_type) if action_type else None
+                if payload:
+                    action_payload = {**payload, **action_payload}
+            elif action is not None:
+                action = str(action)
+
             return BrainResponse(
                 text=parsed.get("text", "I didn't get a proper response."),
-                action=parsed.get("action"),
-                action_payload=parsed.get("action_payload"),
+                action=action,
+                action_payload=action_payload,
                 raw=raw
             )
 

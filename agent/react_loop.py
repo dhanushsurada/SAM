@@ -115,28 +115,45 @@ class ReactLoop:
             self._knowledge_index = VectorIndex(self.settings)
         return self._knowledge_index
 
-    def execute(self, action: str, payload: Dict[str, Any]) -> str:
+    def execute(self, action: Any, payload: Dict[str, Any]) -> str:
         """
         Execute a single action and return the observation.
+        Handles string actions, dict actions from small LLMs, and direct tool aliases.
         """
         logger.info(f"Executing action: {action} | payload: {payload}")
 
+        if isinstance(action, dict):
+            dict_action = action
+            action_name = dict_action.get("type") or dict_action.get("action") or ""
+            payload = {**{k: v for k, v in dict_action.items() if k not in ("type", "action")}, **(payload or {})}
+            action = action_name
+
+        action_str = str(action).strip().lower() if action else ""
+        payload = payload or {}
+
         try:
-            if action == "control":
-                return self._execute_control(payload)
-            elif action == "browser":
+            if action_str in ("control", "open_app", "launch_app", "close_app", "quit_app", "screenshot", "click", "type", "hotkey", "press"):
+                ctrl_payload = dict(payload)
+                if action_str in ("open_app", "launch_app"):
+                    ctrl_payload["type"] = "open_app"
+                elif action_str in ("close_app", "quit_app"):
+                    ctrl_payload["type"] = "close_app"
+                elif action_str in ("screenshot", "click", "type", "hotkey", "press"):
+                    ctrl_payload["type"] = action_str
+                return self._execute_control(ctrl_payload)
+            elif action_str in ("browser", "open_browser", "web"):
                 return self._execute_browser(payload)
-            elif action == "terminal":
+            elif action_str in ("terminal", "command", "bash", "shell"):
                 return self._execute_terminal(payload)
-            elif action == "vision":
+            elif action_str in ("vision", "see", "screen", "read_screen"):
                 return self._execute_vision(payload)
-            elif action == "read_document":
+            elif action_str == "read_document":
                 return self._execute_read_document(payload)
-            elif action == "search_knowledge":
+            elif action_str == "search_knowledge":
                 return self._execute_search_knowledge(payload)
-            elif action == "calculate":
+            elif action_str == "calculate":
                 return self._execute_calculate(payload)
-            elif action == "create_document":
+            elif action_str == "create_document":
                 return self._execute_create_document(payload)
             else:
                 return f"Unknown action: {action}"
@@ -830,14 +847,18 @@ class ReactLoop:
 
         elif action_type == "screenshot":
             target_path = payload.get("path")
-            dest = payload.get("destination")
-            if not target_path and dest == "desktop":
+            dest = str(payload.get("destination") or "").lower()
+            folder = payload.get("folder")
+            if not target_path and (dest == "desktop" or "desktop" in dest or folder or "reels" in dest):
                 import time
                 from pathlib import Path
                 desktop = Path.home() / "Desktop"
-                desktop.mkdir(parents=True, exist_ok=True)
+                if not folder and "reels" in dest:
+                    folder = "Reels"
+                dest_dir = (desktop / folder) if folder else desktop
+                dest_dir.mkdir(parents=True, exist_ok=True)
                 timestamp = time.strftime("%Y-%m-%d_at_%H.%M.%S")
-                target_path = str(desktop / f"Screenshot_{timestamp}.png")
+                target_path = str(dest_dir / f"Screenshot_{timestamp}.png")
             path = controller.screenshot(target_path)
             return f"Screenshot saved to {path}"
 

@@ -143,9 +143,15 @@ def resolve_python(manifest: Optional[dict] = None,
     policy = (manifest or load_manifest())["python"]
     supported = policy["supported_versions"]
     preferred = policy["preferred_versions"]
+
+    found: Dict[str, str] = {}
+    import sys
+    sys_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if sys_ver in supported and Path(sys.executable).is_file():
+        found.setdefault(sys_ver, sys.executable)
+
     default_names = [policy["executables"][version] for version in preferred] + ["python3"]
     names = list(candidates or default_names)
-    found: Dict[str, str] = {}
     for name in names:
         executable = which(name)
         if executable:

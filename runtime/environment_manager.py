@@ -75,7 +75,7 @@ class EnvironmentCompatibilityManager:
         """Return a read-only snapshot of OS, hardware, tools, and packages."""
         if self._discovery_cache is not None:
             return self._discovery_cache
-        packaged_runtime = bool(os.environ.get("SAM_USER_PACKAGES_DIR"))
+        packaged_runtime = bool(os.environ.get("SAM_USER_PACKAGES_DIR")) or "sam-runtime" in sys.executable
         versions = {}
         python_policy = self.manifest["python"]
         if packaged_runtime:
@@ -213,7 +213,8 @@ class EnvironmentCompatibilityManager:
             for key in ("primary_model", "fallback_model", "embedding_model", "vision_model"):
                 model = settings.get(key)
                 if model:
-                    ollama["configured_models"][key] = {"name": model, "available": model in names}
+                    is_avail = any(m == model or m.startswith(f"{model}:") or model.startswith(f"{m}:") for m in names)
+                    ollama["configured_models"][key] = {"name": model, "available": is_avail}
         except (OSError, ValueError, urllib.error.URLError, TimeoutError) as exc:
             # Endpoint URLs may contain credentials. Diagnostics expose a
             # safe state, never the exception string or configured URL.

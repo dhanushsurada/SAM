@@ -278,15 +278,19 @@ class TieredExecutionRouter:
         # 4. Screenshot
         ss_match = SCREENSHOT_PATTERN.match(command_body)
         if ss_match:
-            dest = "desktop" if ("desktop" in lower_body or "desktop" in cleaned.lower()) else "default"
+            dest = "desktop" if ("desktop" in lower_body or "desktop" in cleaned.lower() or "reels" in lower_body) else "default"
+            folder = None
+            if "reels" in lower_body or "reels" in cleaned.lower():
+                folder = "Reels"
+            folder_text = f"/{folder}" if folder else ""
             return RouteDecision(
                 tier=ExecutionTier.DIRECT,
                 action="control",
-                action_payload={"type": "screenshot", "destination": dest},
+                action_payload={"type": "screenshot", "destination": dest, "folder": folder},
                 target_device=target_device or "desktop",
                 confidence=1.0,
                 reason="Deterministic screenshot command",
-                suggested_text="Taking a screenshot and saving to Desktop." if dest == "desktop" else "Taking a screenshot."
+                suggested_text=f"Taking a screenshot and saving to Desktop{folder_text}." if dest == "desktop" else "Taking a screenshot."
             )
 
         # 5. Direct URL browsing

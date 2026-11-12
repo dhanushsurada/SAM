@@ -50,10 +50,16 @@ class Session:
                 store = MemoryStore(self.settings)
 
             # Save episodic event
+            action_val = response.action
+            if isinstance(action_val, dict):
+                action_val = json.dumps(action_val)
+            elif action_val is not None:
+                action_val = str(action_val)
+
             store.save_episode(
                 user_input=user_input,
                 response=response.text,
-                action=response.action,
+                action=action_val,
                 timestamp=self.created_at
             )
 
