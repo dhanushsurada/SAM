@@ -41,19 +41,20 @@ import json
 import logging
 import math
 import site
+import sys
 import threading
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 _user_pkgs = Path.home() / ".sam_data" / "python-packages"
-if _user_pkgs.exists():
+if _user_pkgs.exists() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_user_pkgs))
     except Exception:
         pass
 
 _app_pkgs = Path("/Applications/SAM.app/Contents/Resources/sam-runtime/site-packages")
-if _app_pkgs.is_dir():
+if _app_pkgs.is_dir() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_app_pkgs))
     except Exception:
@@ -480,6 +481,8 @@ async def stream_events(task_id: str, request: Request):
     )
 
 
+@app.get("/health", response_model=HealthStatus)
+@app.get("/api/health", response_model=HealthStatus)
 @app.get("/api/iqoo/health", response_model=HealthStatus)
 def health():
     return get_gateway().health()

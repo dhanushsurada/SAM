@@ -195,8 +195,11 @@ def snapshot_connections() -> Optional[List[dict]]:
     for c in raw_conns:
         if c.status == psutil.CONN_LISTEN or not c.raddr:
             continue
+        pid = getattr(c, "pid", None)
+        if pid is None:
+            pid = os.getpid()
         conns.append({
-            "pid": c.pid, "raddr_ip": c.raddr.ip, "raddr_port": c.raddr.port, "status": c.status,
+            "pid": pid, "raddr_ip": c.raddr.ip, "raddr_port": c.raddr.port, "status": c.status,
         })
     return conns
 

@@ -27,18 +27,19 @@ import subprocess
 import time
 import urllib.parse
 import site
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 _user_pkgs = Path.home() / ".sam_data" / "python-packages"
-if _user_pkgs.exists():
+if _user_pkgs.exists() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_user_pkgs))
     except Exception:
         pass
 
 _app_pkgs = Path("/Applications/SAM.app/Contents/Resources/sam-runtime/site-packages")
-if _app_pkgs.is_dir():
+if _app_pkgs.is_dir() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_app_pkgs))
     except Exception:

@@ -36,7 +36,7 @@ import site
 
 SAM_DATA_DIR = Path.home() / ".sam_data"
 _user_pkgs = SAM_DATA_DIR / "python-packages"
-if _user_pkgs.exists():
+if _user_pkgs.exists() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_user_pkgs))
     except Exception:
@@ -44,13 +44,67 @@ if _user_pkgs.exists():
 
 _cur = Path(__file__).resolve().parent
 for _ in range(5):
-    if (_cur / "site-packages").is_dir():
+    if (_cur / "site-packages").is_dir() and sys.version_info >= (3, 10):
         try:
             site.addsitedir(str(_cur / "site-packages"))
         except Exception:
             pass
         break
     _cur = _cur.parent
+
+
+def ensure_desktop_runtime_config() -> None:
+    """Ensure ~/.sam_data/desktop-runtime.json exists with valid paths for Tauri desktop shell."""
+    try:
+        config_path = SAM_DATA_DIR / "desktop-runtime.json"
+        if config_path.is_file():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                if (
+                    data.get("runtime_schema_version") == 1
+                    and Path(data.get("app_root", "")).exists()
+                    and Path(data.get("sam_cli", "")).exists()
+                    and Path(data.get("python", "")).exists()
+                ):
+                    return
+            except Exception:
+                pass
+
+        app_root = Path(__file__).resolve().parent
+        if (app_root.parent / "site-packages").is_dir():
+            resources_dir = app_root.parent / "site-packages"
+        else:
+            resources_dir = app_root
+
+        packaged_python = app_root.parent / "python" / "bin" / "python3"
+        if packaged_python.is_file():
+            python_exe = packaged_python
+        else:
+            python_exe = Path(sys.executable)
+
+        SAM_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        user_packages = SAM_DATA_DIR / "python-packages"
+        logs = SAM_DATA_DIR / "logs"
+        user_packages.mkdir(parents=True, exist_ok=True)
+        logs.mkdir(parents=True, exist_ok=True)
+
+        env_path = f"{python_exe.parent}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        config = {
+            "runtime_schema_version": 1,
+            "app_root": str(app_root),
+            "resources_dir": str(resources_dir),
+            "sam_cli": str(app_root / "sam_cli.py"),
+            "python": str(python_exe),
+            "api_base_url": "http://127.0.0.1:8420",
+            "environment_path": env_path,
+            "user_packages_dir": str(user_packages),
+            "logs_dir": str(logs),
+        }
+        tmp = config_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        tmp.replace(config_path)
+    except Exception:
+        pass
 
 
 def _emit_json(payload: dict, exit_code: int = 0) -> int:
@@ -880,6 +934,7 @@ def cmd_reset_all():
 # ─── Main ─────────────────────────────────────────────────────────────────
 
 def main():
+    ensure_desktop_runtime_config()
     parser = argparse.ArgumentParser(description="SAM CLI")
     subparsers = parser.add_subparsers(dest="command")
 

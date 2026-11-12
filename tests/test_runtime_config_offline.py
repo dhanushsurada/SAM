@@ -63,10 +63,14 @@ def _isolated_home(overrides_yaml: str = "") -> Path:
 
 def _run_py(script: str, home: Path, timeout=15) -> str:
     """Run `script` as a fresh interpreter under `home` as HOME, return stdout."""
+    clean_paths = [
+        p for p in sys.path
+        if not (sys.version_info < (3, 10) and ("sam-runtime" in p or ".sam_data" in p))
+    ]
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=str(REPO_ROOT),
-        env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(sys.path)},
+        env={"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": os.pathsep.join(clean_paths)},
         capture_output=True,
         text=True,
         timeout=timeout,
