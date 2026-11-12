@@ -8,16 +8,19 @@
 
 ## What SAM 2.0 Does
 
-- **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android mobile device with shared memory and automatic capability routing.
+- **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android mobile companion with shared memory and automatic capability routing.
+- **Conversational Chat & Persistent Memory:** Dedicated instant dialogue with parallel chats, persistent SQLite conversation storage, and long-term memory across app restarts.
+- **Projects & Workspaces:** Bind tasks and chats to specific project directories with custom guidelines, tech stack constraints, and working folder paths.
+- **Model Context Protocol (MCP) & Plugins:** Plug-and-play integrations with GitHub, Google Workspace, Slack, local filesystems, and PostgreSQL databases.
 - **3-Tier Execution Architecture:**
-  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for calculations, app launches, browser navigation, and screenshots without unnecessary LLM calls.
+  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for calculations, app launches, WhatsApp messaging, YouTube media, and screenshots without unnecessary LLM calls.
   - **Tier 2 (Fast Intent):** Fast single-step tool selection and routing using compact models.
-  - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, reflection, and recovery with Qwen 2.5 14B.
-- **Native Android Agent:** Native Kotlin Jetpack Compose app with on-device AI inference, Scoped Storage file sync, accessibility automation, and notification summarization.
-- **Cryptographic Security:** Mutual Ed25519 request signing, one-time QR pairing, sliding replay-prevention nonces, and user confirmation gating for destructive actions.
+  - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, reflection, and recovery with local models.
+- **Native Mobile Companion:** Kotlin Jetpack Compose app with on-device AI inference, Scoped Storage file sync, notification mirroring, and USB reverse tunneling (`adb reverse tcp:8420 tcp:8420`).
+- **Cryptographic Security:** Mutual Ed25519 request signing, one-time pairing tokens, sliding replay-prevention nonces, and user confirmation gating for destructive actions.
 - **Voice & Hands Automation:** openWakeWord 24/7 listening, Whisper STT, Kokoro TTS, Playwright browser agent, and AppleScript/system automation.
 - **Taste & Memory Layer:** ChromaDB + SQLite episodic memory with **Founder Mode** capturing your taste, decisions, and reasoning across sessions.
-- **Zero Cloud.** Zero API keys. Zero subscription fees.
+- **Zero Cloud by Default:** Runs fully on your hardware. Cloud API keys (Groq, Gemini, OpenRouter) are optional accelerators.
 
 ---
 

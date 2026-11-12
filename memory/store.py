@@ -47,6 +47,36 @@ class MemoryStore:
                     updated_at TEXT NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    project_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    tone TEXT DEFAULT 'default',
+                    metadata TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    folder_path TEXT NOT NULL,
+                    context TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
             conn.commit()
         logger.info(f"SQLite at {self._db_path}")
 
@@ -189,3 +219,132 @@ Return ONLY a JSON array."""
                 logger.info(f"Extracted {len(facts)} memories")
         except Exception as e:
             logger.debug(f"Memory extraction skipped: {e}")
+
+    # ─── Chat Conversations Persistence ───────────────────────────────────
+
+    def save_conversation(self, conv_id: str, title: str, project_id: Optional[str] = None) -> Dict:
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO conversations (id, title, project_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    project_id = COALESCE(excluded.project_id, conversations.project_id),
+                    updated_at = excluded.updated_at
+                """,
+                (conv_id, title, project_id, now, now)
+            )
+            conn.commit()
+        return {"id": conv_id, "title": title, "project_id": project_id, "updated_at": now}
+
+    def list_conversations(self, project_id: Optional[str] = None) -> List[Dict]:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if project_id:
+                cur = conn.execute(
+                    "SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC",
+                    (project_id,)
+                )
+            else:
+                cur = conn.execute("SELECT * FROM conversations ORDER BY updated_at DESC")
+            return [dict(row) for row in cur.fetchall()]
+
+    def delete_conversation(self, conv_id: str) -> bool:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("DELETE FROM chat_messages WHERE conversation_id = ?", (conv_id,))
+            conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+            conn.commit()
+        return True
+
+    def save_chat_message(self, msg_id: str, conversation_id: str, role: str,
+                          content: str, timestamp: Optional[str] = None,
+                          tone: str = "default", metadata: Optional[Dict] = None) -> Dict:
+        ts = timestamp or datetime.now().isoformat()
+        meta_str = json.dumps(metadata or {})
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, tone, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    content = excluded.content,
+                    tone = excluded.tone,
+                    metadata = excluded.metadata
+                """,
+                (msg_id, conversation_id, role, content, ts, tone, meta_str)
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                (ts, conversation_id)
+            )
+            conn.commit()
+        return {
+            "id": msg_id,
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "timestamp": ts,
+            "tone": tone
+        }
+
+    def get_conversation_messages(self, conversation_id: str) -> List[Dict]:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                "SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY timestamp ASC",
+                (conversation_id,)
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # ─── Projects & Workspace Context ─────────────────────────────────────
+
+    def save_project(self, proj_id: str, name: str, folder_path: str, context: str = "") -> Dict:
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO projects (id, name, folder_path, context, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    folder_path = excluded.folder_path,
+                    context = excluded.context,
+                    updated_at = excluded.updated_at
+                """,
+                (proj_id, name, folder_path, context, now, now)
+            )
+            conn.commit()
+        return {
+            "id": proj_id,
+            "name": name,
+            "folder_path": folder_path,
+            "context": context,
+            "created_at": now,
+            "updated_at": now
+        }
+
+    def list_projects(self) -> List[Dict]:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute("SELECT * FROM projects ORDER BY updated_at DESC")
+            return [dict(row) for row in cur.fetchall()]
+
+    def delete_project(self, proj_id: str) -> bool:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
+            conn.commit()
+        return True
+
+    def clear_memory(self) -> bool:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("DELETE FROM episodes")
+            conn.execute("DELETE FROM user_model")
+            conn.commit()
+        if self._collection is not None:
+            try:
+                self._collection.delete(where={"source": "auto_extract"})
+            except Exception:
+                pass
+        return True

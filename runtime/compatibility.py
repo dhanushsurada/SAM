@@ -145,11 +145,6 @@ def resolve_python(manifest: Optional[dict] = None,
     preferred = policy["preferred_versions"]
 
     found: Dict[str, str] = {}
-    import sys
-    sys_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
-    if sys_ver in supported and Path(sys.executable).is_file():
-        found.setdefault(sys_ver, sys.executable)
-
     default_names = [policy["executables"][version] for version in preferred] + ["python3"]
     names = list(candidates or default_names)
     for name in names:
@@ -158,6 +153,12 @@ def resolve_python(manifest: Optional[dict] = None,
             version = _python_version(executable, runner)
             if version:
                 found.setdefault(version, executable)
+
+    if candidates is None and not found:
+        import sys
+        sys_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+        if sys_ver in supported and Path(sys.executable).is_file():
+            found.setdefault(sys_ver, sys.executable)
     if platform.system() == "Windows":
         launcher_name = ((manifest or load_manifest()).get("platforms", {})
                          .get("windows", {}).get("python_launcher", "py"))

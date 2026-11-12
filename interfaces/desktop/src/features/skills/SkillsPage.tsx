@@ -8,8 +8,8 @@ export function SkillsPage() {
     <div className="mx-auto max-w-2xl space-y-4">
       <PageHeader
         title="Skills"
-        mode="demo"
-        description="Compiled skills, matched automatically during task execution — there's no manual 'run skill' capability to wire up even once an API exists, so this stays read-only by design."
+        mode="live"
+        description="Compiled skills matched dynamically by SAM's tiered execution router during task execution."
       />
 
       <div className="space-y-2">

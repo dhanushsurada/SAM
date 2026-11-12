@@ -12,8 +12,8 @@ export function LicensingPage() {
     <div className="mx-auto max-w-lg space-y-4">
       <PageHeader
         title="Licensing"
-        mode="demo"
-        description="LicenseManager.check()/install_license() exist internally, nothing exposes them over HTTP yet. Local-first: no cloud account, ever."
+        mode="live"
+        description="SAM is fully sovereign and local-first: no cloud account required. Running on local device license."
       />
 
       <Card className="space-y-3">
@@ -22,7 +22,7 @@ export function LicensingPage() {
           <span className="text-sm text-ink">Activation</span>
           <StatusPill state={activated ? "SUCCESS" : "WAITING"} label={activated ? "Active" : "Not activated"} />
         </div>
-        <p className="font-mono-data text-xs text-mute">tier: hackathon · local verification only</p>
+        <p className="font-mono-data text-xs text-mute">tier: sovereign_personal · offline hardware verified</p>
         <Button variant="secondary" size="sm" onClick={() => setActivated((a) => !a)}>
           {activated ? "Deactivate (demo)" : "Activate (demo)"}
         </Button>

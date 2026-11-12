@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState, useMemo } from "react";
-import { FiPlus, FiMessageSquare, FiTrash2, FiSidebar, FiCompass } from "react-icons/fi";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { FiPlus, FiMessageSquare, FiTrash2, FiSidebar, FiCompass, FiFolder, FiX } from "react-icons/fi";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { ModeBadge } from "@/components/ModeBadge";
 import type { TaskRecord } from "@/api/types";
-import { sendChatMessage } from "@/api/client";
+import {
+  sendChatMessage,
+  listChatConversations,
+  getConversationMessages,
+  deleteChatConversation,
+  listProjects,
+  type ProjectItem,
+} from "@/api/client";
 import { useTaskSession } from "@/stores/taskSession";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ChatComposer } from "./ChatComposer";
@@ -48,6 +55,18 @@ export function ChatPage() {
   const labelOf = useTaskLabel();
   const [isChatThinking, setIsChatThinking] = useState(false);
 
+  // Projects Context
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectItem | null>(() => {
+    try {
+      const raw = localStorage.getItem("sam.desktop.active_project");
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
   // ─── Multiple Parallel Conversations State ─────────────────────────────
   const [conversations, setConversations] = useState<ChatConversation[]>(() => {
     try {
@@ -81,6 +100,64 @@ export function ChatPage() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // Load projects from backend
+  useEffect(() => {
+    void listProjects().then((res) => {
+      setProjects(res.projects || []);
+    }).catch(() => {});
+  }, []);
+
+  // Fetch persistent conversations from backend SQLite on mount
+  const loadBackendConversations = useCallback(async () => {
+    try {
+      const res = await listChatConversations(activeProject?.id);
+      if (res.conversations && res.conversations.length > 0) {
+        setConversations((prev) => {
+          const map = new Map(prev.map((c) => [c.id, c]));
+          const merged: ChatConversation[] = res.conversations.map((bc) => {
+            const existing = map.get(bc.id);
+            return {
+              id: bc.id,
+              title: bc.title || "Chat",
+              createdAt: bc.created_at,
+              updatedAt: bc.updated_at,
+              taskIds: existing?.taskIds || [],
+              messages: existing?.messages || [],
+            };
+          });
+          return merged.length > 0 ? merged : prev;
+        });
+      }
+    } catch {
+      // ignore offline
+    }
+  }, [activeProject?.id]);
+
+  useEffect(() => {
+    void loadBackendConversations();
+  }, [loadBackendConversations]);
+
+  // Load messages from SQLite if current conversation has empty messages
+  useEffect(() => {
+    const current = conversations.find((c) => c.id === activeConvId);
+    if (current && (!current.messages || current.messages.length === 0)) {
+      void getConversationMessages(activeConvId).then((res) => {
+        if (res.messages && res.messages.length > 0) {
+          const loadedMsgs: ChatMessage[] = res.messages.map((m) => ({
+            id: m.id,
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+            timestamp: m.timestamp,
+            tone: (m.tone as "default" | "danger" | "muted") || "default",
+          }));
+          setConversations((prev) =>
+            prev.map((conv) => (conv.id === activeConvId ? { ...conv, messages: loadedMsgs } : conv))
+          );
+        }
+      }).catch(() => {});
+    }
+  }, [activeConvId, conversations]);
+
   // Sync conversations to localStorage
   useEffect(() => {
     try {
@@ -90,6 +167,19 @@ export function ChatPage() {
       // ignore
     }
   }, [conversations, activeConvId]);
+
+  // Sync active project to localStorage
+  useEffect(() => {
+    try {
+      if (activeProject) {
+        localStorage.setItem("sam.desktop.active_project", JSON.stringify(activeProject));
+      } else {
+        localStorage.removeItem("sam.desktop.active_project");
+      }
+    } catch {
+      // ignore
+    }
+  }, [activeProject]);
 
   // Ensure active conversation exists
   useEffect(() => {
@@ -168,6 +258,7 @@ export function ChatPage() {
 
   const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    void deleteChatConversation(id).catch(() => {});
     if (conversations.length <= 1) {
       const newId = `conv-${Date.now()}`;
       setConversations([
@@ -226,8 +317,14 @@ export function ChatPage() {
         content: m.content,
       }));
 
-      // Call dedicated pure conversational chat endpoint
-      const res = await sendChatMessage(text, activeConvId, history);
+      // Call dedicated pure conversational chat endpoint with persistent memory & project context
+      const res = await sendChatMessage(
+        text,
+        activeConvId,
+        history,
+        activeProject?.id,
+        activeProject?.context
+      );
 
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
@@ -335,9 +432,41 @@ export function ChatPage() {
             <ModeBadge mode="live" />
           </div>
 
-          <Button variant="ghost" size="sm" onClick={handleCreateNewChat}>
-            <FiPlus size={14} /> New Chat
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Project Context Selector */}
+            {activeProject ? (
+              <div className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">
+                <FiFolder size={12} />
+                <span className="truncate max-w-[130px] font-medium">{activeProject.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveProject(null)}
+                  className="hover:text-amber-100 ml-0.5"
+                  title="Clear project context"
+                >
+                  <FiX size={12} />
+                </button>
+              </div>
+            ) : projects.length > 0 ? (
+              <select
+                className="rounded border border-line bg-surface px-2 py-1 text-xs text-mute hover:text-ink focus:outline-none"
+                value=""
+                onChange={(e) => {
+                  const p = projects.find((item) => item.id === e.target.value);
+                  if (p) setActiveProject(p);
+                }}
+              >
+                <option value="" disabled>Bind to Project Context...</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            ) : null}
+
+            <Button variant="ghost" size="sm" onClick={handleCreateNewChat}>
+              <FiPlus size={14} /> New Chat
+            </Button>
+          </div>
         </div>
 
         {/* Message Thread */}
@@ -350,7 +479,7 @@ export function ChatPage() {
               <div>
                 <h3 className="text-base font-medium text-ink">Conversational Chat with SAM</h3>
                 <p className="text-xs text-mute mt-1 max-w-md">
-                  Ask questions, discuss topics, write code, or explore ideas. Instant conversational replies without OS task delays.
+                  Ask questions, discuss topics, write code, or explore ideas. Instant conversational replies with persistent memory across restarts.
                 </p>
               </div>
 

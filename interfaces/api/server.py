@@ -89,6 +89,8 @@ from interfaces.api.schemas import (
     TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest, ModelPullRequest,
     SpeechRequest, TaskFeedbackRequest, ProviderKeyRequest, ChatRequest, ChatResponse,
     MCPServerCreateRequest, MCPServerToggleRequest,
+    ConversationCreateRequest, ProjectCreateRequest,
+    FounderDecisionCreateRequest, FounderTasteCreateRequest, FounderReviewRequest,
 )
 from core.cloud_providers import (
     get_providers_status, save_api_key, delete_api_key, get_model_update_notifications,
@@ -557,18 +559,21 @@ def model_updates():
     return {"notifications": get_model_update_notifications()}
 
 
-# ─── Conversational Chat ──────────────────────────────────────────────────
+# ─── Conversational Chat & Persistent Memory ──────────────────────────────
 
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_local_caller)])
 def conversational_chat(req: ChatRequest):
     """
     Dedicated instant conversational chat endpoint.
     Processes messages conversationally without triggering autonomous OS tasks,
-    providing lightning-fast response times and natural dialogue.
+    providing lightning-fast response times and natural dialogue, with persistent memory.
     """
     gateway = get_gateway()
     identity = gateway.identity.load()
-    founder_ctx = gateway.founder_mode.get_context()
+    founder_ctx = gateway.founder_mode.get_context() or ""
+
+    if req.project_context:
+        founder_ctx = (founder_ctx + f"\n\nActive Project Context:\n{req.project_context}").strip()
 
     reply = gateway.brain.chat(
         message=req.message,
@@ -577,11 +582,197 @@ def conversational_chat(req: ChatRequest):
         founder_context=founder_ctx,
     )
     active_model = gateway.brain.settings.primary_model
+
+    # Persist conversation and messages to SQLite
+    conv_id = req.conversation_id or f"conv-{int(time.time()*1000)}"
+    try:
+        mem_store = gateway.memory.get_store(gateway.settings)
+        if mem_store:
+            title = req.message[:40] if len(req.message) > 40 else req.message
+            mem_store.save_conversation(conv_id, title, req.project_id)
+            user_msg_id = f"msg-{int(time.time()*1000)}-user"
+            asst_msg_id = f"msg-{int(time.time()*1000)+1}-asst"
+            mem_store.save_chat_message(user_msg_id, conv_id, "user", req.message)
+            mem_store.save_chat_message(asst_msg_id, conv_id, "assistant", reply)
+            mem_store.save_episode(req.message, reply, "chat", datetime.now().isoformat())
+    except Exception as e:
+        logger.warning(f"Failed to persist chat messages to memory store: {e}")
+
     return ChatResponse(
         reply=reply,
         model=active_model,
-        conversation_id=req.conversation_id,
+        conversation_id=conv_id,
     )
+
+
+@app.get("/api/chat/conversations", dependencies=[Depends(require_local_caller)])
+def list_chat_conversations(project_id: Optional[str] = None):
+    """List persistent chat conversations from SQLite."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        return {"conversations": []}
+    return {"conversations": mem_store.list_conversations(project_id)}
+
+
+@app.post("/api/chat/conversations", dependencies=[Depends(require_local_caller)])
+def create_or_update_conversation(req: ConversationCreateRequest):
+    """Create or update conversation metadata."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        raise HTTPException(status_code=500, detail="Memory store unavailable")
+    conv = mem_store.save_conversation(req.id, req.title, req.project_id)
+    return {"ok": True, "conversation": conv}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/messages", dependencies=[Depends(require_local_caller)])
+def get_conversation_messages(conversation_id: str):
+    """Get all messages for a saved conversation."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        return {"messages": []}
+    return {"messages": mem_store.get_conversation_messages(conversation_id)}
+
+
+@app.delete("/api/chat/conversations/{conversation_id}", dependencies=[Depends(require_local_caller)])
+def delete_conversation(conversation_id: str):
+    """Delete a conversation and all its messages."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if mem_store:
+        mem_store.delete_conversation(conversation_id)
+    return {"ok": True}
+
+
+# ─── Projects & Workspace Context ─────────────────────────────────────────
+
+@app.get("/api/projects", dependencies=[Depends(require_local_caller)])
+def list_projects():
+    """List saved projects with folder paths and custom context instructions."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        return {"projects": []}
+    return {"projects": mem_store.list_projects()}
+
+
+@app.post("/api/projects", dependencies=[Depends(require_local_caller)])
+def save_project(req: ProjectCreateRequest):
+    """Create or update a project."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        raise HTTPException(status_code=500, detail="Memory store unavailable")
+    proj_id = req.id or f"proj-{int(time.time())}"
+    project = mem_store.save_project(proj_id, req.name, req.folder_path, req.context or "")
+    return {"ok": True, "project": project}
+
+
+@app.delete("/api/projects/{project_id}", dependencies=[Depends(require_local_caller)])
+def delete_project(project_id: str):
+    """Delete a project."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if mem_store:
+        mem_store.delete_project(project_id)
+    return {"ok": True}
+
+
+# ─── Live Memory Endpoints ────────────────────────────────────────────────
+
+@app.get("/api/memory/episodes", dependencies=[Depends(require_local_caller)])
+def get_memory_episodes(limit: int = 50):
+    """Get real episodic memory entries from SQLite."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store:
+        return {"episodes": []}
+    return {"episodes": mem_store.get_recent_episodes(limit=limit)}
+
+
+@app.get("/api/memory/search", dependencies=[Depends(require_local_caller)])
+def search_memory(q: str = ""):
+    """Search semantic memory entries."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if not mem_store or not q.strip():
+        return {"results": []}
+    return {"results": mem_store.search_semantic(q.strip())}
+
+
+@app.delete("/api/memory", dependencies=[Depends(require_local_caller)])
+def clear_memory():
+    """Clear memory store episodes and semantic embeddings."""
+    gateway = get_gateway()
+    mem_store = gateway.memory.get_store(gateway.settings)
+    if mem_store:
+        mem_store.clear_memory()
+    return {"ok": True}
+
+
+# ─── Live Founder Mode Endpoints ──────────────────────────────────────────
+
+@app.get("/api/founder/decisions", dependencies=[Depends(require_local_caller)])
+def get_founder_decisions(limit: int = 50):
+    """Get real captured founder decisions."""
+    gateway = get_gateway()
+    return {"decisions": gateway.founder_mode._get_recent_decisions(limit=limit)}
+
+
+@app.get("/api/founder/taste", dependencies=[Depends(require_local_caller)])
+def get_founder_taste():
+    """Get real user taste profile preferences."""
+    gateway = get_gateway()
+    return {"taste": gateway.founder_mode._get_taste_profile()}
+
+
+@app.get("/api/founder/pending", dependencies=[Depends(require_local_caller)])
+def get_founder_pending(limit: int = 50):
+    """Get pending captures waiting for user review."""
+    gateway = get_gateway()
+    return {"pending": gateway.founder_mode.list_llm_captures(limit=limit)}
+
+
+@app.post("/api/founder/decision", dependencies=[Depends(require_local_caller)])
+def add_founder_decision(req: FounderDecisionCreateRequest):
+    """Add a verified founder decision."""
+    gateway = get_gateway()
+    gateway.founder_mode.capture_decision(
+        decision=req.decision,
+        reasoning=req.reasoning or "",
+        category=req.category or "general",
+    )
+    return {"ok": True}
+
+
+@app.post("/api/founder/taste", dependencies=[Depends(require_local_caller)])
+def add_founder_taste(req: FounderTasteCreateRequest):
+    """Add or update a taste profile preference."""
+    gateway = get_gateway()
+    gateway.founder_mode.update_taste(
+        domain=req.domain,
+        preference=req.preference,
+        strength=req.strength or "strong",
+    )
+    return {"ok": True}
+
+
+@app.post("/api/founder/confirm", dependencies=[Depends(require_local_caller)])
+def confirm_founder_capture(req: FounderReviewRequest):
+    """Confirm an auto-captured founder signal."""
+    gateway = get_gateway()
+    gateway.founder_mode.confirm_capture(req.table, req.row_id)
+    return {"ok": True}
+
+
+@app.post("/api/founder/reject", dependencies=[Depends(require_local_caller)])
+def reject_founder_capture(req: FounderReviewRequest):
+    """Reject an auto-captured founder signal."""
+    gateway = get_gateway()
+    gateway.founder_mode.reject_capture(req.table, req.row_id)
+    return {"ok": True}
 
 
 # ─── Model Context Protocol (MCP) & Plugins ──────────────────────────────

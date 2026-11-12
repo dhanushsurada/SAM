@@ -182,9 +182,8 @@ export function OnboardingPage() {
                 {runtimeRepairMessage && <p role="status" className="text-xs text-mute">{runtimeRepairMessage}</p>}
               </div>}
               <p className="text-xs text-mute">
-                This only checks the iQOO gateway — it's the one thing this browser tab can
-                actually reach. Not being able to continue past this step isn't required; you can
-                set up the rest first and come back.
+                This checks the SAM API gateway — the core service managing tasks and model routing.
+                You can continue onboarding or adjust settings at any time.
               </p>
             </div>
           )}

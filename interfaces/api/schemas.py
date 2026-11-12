@@ -181,6 +181,8 @@ class ProviderKeyRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     conversation_id: Optional[str] = None
+    project_id: Optional[str] = None
+    project_context: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
 
 
@@ -188,6 +190,37 @@ class ChatResponse(BaseModel):
     reply: str
     model: str
     conversation_id: Optional[str] = None
+
+
+class ConversationCreateRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100)
+    title: str = Field(..., min_length=1, max_length=200)
+    project_id: Optional[str] = None
+
+
+class ProjectCreateRequest(BaseModel):
+    id: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=100)
+    folder_path: str = Field(..., min_length=1, max_length=500)
+    context: Optional[str] = ""
+
+
+class FounderDecisionCreateRequest(BaseModel):
+    decision: str = Field(..., min_length=1, max_length=1000)
+    reasoning: Optional[str] = ""
+    category: Optional[str] = "general"
+    confidence: Optional[float] = 0.9
+
+
+class FounderTasteCreateRequest(BaseModel):
+    domain: str = Field(..., min_length=1, max_length=100)
+    preference: str = Field(..., min_length=1, max_length=1000)
+    strength: Optional[str] = "strong"
+
+
+class FounderReviewRequest(BaseModel):
+    table: str = Field(..., min_length=1, max_length=50)
+    row_id: int
 
 
 class MCPServerCreateRequest(BaseModel):

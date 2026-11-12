@@ -828,7 +828,13 @@ class ReactLoop:
         elif action_type == "open_app":
             app = payload.get("app", "")
             background = bool(payload.get("background", False))
-            controller.open_app(app, background=background)
+            if background:
+                try:
+                    controller.open_app(app, background=True)
+                except TypeError:
+                    controller.open_app(app)
+            else:
+                controller.open_app(app)
 
             if background:
                 return f"Opened: {app} in the background without stealing screen focus."

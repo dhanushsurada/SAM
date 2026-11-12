@@ -39,10 +39,9 @@ irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1
    - To enable UI automation and app control, grant **Accessibility Service** in Android Settings.
    - To enable phone notification summarization, grant **Notification Access** in Android Settings.
 3. **Pair with Desktop:**
-   - Ensure phone and desktop are on the same Wi-Fi network (or configure the secure remote relay).
-   - In Desktop SAM, navigate to **Settings → Connected Devices → Pair New Device** to display the QR code.
-   - In Android SAM, tap **Pair Device** and scan the QR code (or enter the pairing token).
-   - Both devices complete an Ed25519 mutual authentication handshake; status changes to **Connected**.
+   - Option A (Local Wi-Fi): Ensure phone and desktop are on the same Wi-Fi network. In Desktop SAM, navigate to **Device Connect** in the sidebar and click **Generate Pairing Key**. In Android SAM, enter the server address and token.
+   - Option B (USB Cable / ADB Tunnel - Fastest): Connect phone via USB with USB Debugging enabled, run `adb reverse tcp:8420 tcp:8420` in Mac terminal, and connect to `http://127.0.0.1:8420` in the mobile app.
+   - Both devices complete an Ed25519 mutual authentication handshake; status changes to **Trusted**.
 
 ## First launch
 

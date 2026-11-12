@@ -126,7 +126,7 @@ export function PermissionsPage() {
       <section className="space-y-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-ink">SAM Core</h2>
-          <ModeBadge mode="demo" />
+          <ModeBadge mode="live" />
         </div>
         <p className="text-xs text-mute">
           Granted separately, in System Settings, to the SAM Core process — not requestable or

@@ -283,7 +283,9 @@ export interface ChatResponsePayload {
 export function sendChatMessage(
   message: string,
   conversationId?: string,
-  history?: Array<{ role: string; content: string }>
+  history?: Array<{ role: string; content: string }>,
+  projectId?: string,
+  projectContext?: string
 ): Promise<ChatResponsePayload> {
   return request<ChatResponsePayload>(
     "/chat",
@@ -293,7 +295,202 @@ export function sendChatMessage(
         message,
         conversation_id: conversationId,
         history: history || [],
+        project_id: projectId,
+        project_context: projectContext,
       }),
+    },
+    CORE_BASE
+  );
+}
+
+// ─── Conversations & Chat Persistence ────────────────────────────────────
+
+export interface SavedConversation {
+  id: string;
+  title: string;
+  project_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedChatMessage {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: string;
+  tone?: string;
+}
+
+export function listChatConversations(projectId?: string): Promise<{ conversations: SavedConversation[] }> {
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  return request<{ conversations: SavedConversation[] }>(`/chat/conversations${query}`, undefined, CORE_BASE);
+}
+
+export function saveChatConversation(id: string, title: string, projectId?: string): Promise<{ ok: boolean; conversation: SavedConversation }> {
+  return request<{ ok: boolean; conversation: SavedConversation }>(
+    "/chat/conversations",
+    {
+      method: "POST",
+      body: JSON.stringify({ id, title, project_id: projectId }),
+    },
+    CORE_BASE
+  );
+}
+
+export function getConversationMessages(conversationId: string): Promise<{ messages: SavedChatMessage[] }> {
+  return request<{ messages: SavedChatMessage[] }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+    undefined,
+    CORE_BASE
+  );
+}
+
+export function deleteChatConversation(conversationId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" },
+    CORE_BASE
+  );
+}
+
+// ─── Projects & Workspaces ───────────────────────────────────────────────
+
+export interface ProjectItem {
+  id: string;
+  name: string;
+  folder_path: string;
+  context: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listProjects(): Promise<{ projects: ProjectItem[] }> {
+  return request<{ projects: ProjectItem[] }>("/projects", undefined, CORE_BASE);
+}
+
+export function saveProject(project: { id?: string; name: string; folder_path: string; context?: string }): Promise<{ ok: boolean; project: ProjectItem }> {
+  return request<{ ok: boolean; project: ProjectItem }>(
+    "/projects",
+    {
+      method: "POST",
+      body: JSON.stringify(project),
+    },
+    CORE_BASE
+  );
+}
+
+export function deleteProject(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/projects/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    CORE_BASE
+  );
+}
+
+// ─── Live Memory ─────────────────────────────────────────────────────────
+
+export interface MemoryEpisode {
+  id?: number;
+  timestamp: string;
+  user: string;
+  response: string;
+  action?: string | null;
+}
+
+export interface SemanticMemoryResult {
+  content: string;
+  relevance?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export function getMemoryEpisodes(limit: number = 50): Promise<{ episodes: MemoryEpisode[] }> {
+  return request<{ episodes: MemoryEpisode[] }>(`/memory/episodes?limit=${limit}`, undefined, CORE_BASE);
+}
+
+export function searchMemory(query: string): Promise<{ results: SemanticMemoryResult[] }> {
+  return request<{ results: SemanticMemoryResult[] }>(`/memory/search?q=${encodeURIComponent(query)}`, undefined, CORE_BASE);
+}
+
+export function clearMemory(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/memory", { method: "DELETE" }, CORE_BASE);
+}
+
+// ─── Live Founder Mode ───────────────────────────────────────────────────
+
+export interface FounderDecision {
+  id?: number;
+  decision: string;
+  reasoning: string;
+  category: string;
+  confidence: number;
+}
+
+export interface FounderTasteItem {
+  domain: string;
+  preference: string;
+  strength?: string;
+  confidence: number;
+}
+
+export interface FounderPendingCapture {
+  id: number;
+  table: string;
+  content: string;
+  reasoning?: string;
+}
+
+export function getFounderDecisions(limit: number = 50): Promise<{ decisions: FounderDecision[] }> {
+  return request<{ decisions: FounderDecision[] }>(`/founder/decisions?limit=${limit}`, undefined, CORE_BASE);
+}
+
+export function getFounderTaste(): Promise<{ taste: FounderTasteItem[] }> {
+  return request<{ taste: FounderTasteItem[] }>("/founder/taste", undefined, CORE_BASE);
+}
+
+export function getFounderPending(): Promise<{ pending: FounderPendingCapture[] }> {
+  return request<{ pending: FounderPendingCapture[] }>("/founder/pending", undefined, CORE_BASE);
+}
+
+export function addFounderDecision(decision: string, reasoning?: string, category?: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    "/founder/decision",
+    {
+      method: "POST",
+      body: JSON.stringify({ decision, reasoning: reasoning || "", category: category || "general" }),
+    },
+    CORE_BASE
+  );
+}
+
+export function addFounderTaste(domain: string, preference: string, strength: string = "strong"): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    "/founder/taste",
+    {
+      method: "POST",
+      body: JSON.stringify({ domain, preference, strength }),
+    },
+    CORE_BASE
+  );
+}
+
+export function confirmFounderCapture(table: string, row_id: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    "/founder/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify({ table, row_id }),
+    },
+    CORE_BASE
+  );
+}
+
+export function rejectFounderCapture(table: string, row_id: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    "/founder/reject",
+    {
+      method: "POST",
+      body: JSON.stringify({ table, row_id }),
     },
     CORE_BASE
   );

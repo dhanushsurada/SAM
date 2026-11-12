@@ -5,6 +5,7 @@ import { FeatureStubPage } from "@/features/FeatureStubPage";
 import { DesignSystemPage } from "@/features/dev/DesignSystemPage";
 import { IqooPage } from "@/features/iqoo/IqooPage";
 import { ConnectPage } from "@/features/connect/ConnectPage";
+import { ProjectsPage } from "@/features/projects/ProjectsPage";
 import { CommandCenterPage } from "@/features/command-center/CommandCenterPage";
 import { ChatPage } from "@/features/chat/ChatPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
@@ -43,6 +44,7 @@ function FirstRunRedirect({ children }: { children: ReactNode }) {
 // not". Everything not listed here still renders FeatureStubPage.
 const BUILT_PAGES: Partial<Record<string, () => JSX.Element>> = {
   "/": CommandCenterPage,
+  "/projects": ProjectsPage,
   "/iqoo": IqooPage,
   "/connect": ConnectPage,
   "/chat": ChatPage,

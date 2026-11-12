@@ -14,6 +14,7 @@ import {
   FiKey,
   FiShield,
   FiBox,
+  FiFolder,
 } from "react-icons/fi";
 
 export type SamIcon = FC<{ className?: string; size?: number | string }>;
@@ -90,12 +91,12 @@ export const ROUTES: RouteMeta[] = [
     description: "How SAM acts on a computer: desktop control, vision, browser, terminal and verification.",
   },
   {
-    path: "/iqoo",
-    label: "iQOO Workspace",
-    icon: FiSmartphone,
+    path: "/projects",
+    label: "Projects & Folders",
+    icon: FiFolder,
     group: "workspaces",
     plannedStep: "Step 4",
-    description: "Phone to PC workflow: the gateway a phone sends tasks to, its health, and the demo controls.",
+    description: "Manage dedicated project folders, custom system prompts, and task context.",
   },
   {
     path: "/connect",
@@ -103,7 +104,15 @@ export const ROUTES: RouteMeta[] = [
     icon: FiSmartphone,
     group: "workspaces",
     plannedStep: "Agent 3 + Android",
-    description: "Pair and manage trusted devices and route supported device tasks.",
+    description: "Pair trusted mobile devices, set up Wi-Fi or USB tunnels, and troubleshoot phone connection.",
+  },
+  {
+    path: "/iqoo",
+    label: "Mobile Companion",
+    icon: FiSmartphone,
+    group: "workspaces",
+    plannedStep: "Step 4",
+    description: "Phone to PC workflow: task gateway status, execution streams, and health monitor.",
   },
   {
     path: "/memory",
