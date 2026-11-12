@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { FiMic, FiCopy, FiCheck, FiVolume2, FiVolumeX } from "react-icons/fi";
+import { FiMic, FiCopy, FiCheck, FiVolume2, FiVolumeX, FiThumbsUp, FiThumbsDown, FiX, FiSend } from "react-icons/fi";
 import { speechService } from "@/services/speech";
+import { submitTaskFeedback } from "@/api/client";
 import type { ChatMessage } from "./types";
 
 const ASSISTANT_TONE = {
@@ -13,6 +14,10 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [feedbackState, setFeedbackState] = useState<"idle" | "negative-open" | "submitted">("idle");
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackResult, setFeedbackResult] = useState<string | null>(null);
 
   const handleCopy = async () => {
     try {
@@ -21,6 +26,21 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // ignore
+    }
+  };
+
+  const handleFeedback = async (rating: "positive" | "negative", comment?: string) => {
+    if (!message.taskId || feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+    try {
+      await submitTaskFeedback(message.taskId, rating, comment);
+      setFeedbackResult(rating === "positive" ? "Path saved to Founder Mode ✓" : "Critique saved to Founder Mode ✓");
+      setFeedbackState("submitted");
+    } catch {
+      setFeedbackResult("Feedback recorded");
+      setFeedbackState("submitted");
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -73,7 +93,7 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
         {message.content}
 
         {/* Action icons row */}
-        <div className={`mt-1.5 flex items-center gap-2 pt-1 border-t ${isUser ? "border-ember-ink/20 text-ember-ink/80" : "border-line/60 text-mute"} text-xs opacity-75 group-hover:opacity-100 transition-opacity`}>
+        <div className={`mt-1.5 flex flex-wrap items-center gap-2 pt-1 border-t ${isUser ? "border-ember-ink/20 text-ember-ink/80" : "border-line/60 text-mute"} text-xs opacity-80 group-hover:opacity-100 transition-opacity`}>
           <button
             type="button"
             onClick={handleCopy}
@@ -96,12 +116,80 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
             </button>
           )}
 
+          {/* Minimal Optional Feedback System */}
+          {!isUser && message.taskId && feedbackState === "idle" && (
+            <div className="flex items-center gap-1 border-l border-line/60 pl-2">
+              <span className="text-[11px] text-mute mr-1">Feedback:</span>
+              <button
+                type="button"
+                onClick={() => void handleFeedback("positive")}
+                className="hover:text-emerald-500 p-0.5 transition-colors"
+                title="Good execution (reinforces this path in memory)"
+              >
+                <FiThumbsUp size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackState("negative-open")}
+                className="hover:text-rose-500 p-0.5 transition-colors"
+                title="Needs improvement (provide optional critique/advice)"
+              >
+                <FiThumbsDown size={12} />
+              </button>
+            </div>
+          )}
+
+          {feedbackResult && feedbackState === "submitted" && (
+            <span className="text-[10px] text-emerald-500 border-l border-line/60 pl-2 font-medium">
+              {feedbackResult}
+            </span>
+          )}
+
           {message.timestamp && (
             <span className="ml-auto text-[10px] opacity-60">
               {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
         </div>
+
+        {/* Expandable critique / advice form on negative feedback */}
+        {!isUser && feedbackState === "negative-open" && (
+          <div className="mt-2 pt-2 border-t border-line/60 text-xs space-y-1.5">
+            <p className="text-[11px] text-mute">What could SAM improve? (optional, can skip or close)</p>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                placeholder="e.g. execute in background, verify element..."
+                className="flex-1 bg-surface border border-line rounded px-2 py-1 text-xs text-ink placeholder:text-mute/60 focus:outline-none focus:border-ember"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleFeedback("negative", feedbackComment);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void handleFeedback("negative", feedbackComment)}
+                disabled={feedbackSubmitting}
+                className="px-2 py-1 bg-ember text-ember-ink rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-1"
+              >
+                <FiSend size={10} />
+                <span>Submit</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackState("idle")}
+                className="p-1 text-mute hover:text-ink transition-colors"
+                title="Dismiss"
+              >
+                <FiX size={12} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

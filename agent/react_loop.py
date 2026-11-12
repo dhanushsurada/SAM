@@ -827,7 +827,11 @@ class ReactLoop:
 
         elif action_type == "open_app":
             app = payload.get("app", "")
-            controller.open_app(app)
+            background = bool(payload.get("background", False))
+            controller.open_app(app, background=background)
+
+            if background:
+                return f"Opened: {app} in the background without stealing screen focus."
 
             # Phase 1 (Hands reliability): verify the app actually became
             # frontmost instead of trusting that issuing the AppleScript

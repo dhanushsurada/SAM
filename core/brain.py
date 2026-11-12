@@ -179,8 +179,36 @@ class Brain:
 
         logger.info(f"Sending to {model}...")
 
+        provider = getattr(self.settings, "model_provider", "ollama") or "ollama"
+        cloud_provider = None
+        cloud_model = model
+
+        if ":" in model and model.split(":")[0].lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+            cloud_provider, cloud_model = model.split(":", 1)
+        elif provider in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+            cloud_provider = provider
+
         try:
-            if on_token is not None:
+            if cloud_provider:
+                logger.info(f"Using Cloud LLM provider: {cloud_provider} (model: {cloud_model})")
+                from core.cloud_providers import call_cloud_chat
+                sys_prompt = next((m["content"] for m in messages if m.get("role") == "system"), "")
+                chat_messages = [m for m in messages if m.get("role") != "system"]
+                content = call_cloud_chat(
+                    provider=cloud_provider,
+                    model=cloud_model,
+                    messages=chat_messages,
+                    system_prompt=sys_prompt,
+                    temperature=self.settings.temperature,
+                    max_tokens=self.settings.max_tokens,
+                )
+                raw = {"message": {"content": content}}
+                if on_token is not None:
+                    try:
+                        on_token(content)
+                    except Exception:
+                        pass
+            elif on_token is not None:
                 # Streaming mode enabled
                 payload = {
                     "model": model,
@@ -283,7 +311,11 @@ class Brain:
 
         except Exception as e:
             logger.error(f"Brain processing error: {e}", exc_info=True)
-            return BrainResponse(text="I hit a problem processing that. Try again.")
+            err_str = str(e).strip()
+            clean_err = err_str if len(err_str) < 180 else err_str[:177] + "..."
+            return BrainResponse(
+                text=f"I ran into an issue while processing your request: {clean_err}. Please check logs or retry with clearer details."
+            )
 
     def _build_messages(self, session) -> list:
         """Build the full message list for the LLM."""

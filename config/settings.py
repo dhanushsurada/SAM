@@ -66,6 +66,7 @@ class Settings:
 
     # Brain
     ollama_host: str = "http://localhost:11434"
+    model_provider: str = "ollama"  # "ollama" | "groq" | "gemini" | "openai" | "anthropic" | "openrouter"
     primary_model: str = "qwen2.5:14b"
     fallback_model: str = "qwen2.5:7b"
     # True once the user has explicitly chosen primary_model (via

@@ -16,6 +16,8 @@ export interface ChatMessage {
   tone?: "default" | "danger" | "muted";
   /** A message the person spoke: content is what SAM heard. */
   via?: "voice";
+  /** ID of the underlying task, enabling feedback capture. */
+  taskId?: string;
 }
 
 export interface ChatConversation {

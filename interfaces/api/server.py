@@ -52,6 +52,13 @@ if _user_pkgs.exists():
     except Exception:
         pass
 
+_app_pkgs = Path("/Applications/SAM.app/Contents/Resources/sam-runtime/site-packages")
+if _app_pkgs.is_dir():
+    try:
+        site.addsitedir(str(_app_pkgs))
+    except Exception:
+        pass
+
 # When running inside packaged SAM.app bundle:
 _cur = Path(__file__).resolve().parent
 for _ in range(5):
@@ -80,7 +87,10 @@ from interfaces.api.gateway import (
 from interfaces.api.task_store import TERMINAL_STATUSES
 from interfaces.api.schemas import (
     TaskCreateRequest, TaskRecord, HealthStatus, BrainStatus, ModelSelectRequest, ModelPullRequest,
-    SpeechRequest,
+    SpeechRequest, TaskFeedbackRequest, ProviderKeyRequest,
+)
+from core.cloud_providers import (
+    get_providers_status, save_api_key, delete_api_key, get_model_update_notifications,
 )
 from mouth.tts import TextToSpeech, TTSDisabledError, TTSUnavailableError
 # agent/cross-device: /api/connect/* — device pairing, trust, capabilities
@@ -362,6 +372,32 @@ def retry_task(task_id: str):
     return gateway.get_task(new_id)
 
 
+@app.post("/api/iqoo/tasks/{task_id}/feedback", dependencies=[Depends(require_task_auth)])
+def submit_task_feedback(task_id: str, req: TaskFeedbackRequest):
+    """Minimal, non-mandatory feedback endpoint for completed/failed tasks.
+    Reinforces effective paths in Founder Mode on positive rating, or logs
+    critiques/rejections to prevent repeating mistakes on negative rating."""
+    gateway = get_gateway()
+    task = gateway.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    instruction = task.get("instruction") or "Task"
+    if req.rating == "positive":
+        gateway.founder_mode.capture_decision(
+            decision=f"Confirmed effective path for task: {instruction}",
+            reasoning=req.comment or "User confirmed task execution was correct.",
+            category="task_success",
+        )
+    else:
+        gateway.founder_mode.capture_rejection(
+            what_was_rejected=f"Flawed task execution for: {instruction}",
+            why=req.comment or "User gave negative feedback on execution path.",
+            category="task_correction",
+        )
+    return {"ok": True, "feedback_recorded": True, "rating": req.rating}
+
+
 def _format_sse(event: dict) -> str:
     """Standard SSE framing, including `id:` — this is what makes the
     browser's native EventSource send a Last-Event-ID header
@@ -488,6 +524,32 @@ def select_model(req: ModelSelectRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except ModelManagerError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models/providers", dependencies=[Depends(require_local_caller)])
+def list_providers():
+    """List available Cloud LLM providers and their configuration status."""
+    return {"providers": get_providers_status()}
+
+
+@app.post("/api/models/keys", dependencies=[Depends(require_local_caller)])
+def store_provider_key(req: ProviderKeyRequest):
+    """Securely store an API key for a Cloud LLM provider (Groq, Gemini, OpenAI, Claude, OpenRouter)."""
+    save_api_key(req.provider, req.api_key)
+    return {"ok": True, "provider": req.provider}
+
+
+@app.delete("/api/models/keys/{provider}", dependencies=[Depends(require_local_caller)])
+def remove_provider_key(provider: str):
+    """Delete an API key for a Cloud LLM provider."""
+    success = delete_api_key(provider)
+    return {"ok": success}
+
+
+@app.get("/api/models/updates", dependencies=[Depends(require_local_caller)])
+def model_updates():
+    """Get latest model release and upgrade recommendations."""
+    return {"notifications": get_model_update_notifications()}
 
 
 async def _next_from_sync_gen(gen):

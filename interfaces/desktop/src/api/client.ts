@@ -201,3 +201,75 @@ export function subscribeToTaskEvents(
     source?.close();
   };
 }
+
+export interface CloudModel {
+  id: string;
+  name: string;
+  context: number;
+  fast: boolean;
+}
+
+export interface CloudProvider {
+  id: string;
+  name: string;
+  description: string;
+  configured: boolean;
+  masked_key: string;
+  default_model: string;
+  models: CloudModel[];
+}
+
+export interface ModelNotification {
+  id: string;
+  title: string;
+  provider: string;
+  model: string;
+  description: string;
+  badge: string;
+  action_url: string | null;
+  configured: boolean;
+  type: string;
+}
+
+export function submitTaskFeedback(
+  taskId: string,
+  rating: "positive" | "negative",
+  comment?: string
+): Promise<{ ok: boolean; feedback_recorded: boolean; rating: string }> {
+  return request<{ ok: boolean; feedback_recorded: boolean; rating: string }>(
+    `/tasks/${encodeURIComponent(taskId)}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify({ rating, comment: comment || "" }),
+    }
+  );
+}
+
+export function getCloudProviders(): Promise<{ providers: CloudProvider[] }> {
+  return request<{ providers: CloudProvider[] }>("/models/providers", undefined, CORE_BASE);
+}
+
+export function saveProviderKey(provider: string, apiKey: string): Promise<{ ok: boolean; provider: string }> {
+  return request<{ ok: boolean; provider: string }>(
+    "/models/keys",
+    {
+      method: "POST",
+      body: JSON.stringify({ provider, api_key: apiKey }),
+    },
+    CORE_BASE
+  );
+}
+
+export function deleteProviderKey(provider: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/models/keys/${encodeURIComponent(provider)}`,
+    {
+      method: "DELETE",
+    },
+    CORE_BASE
+  );
+}
+
+export function getModelUpdates(): Promise<{ notifications: ModelNotification[] }> {
+  return request<{ notifications: ModelNotification[] }>("/models/updates", undefined, CORE_BASE);
+}

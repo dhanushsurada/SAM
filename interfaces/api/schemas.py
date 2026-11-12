@@ -166,3 +166,13 @@ class ModelSelectRequest(BaseModel):
 class ModelPullRequest(BaseModel):
     """Model identifier for the streaming Ollama pull endpoint."""
     model: str = Field(..., min_length=1, max_length=200)
+
+
+class TaskFeedbackRequest(BaseModel):
+    rating: Literal["positive", "negative"]
+    comment: Optional[str] = ""
+
+
+class ProviderKeyRequest(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=50)
+    api_key: str = Field(..., min_length=1, max_length=500)

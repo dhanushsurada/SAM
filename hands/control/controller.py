@@ -306,9 +306,11 @@ class ComputerController:
 
     # ─── App Control ──────────────────────────────────────────────────────
 
-    def open_app(self, app_name: str):
+    def open_app(self, app_name: str, background: bool = False):
         """
         Open an application — cross-platform.
+        When `background` is True on macOS, launches using `open -g -a` without
+        stealing focus from the user's active window.
 
         Reform 5 (Hands reliability, Phase 3): on macOS, `tell
         application "{app_name}" to activate` only resolves if app_name
@@ -337,16 +339,28 @@ class ComputerController:
         failure.
         """
         if IS_MAC:
-            self._open_app_mac(app_name)
+            self._open_app_mac(app_name, background=background)
         elif IS_WIN:
             self._win_open_app(app_name)
-        logger.info(f"Opened app: {app_name}")
+        logger.info(f"Opened app: {app_name}{' (background)' if background else ''}")
 
-    def _open_app_mac(self, app_name: str):
+    def _open_app_mac(self, app_name: str, background: bool = False):
         safe_name = _escape_applescript_string(app_name)
         tried = [app_name]
+
+        if background:
+            try:
+                res = subprocess.run(["open", "-g", "-a", app_name], capture_output=True, text=True)
+                if res.returncode == 0:
+                    return
+            except Exception:
+                pass
+            cmd = f'tell application "{safe_name}" to launch'
+        else:
+            cmd = f'tell application "{safe_name}" to activate'
+
         try:
-            self._applescript(f'tell application "{safe_name}" to activate')
+            self._applescript(cmd)
             return
         except RuntimeError:
             pass
@@ -356,8 +370,19 @@ class ComputerController:
                 continue
             tried.append(candidate)
             try:
-                safe_candidate = _escape_applescript_string(candidate)
-                self._applescript(f'tell application "{safe_candidate}" to activate')
+                if background:
+                    try:
+                        res = subprocess.run(["open", "-g", "-a", candidate], capture_output=True, text=True)
+                        if res.returncode == 0:
+                            logger.info(f"Resolved app name '{app_name}' -> '{candidate}' (background)")
+                            return
+                    except Exception:
+                        pass
+                    safe_candidate = _escape_applescript_string(candidate)
+                    self._applescript(f'tell application "{safe_candidate}" to launch')
+                else:
+                    safe_candidate = _escape_applescript_string(candidate)
+                    self._applescript(f'tell application "{safe_candidate}" to activate')
                 logger.info(f"Resolved app name '{app_name}' -> '{candidate}'")
                 return
             except RuntimeError:

@@ -423,8 +423,17 @@ class ModelManager:
         normal state to show, not a server fault."""
         s = self.settings
         last_used = getattr(self.brain, "_current_model", None) if self.brain is not None else None
+
+        is_cloud = (
+            (":" in str(s.primary_model) and str(s.primary_model).split(":", 1)[0].lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"))
+            or (getattr(s, "model_provider", "ollama") in ("groq", "gemini", "openai", "anthropic", "openrouter"))
+        )
+        provider = getattr(s, "model_provider", "ollama") or "ollama"
+        if ":" in str(s.primary_model) and str(s.primary_model).split(":", 1)[0].lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+            provider = str(s.primary_model).split(":", 1)[0].lower()
+
         out = {
-            "provider": PROVIDER,
+            "provider": provider,
             "ollama_host": str(s.ollama_host),
             "selected_model": s.primary_model,
             "fallback_model": s.fallback_model,
@@ -435,8 +444,16 @@ class ModelManager:
         try:
             models = self.list_models()
         except OllamaUnavailableError as e:
+            if is_cloud:
+                return {**out, "status": "ready", "detail": f"Operating with Cloud Provider: {provider.capitalize()}",
+                        "active_model": s.primary_model, "active_source": "selected", "models": []}
             return {**out, "status": "unavailable", "detail": str(e),
                     "active_model": None, "active_source": None, "models": []}
+
+        if is_cloud:
+            return {**out, "status": "ready", "detail": f"Operating with Cloud Provider: {provider.capitalize()}",
+                    "active_model": s.primary_model, "active_source": "selected",
+                    "models": [m.to_dict() for m in models]}
 
         active = next((m.name for m in models if m.is_active), None)
         detail = None
@@ -465,6 +482,22 @@ class ModelManager:
         OllamaUnavailableError, ModelNotInstalledError, ModelMetadataError or
         ModelIncompatibleError -- never selects on a guess."""
         requested = (requested or "").strip()
+
+        # Handle Cloud LLM selection (e.g. groq:llama-3.3-70b-versatile, gemini:gemini-2.0-flash, etc.)
+        if ":" in requested:
+            prefix, model_name = requested.split(":", 1)
+            if prefix.lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+                from core.cloud_providers import load_api_keys, SUPPORTED_PROVIDERS
+                if prefix.lower() not in SUPPORTED_PROVIDERS:
+                    raise ModelIncompatibleError(f"Unsupported cloud provider: '{prefix}'")
+                keys = load_api_keys()
+                if not keys.get(prefix.lower()):
+                    raise ModelIncompatibleError(
+                        f"No API key saved for {SUPPORTED_PROVIDERS[prefix.lower()]['name']}. "
+                        f"Please save an API key in Settings or Cloud Models before selecting it."
+                    )
+                return requested
+
         tags = self._fetch_tags()
         installed = [self._tag_name(t) for t in tags]
         name = resolve_installed_name(requested, installed)
@@ -487,7 +520,13 @@ class ModelManager:
         if name == self.settings.primary_model and self.settings.model_explicitly_set:
             return
         try:
-            self.settings.apply_model_choice(primary=name)
+            if ":" in name and name.split(":", 1)[0].lower() in ("groq", "gemini", "openai", "anthropic", "openrouter"):
+                prefix = name.split(":", 1)[0].lower()
+                self.settings.model_provider = prefix
+                self.settings.apply_model_choice(primary=name)
+            else:
+                self.settings.model_provider = "ollama"
+                self.settings.apply_model_choice(primary=name)
         except Exception as e:
             raise ModelPersistError(f"Couldn't save the model choice: {e}") from e
         logger.info(f"Brain model selected: {name}")

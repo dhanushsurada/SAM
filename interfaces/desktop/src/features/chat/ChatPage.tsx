@@ -29,7 +29,12 @@ function isTerminal(status: string): boolean {
 }
 
 function replyFor(task: TaskRecord): ChatMessage | null {
-  const base = { id: `${task.task_id}-reply`, role: "assistant" as const, timestamp: task.updated_at };
+  const base = {
+    id: `${task.task_id}-reply`,
+    role: "assistant" as const,
+    timestamp: task.updated_at,
+    taskId: task.task_id,
+  };
   if (task.status === "completed") {
     return { ...base, content: task.result_text || "Done.", tone: "default" };
   }

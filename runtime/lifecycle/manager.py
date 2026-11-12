@@ -37,6 +37,13 @@ if _user_pkgs.exists():
     except Exception:
         pass
 
+_app_pkgs = Path("/Applications/SAM.app/Contents/Resources/sam-runtime/site-packages")
+if _app_pkgs.is_dir():
+    try:
+        site.addsitedir(str(_app_pkgs))
+    except Exception:
+        pass
+
 from runtime.health.status import RuntimeStatus, compute_health, compute_status
 from runtime.lifecycle.specs import ProcessSpec, default_specs
 from runtime.lifecycle.state import (
@@ -180,6 +187,9 @@ class SAMRuntime:
             _user_pkgs = Path.home() / ".sam_data" / "python-packages"
             if _user_pkgs.exists():
                 py_paths.append(str(_user_pkgs))
+            _app_pkgs = Path("/Applications/SAM.app/Contents/Resources/sam-runtime/site-packages")
+            if _app_pkgs.is_dir():
+                py_paths.append(str(_app_pkgs))
             existing_py_path = proc_env.get("PYTHONPATH", "")
             if existing_py_path:
                 py_paths.append(existing_py_path)
