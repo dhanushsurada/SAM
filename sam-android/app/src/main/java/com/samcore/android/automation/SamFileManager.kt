@@ -12,10 +12,22 @@ import java.security.MessageDigest
  * Handles scoped storage and received file operations.
  * Complies with Android 11+ scoped storage requirements (no broad MANAGE_EXTERNAL_STORAGE).
  */
-open class SamFileManager(protected val context: Context?) {
+open class SamFileManager(protected val context: Context? = null) {
 
     protected open val downloadsDir: File
-        get() = context?.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context?.filesDir ?: File(System.getProperty("java.io.tmpdir", "/tmp"))
+        get() {
+            val dir = try {
+                context?.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: context?.filesDir
+                    ?: File(System.getProperty("java.io.tmpdir") ?: "/tmp", "sam_downloads")
+            } catch (_: Throwable) {
+                File(System.getProperty("java.io.tmpdir") ?: "/tmp", "sam_downloads")
+            }
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            return dir
+        }
 
     open fun saveReceivedFile(filename: String, bytes: ByteArray, expectedSha256: String? = null): FileResult {
         return try {
@@ -33,7 +45,7 @@ open class SamFileManager(protected val context: Context?) {
                 )
             }
 
-            Log.i(TAG, "Saved file ${targetFile.name} (${bytes.size} bytes) to ${targetFile.absolutePath}")
+            safeLogInfo("Saved file ${targetFile.name} (${bytes.size} bytes) to ${targetFile.absolutePath}")
             FileResult(
                 success = true,
                 filePath = targetFile.absolutePath,
@@ -41,18 +53,19 @@ open class SamFileManager(protected val context: Context?) {
                 sha256 = actualSha256
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save file: ${e.message}")
-            FileResult(success = false, error = e.message)
+            val err = e.message ?: "Failed to save file: ${e::class.simpleName}"
+            safeLogError("Failed to save file: $err", e)
+            FileResult(success = false, error = err)
         }
     }
 
-    fun readFileBytes(filename: String): ByteArray? {
+    open fun readFileBytes(filename: String): ByteArray? {
         val target = File(downloadsDir, filename)
         if (!target.exists() || !target.isFile) return null
         return target.readBytes()
     }
 
-    fun listReceivedFiles(): List<FileInfo> {
+    open fun listReceivedFiles(): List<FileInfo> {
         val files = downloadsDir.listFiles() ?: return emptyList()
         return files.filter { it.isFile }.map {
             FileInfo(
@@ -64,7 +77,13 @@ open class SamFileManager(protected val context: Context?) {
         }
     }
 
-    private fun computeSha256(file: File): String {
+    open fun computeSha256(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(bytes)
+        return hash.joinToString("") { "%02x".format(it) }
+    }
+
+    open fun computeSha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { fis ->
             val buffer = ByteArray(8192)
@@ -74,6 +93,22 @@ open class SamFileManager(protected val context: Context?) {
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun safeLogInfo(msg: String) {
+        try {
+            Log.i(TAG, msg)
+        } catch (_: Throwable) {
+            println("[$TAG] $msg")
+        }
+    }
+
+    private fun safeLogError(msg: String, err: Throwable? = null) {
+        try {
+            Log.e(TAG, msg, err)
+        } catch (_: Throwable) {
+            System.err.println("[$TAG] $msg: ${err?.message}")
+        }
     }
 
     companion object {

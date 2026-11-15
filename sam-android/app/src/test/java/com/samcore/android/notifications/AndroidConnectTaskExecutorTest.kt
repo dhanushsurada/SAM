@@ -14,6 +14,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 import java.util.Base64
 
 class AndroidConnectTaskExecutorTest {
@@ -87,7 +88,7 @@ class AndroidConnectTaskExecutorTest {
         val result = executor.execute(task)
 
         assertTrue(result is TransportResult.Failure)
-        assertEquals("Network timeout on ACK", (result as TransportResult.Failure).error)
+        assertEquals("Network timeout on ACK", (result as TransportResult.Failure).message)
         assertEquals(listOf(task.taskId), transport.acknowledgedTasks)
         assertTrue(transport.completedTasks.isEmpty())
         assertTrue(transport.failedTasks.isEmpty())
@@ -341,6 +342,38 @@ class AndroidConnectTaskExecutorTest {
 
         assertEquals(1, transport.failedTasks.size)
         assertTrue(transport.failedTasks[0].second.contains("Checksum mismatch"))
+    }
+
+    @Test
+    fun execute_receiveFile_withRealFileManager_calculatesSha256AndSavesToDisk() = runBlocking {
+        val transport = FakeSamTransport()
+        transport.connectTaskUpdateResult = TransportResult.Success(createTask(AndroidConnectTaskExecutor.ACTION_RECEIVE_FILE))
+        val realFileManager = SamFileManager(context = null)
+        val executor = AndroidConnectTaskExecutor(context = null, transport = transport, fileManager = realFileManager)
+
+        val rawText = "Verified end-to-end payload for executor file reception"
+        val rawBytes = rawText.toByteArray(Charsets.UTF_8)
+        val calculatedSha = realFileManager.computeSha256(rawBytes)
+        val base64Data = Base64.getEncoder().encodeToString(rawBytes)
+
+        val task = createTask(AndroidConnectTaskExecutor.ACTION_RECEIVE_FILE, buildJsonObject {
+            put("filename", "real_file_test.txt")
+            put("data", base64Data)
+            put("sha256", calculatedSha)
+        })
+        val result = executor.execute(task)
+
+        assertTrue(result is TransportResult.Success)
+        assertEquals(1, transport.completedTasks.size)
+        val payload = transport.completedTasks[0].second
+        assertEquals(JsonPrimitive(true), payload!!["saved"])
+        assertEquals(JsonPrimitive(calculatedSha), payload["sha256"])
+
+        // Clean up written file
+        val writtenPath = (payload["path"] as? JsonPrimitive)?.content
+        if (writtenPath != null) {
+            File(writtenPath).delete()
+        }
     }
 
     @Test
