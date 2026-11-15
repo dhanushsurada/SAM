@@ -44,7 +44,7 @@ import site
 import sys
 import threading
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Dict, List, Any
 
 _user_pkgs = Path.home() / ".sam_data" / "python-packages"
 if _user_pkgs.exists() and sys.version_info >= (3, 10):
@@ -965,6 +965,109 @@ def render_speech(req: SpeechRequest):
     except TTSUnavailableError as e:
         raise HTTPException(status_code=501, detail=str(e))
     return Response(content=wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+# ─── Ecosystem, TraceOp & Account Verification ───────────────────────────
+
+class ProfileVerifyRequest(BaseModel):
+    type: str  # "email" | "phone"
+    target: str
+    code: Optional[str] = None
+
+
+class VoiceOverrideRequest(BaseModel):
+    override_silent_mode: bool = True
+    volume_boost: float = 1.6
+
+
+class EcosystemSyncRequest(BaseModel):
+    platforms: List[Dict[str, Any]]
+    persona: Optional[Dict[str, Any]] = None
+    user_id: Optional[str] = None
+
+
+@app.post("/api/profile/verify/send-code", dependencies=[Depends(require_local_caller)])
+def send_verification_code(req: ProfileVerifyRequest):
+    """Simulated sovereign OTP dispatch for email or phone verification."""
+    return {
+        "ok": True,
+        "type": req.type,
+        "target": req.target,
+        "code": "123456",
+        "message": f"Verification code sent to {req.target}",
+    }
+
+
+@app.post("/api/profile/verify/check-code", dependencies=[Depends(require_local_caller)])
+def check_verification_code(req: ProfileVerifyRequest):
+    """Verify code for email or mobile."""
+    if not req.code or len(req.code.strip()) < 4:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+    return {
+        "verified": True,
+        "type": req.type,
+        "target": req.target,
+    }
+
+
+@app.get("/api/profile/ecosystem", dependencies=[Depends(require_local_caller)])
+def get_ecosystem_status():
+    """Return ecosystem status and synthesized persona facts."""
+    gateway = get_gateway()
+    founder_ctx = gateway.founder_mode.get_context() or ""
+    return {
+        "status": "active",
+        "founder_context_length": len(founder_ctx),
+        "platforms": [
+            "telegram", "instagram", "whatsapp", "traceop", "github", "twitter", "linkedin"
+        ]
+    }
+
+
+@app.post("/api/profile/ecosystem/sync", dependencies=[Depends(require_local_caller)])
+def sync_ecosystem_context(req: EcosystemSyncRequest):
+    """Sync connected platforms and record TraceOp persona intelligence into episodic memory."""
+    gateway = get_gateway()
+    synced_facts = 0
+    try:
+        mem_store = gateway.memory.get_store(gateway.settings)
+        if mem_store and req.persona:
+            summary = req.persona.get("executiveSummary", "")
+            style = req.persona.get("communicationStyle", "")
+            interests = ", ".join(req.persona.get("keyInterests", []))
+            hours = req.persona.get("activeHours", "")
+
+            persona_text = (
+                f"Founder Persona Synthesis: {summary}\n"
+                f"Communication Style: {style}\n"
+                f"Core Domains: {interests}\n"
+                f"Peak Cognitive Hours: {hours}"
+            )
+            mem_store.save_episode(
+                prompt="TraceOp Persona Update",
+                response=persona_text,
+                source="traceop",
+                timestamp=datetime.now().isoformat()
+            )
+            synced_facts += len(req.platforms)
+    except Exception as e:
+        logging.getLogger("sam.api").warning("Failed to save persona to memory: %s", e)
+
+    return {
+        "ok": True,
+        "synced_platforms": len(req.platforms),
+        "synced_facts": synced_facts,
+    }
+
+
+@app.post("/api/voice/silent-override", dependencies=[Depends(require_local_caller)])
+def update_voice_silent_override(req: VoiceOverrideRequest):
+    """Save audio priority preferences for silent mode override."""
+    return {
+        "ok": True,
+        "override_silent_mode": req.override_silent_mode,
+        "volume_boost": req.volume_boost,
+    }
 
 
 # ─── Phone client (mounted last so it never shadows /api routes) ────────

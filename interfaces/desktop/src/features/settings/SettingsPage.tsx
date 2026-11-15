@@ -9,8 +9,9 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { isNative, launchAtLoginEnabled, setLaunchAtLogin, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
 import { getSettings, updateSettings } from "@/api/client";
 import { useProfile } from "@/features/profile/ProfileContext";
+import { useVoice } from "@/features/voice/VoiceProvider";
 import { ThemePicker } from "@/features/theme/ThemePicker";
-import { FiShield, FiLogOut, FiLogIn, FiEdit3 } from "react-icons/fi";
+import { FiShield, FiLogOut, FiLogIn, FiEdit3, FiVolume2, FiCpu, FiPlay } from "react-icons/fi";
 
 type FormState = Record<string, string | number | boolean>;
 
@@ -124,6 +125,8 @@ export function SettingsPage() {
   useRuntimePolling();
 
   const { profile, isSignedIn, openProfileModal, openSignInModal, signOut } = useProfile();
+  const { audioConfig, setAudioConfig, speak } = useVoice();
+  const [testingVoice, setTestingVoice] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -244,7 +247,16 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openProfileModal("ecosystem")}
+              className="flex items-center gap-1"
+            >
+              <FiCpu size={12} className="text-ember" />
+              Ecosystem & TraceOp ({profile.connectedPlatforms?.filter((p) => p.connected).length || 0})
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -283,6 +295,86 @@ export function SettingsPage() {
             "{profile.bio}"
           </p>
         )}
+      </Card>
+
+      {/* Voice Priority & Silent Mode Override Section */}
+      <Card as="section" className="p-4 sm:p-5 space-y-3.5">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-ink flex items-center gap-1.5">
+                <FiVolume2 size={16} className="text-ember" />
+                Voice Priority Audio & Silent Mode Override
+              </h2>
+              {audioConfig.overrideSilentMode && (
+                <span className="rounded bg-ember/15 border border-ember/30 px-2 py-0.5 text-[10px] font-semibold text-ember-text uppercase tracking-wide">
+                  Active
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-mute mt-0.5">
+              Allows SAM's voice to remain audible even when the system master or media volumes are kept low or silent.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              setTestingVoice(true);
+              try {
+                await speak("SAM voice override is active and audible.");
+              } finally {
+                setTestingVoice(false);
+              }
+            }}
+            disabled={testingVoice}
+            className="flex items-center gap-1 text-xs"
+          >
+            <FiPlay size={12} className="text-ember" />
+            {testingVoice ? "Testing..." : "Test Voice"}
+          </Button>
+        </div>
+
+        <div className="rounded-xl border border-line/60 bg-void/50 p-3.5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-ink">Audible in Silent / Low Volume Mode</p>
+              <p className="text-[11px] text-mute">
+                Boosts digital gain amplification node so speech cuts through low speaker levels.
+              </p>
+            </div>
+            <Switch
+              checked={audioConfig.overrideSilentMode}
+              onChange={(on) => setAudioConfig({ overrideSilentMode: on })}
+              label="Audible in Silent Mode"
+            />
+          </div>
+
+          {audioConfig.overrideSilentMode && (
+            <div className="border-t border-line/40 pt-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-mute font-medium">Digital Gain Amplification Boost</span>
+                <span className="font-mono text-ink font-semibold">
+                  {audioConfig.volumeBoost.toFixed(1)}x (+{Math.round(20 * Math.log10(audioConfig.volumeBoost))} dB)
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1.0"
+                max="2.5"
+                step="0.1"
+                value={audioConfig.volumeBoost}
+                onChange={(e) => setAudioConfig({ volumeBoost: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-line/80 rounded-lg appearance-none cursor-pointer accent-ember"
+              />
+              <div className="flex justify-between text-[10px] text-mute">
+                <span>1.0x (Standard)</span>
+                <span>1.6x (Recommended default)</span>
+                <span>2.5x (Maximum amplification)</span>
+              </div>
+            </div>
+          )}
+        </div>
       </Card>
 
       {/* Appearance & Color Presets Section */}

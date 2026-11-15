@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { FiCheck, FiX, FiPlus } from "react-icons/fi";
+import { FiCheck, FiX, FiPlus, FiCpu } from "react-icons/fi";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import { useProfile } from "@/features/profile/ProfileContext";
 import {
   getFounderDecisions,
   getFounderTaste,
@@ -17,6 +18,7 @@ import {
 } from "@/api/client";
 
 export function FounderModePage() {
+  const { openProfileModal } = useProfile();
   const [decisions, setDecisions] = useState<FounderDecision[]>([]);
   const [taste, setTaste] = useState<FounderTasteItem[]>([]);
   const [pending, setPending] = useState<FounderPendingCapture[]>([]);
@@ -102,6 +104,29 @@ export function FounderModePage() {
         />
         <Button variant="primary" size="sm" onClick={() => setShowAddModal(!showAddModal)}>
           <FiPlus size={14} /> Add Taste / Rule
+        </Button>
+      </div>
+
+      {/* TraceOp Ecosystem Integration Card */}
+      <div className="rounded-xl border border-ember/30 bg-gradient-to-r from-ember/15 via-surface/60 to-surface p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-panel">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface border border-ember/40 text-ember-text shadow-xs">
+            <FiCpu size={16} />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-ink">TraceOp Persona Intelligence & Ecosystem</p>
+            <p className="text-[11px] text-mute">
+              Synthesized behavioral context from Telegram, WhatsApp, Instagram, and social accounts.
+            </p>
+          </div>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => openProfileModal("ecosystem")}
+          className="shrink-0 text-xs"
+        >
+          Manage Ecosystem
         </Button>
       </div>
 

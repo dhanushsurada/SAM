@@ -1,7 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAudioPlayer } from "./player.ts";
-import type { AudioContextLike, SourceLike } from "./player.ts";
+import { createAudioPlayer, getVoiceAudioConfig, setVoiceAudioConfig } from "./player.ts";
+import type { AudioContextLike, GainNodeLike, SourceLike } from "./player.ts";
+
+class FakeGain implements GainNodeLike {
+  gain = { value: 1.0 };
+  connected: unknown[] = [];
+  connect(destination: unknown) {
+    this.connected.push(destination);
+    return destination;
+  }
+}
 
 class FakeSource implements SourceLike {
   buffer: unknown = null;
@@ -34,6 +43,9 @@ class FakeContext implements AudioContextLike {
   decoded: ArrayBuffer[] = [];
   gate: Promise<void> | null = null;
   failDecode = false;
+  gains: FakeGain[] = [];
+  enableGain = false;
+
   async resume() {
     this.resumes++;
     this.state = "running";
@@ -48,6 +60,12 @@ class FakeContext implements AudioContextLike {
     const source = new FakeSource();
     this.sources.push(source);
     return source;
+  }
+  createGain?() {
+    if (!this.enableGain) return undefined as unknown as GainNodeLike;
+    const gain = new FakeGain();
+    this.gains.push(gain);
+    return gain;
   }
 }
 
@@ -167,5 +185,47 @@ test("stop with nothing playing, or a source that refuses to stop, is harmless",
   await tick();
   ctx.sources[0].throwOnStop = true;
   player.stop();
+  await playing;
+});
+
+test("voice audio config defaults and updates correctly", () => {
+  setVoiceAudioConfig({ overrideSilentMode: true, volumeBoost: 1.8 });
+  const cfg = getVoiceAudioConfig();
+  assert.equal(cfg.overrideSilentMode, true);
+  assert.equal(cfg.volumeBoost, 1.8);
+});
+
+test("routes audio through GainNode when overrideSilentMode is enabled", async () => {
+  const ctx = new FakeContext();
+  ctx.enableGain = true;
+  const player = createAudioPlayer(() => ctx);
+  player.configureAudio({ overrideSilentMode: true, volumeBoost: 2.2 });
+
+  const playing = player.play(audio(16));
+  await tick();
+
+  assert.equal(ctx.gains.length, 1);
+  const gain = ctx.gains[0];
+  assert.equal(gain.gain.value, 2.2);
+  assert.deepEqual(gain.connected, [ctx.destination]);
+  assert.deepEqual(ctx.sources[0].connected, [gain]);
+
+  ctx.sources[0].end();
+  await playing;
+});
+
+test("bypasses GainNode and connects directly to destination when overrideSilentMode is disabled", async () => {
+  const ctx = new FakeContext();
+  ctx.enableGain = true;
+  const player = createAudioPlayer(() => ctx);
+  player.configureAudio({ overrideSilentMode: false, volumeBoost: 1.0 });
+
+  const playing = player.play(audio(16));
+  await tick();
+
+  assert.equal(ctx.gains.length, 0);
+  assert.deepEqual(ctx.sources[0].connected, [ctx.destination]);
+
+  ctx.sources[0].end();
   await playing;
 });

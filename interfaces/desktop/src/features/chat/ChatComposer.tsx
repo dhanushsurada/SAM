@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
-import { VoiceMicButton, VoiceSpeakToggle } from "@/features/voice/VoiceControls";
+import { VoiceMicButton, VoiceSpeakToggle, VoiceAudioPriorityControl } from "@/features/voice/VoiceControls";
 
 export function ChatComposer({
   onSend,
@@ -37,6 +37,7 @@ export function ChatComposer({
         className="max-h-36 flex-1 resize-none bg-transparent px-2 py-1 text-sm text-ink placeholder:text-mute/60 focus:outline-none"
       />
       <div className="flex items-center gap-1">
+        <VoiceAudioPriorityControl />
         <VoiceSpeakToggle />
         <VoiceMicButton blockStart={disabled} />
         <Button

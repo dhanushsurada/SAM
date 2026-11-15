@@ -7,8 +7,9 @@
  * then start sounds whenever the reply arrives, and AudioBufferSourceNode
  * gives a Stop that works immediately.
  *
- * The context is injected so the logic (stop while decoding, stop while
- * playing, a second play replacing the first) is testable in Node.
+ * Dedicated Voice Gain & Silent Override:
+ * Allows SAM's voice to remain audible even when other system/media volumes
+ * are kept low or silent. Uses Web Audio GainNode to amplify speech levels.
  */
 
 export interface SourceLike {
@@ -19,12 +20,58 @@ export interface SourceLike {
   stop(): void;
 }
 
+export interface GainNodeLike {
+  gain: { value: number };
+  connect(destination: unknown): unknown;
+}
+
 export interface AudioContextLike {
   state: string;
   destination: unknown;
   resume(): Promise<void>;
   decodeAudioData(data: ArrayBuffer): Promise<unknown>;
   createBufferSource(): SourceLike;
+  createGain?(): GainNodeLike;
+}
+
+export interface VoiceAudioConfig {
+  /** When true, boosts SAM's audio output so speech remains audible in quiet/silent environments. */
+  overrideSilentMode: boolean;
+  /** Digital gain boost multiplier (1.0 = normal, 1.5 = +3.5dB, 2.0 = +6dB). Default: 1.6 */
+  volumeBoost: number;
+}
+
+const DEFAULT_AUDIO_CONFIG: VoiceAudioConfig = {
+  overrideSilentMode: true,
+  volumeBoost: 1.6,
+};
+
+let currentAudioConfig: VoiceAudioConfig = { ...DEFAULT_AUDIO_CONFIG };
+
+export function getVoiceAudioConfig(): VoiceAudioConfig {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("sam.voice_audio_config");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return { ...DEFAULT_AUDIO_CONFIG, ...parsed };
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return currentAudioConfig;
+}
+
+export function setVoiceAudioConfig(cfg: Partial<VoiceAudioConfig>): void {
+  currentAudioConfig = { ...getVoiceAudioConfig(), ...cfg };
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem("sam.voice_audio_config", JSON.stringify(currentAudioConfig));
+    } catch {
+      // fallback
+    }
+  }
 }
 
 export interface AudioPlayer {
@@ -35,6 +82,8 @@ export interface AudioPlayer {
   play(data: ArrayBuffer): Promise<void>;
   /** Silences whatever is playing, or about to play. */
   stop(): void;
+  /** Configure digital gain boost and silent mode override. */
+  configureAudio(cfg: Partial<VoiceAudioConfig>): void;
 }
 
 export function createAudioPlayer(makeContext: () => AudioContextLike | null): AudioPlayer {
@@ -68,6 +117,10 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
       if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
     },
 
+    configureAudio(cfg: Partial<VoiceAudioConfig>) {
+      setVoiceAudioConfig(cfg);
+    },
+
     async play(data) {
       const ctx = getContext();
       if (!ctx) throw new Error("Audio playback isn't available in this web view.");
@@ -81,7 +134,22 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
       await new Promise<void>((resolve) => {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(ctx.destination);
+
+        // Apply gain node when available to support silent mode override and digital boost
+        const config = getVoiceAudioConfig();
+        if (typeof ctx.createGain === "function" && config.overrideSilentMode) {
+          try {
+            const gain = ctx.createGain();
+            gain.gain.value = Math.max(0.5, Math.min(3.0, config.volumeBoost || 1.6));
+            source.connect(gain);
+            gain.connect(ctx.destination);
+          } catch {
+            source.connect(ctx.destination);
+          }
+        } else {
+          source.connect(ctx.destination);
+        }
+
         let done = false;
         const finish = () => {
           if (done) return;

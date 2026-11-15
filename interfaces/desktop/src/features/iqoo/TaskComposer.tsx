@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from "react
 import { FiImage, FiX, FiSend } from "react-icons/fi";
 import { Button } from "@/components/Button";
 import { fileToBase64Payload } from "@/lib/file";
-import { VoiceMicButton, VoiceSpeakToggle, VoiceStatusLine } from "@/features/voice/VoiceControls";
+import { VoiceMicButton, VoiceSpeakToggle, VoiceAudioPriorityControl, VoiceStatusLine } from "@/features/voice/VoiceControls";
 import type { TaskCreateRequest } from "@/api/types";
 
 // Mirrors multimodal/media_validation.py exactly (checked directly, not
@@ -122,6 +122,7 @@ export function TaskComposer({ onSubmit, submitting, presetText, onClearPreset }
           </label>
           <VoiceMicButton blockStart={submitting} />
           <VoiceSpeakToggle />
+          <VoiceAudioPriorityControl />
         </div>
         <div className="flex items-center gap-2.5">
           <span className="hidden sm:inline font-mono text-[10px] text-mute/60">

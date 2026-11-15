@@ -4,8 +4,8 @@ import { TERMINAL_PHASES } from "@/api/types";
 import { blobToBase64 } from "@/lib/file";
 import { speechService } from "@/services/speech";
 import { useTaskSession } from "@/stores/taskSession";
-import { createAudioPlayer } from "./player";
-import type { AudioContextLike } from "./player";
+import { createAudioPlayer, getVoiceAudioConfig, setVoiceAudioConfig } from "./player";
+import type { AudioContextLike, VoiceAudioConfig } from "./player";
 import { startRecording } from "./recorder";
 import type { RecorderCtor, RecorderDeps } from "./recorder";
 import { speakReply } from "./speak";
@@ -118,6 +118,9 @@ export interface VoiceValue {
   dismissError: () => void;
   speakReplies: boolean;
   setSpeakReplies: (on: boolean) => void;
+  /** Digital audio boost & silent mode override configuration */
+  audioConfig: VoiceAudioConfig;
+  setAudioConfig: (cfg: Partial<VoiceAudioConfig>) => void;
   /** Explicitly speak a text snippet out loud using SAM's voice */
   speak: (text: string) => Promise<void>;
   /** A quiet, one-off message that is not an error; null when there is none. */
@@ -130,6 +133,7 @@ const VoiceContext = createContext<VoiceValue | null>(null);
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const { sessionTasks, events, health, submitTask, cancelTask } = useTaskSession();
   const [speakReplies, setSpeakRepliesState] = useState<boolean>(readSpeakReplies);
+  const [audioConfig, setAudioConfigState] = useState<VoiceAudioConfig>(getVoiceAudioConfig);
   const [notice, setNotice] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
   const shownNotices = useRef(new Set<string>());
@@ -245,6 +249,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     writeSpeakReplies(on);
   }, []);
 
+  const setAudioConfig = useCallback(
+    (cfg: Partial<VoiceAudioConfig>) => {
+      setVoiceAudioConfig(cfg);
+      const updated = getVoiceAudioConfig();
+      setAudioConfigState(updated);
+      player.configureAudio(updated);
+    },
+    [player],
+  );
+
   const speakText = useCallback(
     async (text: string) => {
       if (!text || !text.trim()) return;
@@ -291,11 +305,26 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       dismissError: controller.dismissError,
       speakReplies,
       setSpeakReplies,
+      audioConfig,
+      setAudioConfig,
       speak: speakText,
       notice,
       dismissNotice: () => setNotice(null),
     }),
-    [state, unavailableReason, phase, taskMessage, slow, controller, speakReplies, setSpeakReplies, speakText, notice],
+    [
+      state,
+      unavailableReason,
+      phase,
+      taskMessage,
+      slow,
+      controller,
+      speakReplies,
+      setSpeakReplies,
+      audioConfig,
+      setAudioConfig,
+      speakText,
+      notice,
+    ],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

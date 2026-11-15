@@ -1,4 +1,4 @@
-import { FiLogOut, FiLogIn, FiSliders } from "react-icons/fi";
+import { FiLogOut, FiLogIn, FiSliders, FiActivity } from "react-icons/fi";
 import { useProfile } from "./ProfileContext";
 
 export function SidebarProfile() {
@@ -63,6 +63,15 @@ export function SidebarProfile() {
         </button>
 
         <div className="flex items-center gap-1 pl-1">
+          <button
+            type="button"
+            onClick={() => openProfileModal("ecosystem")}
+            className="rounded-md p-1 text-mute hover:bg-void hover:text-ember-text transition-colors"
+            title="Connected Ecosystem & TraceOp"
+            aria-label="Ecosystem & TraceOp"
+          >
+            <FiActivity size={13} />
+          </button>
           <button
             type="button"
             onClick={() => openProfileModal("appearance")}
