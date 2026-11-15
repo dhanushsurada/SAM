@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { ProfileModal } from "@/features/profile/ProfileModal";
+import { SignInModal } from "@/features/profile/SignInModal";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -33,6 +35,10 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {/* Global Modals */}
+      <ProfileModal />
+      <SignInModal />
     </div>
   );
 }

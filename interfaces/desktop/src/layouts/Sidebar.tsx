@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { GROUP_LABELS, ROUTES, type NavGroup } from "@/app/routes";
 import { NavItem } from "@/components/NavItem";
 import { useTaskSession } from "@/stores/taskSession";
+import { SidebarProfile } from "@/features/profile/SidebarProfile";
 import type { HealthStatus } from "@/api/types";
 
 type PulseVisual = { dotClass: string; textClass: string; label: string };
@@ -38,14 +39,14 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     <div className="flex h-full flex-col bg-void/60 backdrop-blur-xl">
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-line/40">
         <div className="flex items-center gap-2.5">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-ember/15 border border-ember/30 text-ember font-bold text-xs shadow-sm">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-surface border border-line/80 text-ink font-bold text-xs shadow-sm">
             S
             <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-ember" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-semibold tracking-tight text-ink">SAM</span>
-              <span className="rounded-md bg-surface border border-line/70 px-1.5 py-0.5 font-mono text-[9px] text-mute">2.0</span>
+              <span className="rounded-md bg-surface border border-line/70 px-1.5 py-0.5 font-mono text-[9px] text-mute">2.1.1</span>
             </div>
           </div>
         </div>
@@ -78,7 +79,8 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         })}
       </nav>
 
-      <div className="border-t border-line/60 p-3 space-y-1">
+      <div className="border-t border-line/60 p-3 space-y-2">
+        <SidebarProfile />
         <NavItem to={settingsRoute.path} label={settingsRoute.label} icon={settingsRoute.icon} onNavigate={onCloseMobile} />
         <div className="flex items-center justify-between px-2.5 py-1 text-[11px] text-mute">
           <Link

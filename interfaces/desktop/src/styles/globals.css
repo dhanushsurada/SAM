@@ -22,15 +22,15 @@
     overflow-x: hidden;
   }
 
-  /* Subtle ambient lighting effect at top of app */
+  /* Subtle ambient lighting effect at top of app — translucent minimal frosted glow */
   body::before {
     content: "";
     position: fixed;
-    top: -120px;
-    left: 20%;
-    right: 20%;
-    height: 340px;
-    background: radial-gradient(ellipse 65% 50% at 50% 0%, rgb(var(--sam-ember) / 0.08), transparent 70%);
+    top: -140px;
+    left: 15%;
+    right: 15%;
+    height: 380px;
+    background: radial-gradient(ellipse 65% 50% at 50% 0%, rgb(var(--sam-ember) / 0.05), transparent 75%);
     pointer-events: none;
     z-index: 0;
   }
@@ -59,8 +59,7 @@
     font-feature-settings: "zero", "ss01";
   }
 
-  /* Visible keyboard focus everywhere, styled rather than suppressed —
-     never `outline: none` without a replacement. */
+  /* Visible keyboard focus everywhere, styled rather than suppressed */
   :focus-visible {
     outline: 2px solid rgb(var(--sam-ember));
     outline-offset: 2px;
@@ -68,13 +67,53 @@
   }
 
   ::selection {
-    background: rgb(var(--sam-ember) / 0.28);
+    background: rgb(var(--sam-ember) / 0.22);
   }
 }
 
-/* Belt-and-suspenders reduced-motion: tokens.css zeroes the duration
-   variables already; this also collapses anything hard-coded outside them
-   (e.g. a third-party component's own CSS animation). */
+/* Glassmorphism & Translucent Minimal Utilities */
+@layer utilities {
+  .glass-panel {
+    background-color: rgb(var(--sam-surface) / 0.72);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--sam-line) / 0.6);
+  }
+
+  .glass-card {
+    background-color: rgb(var(--sam-surface) / 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgb(var(--sam-line) / 0.5);
+    transition: all var(--sam-motion-state) ease;
+  }
+
+  .glass-card:hover {
+    background-color: rgb(var(--sam-surface) / 0.75);
+    border-color: rgb(var(--sam-line) / 0.8);
+  }
+
+  .glass-pill {
+    background-color: rgb(var(--sam-surface) / 0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgb(var(--sam-line) / 0.5);
+  }
+
+  .glass-input {
+    background-color: rgb(var(--sam-void) / 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgb(var(--sam-line) / 0.7);
+  }
+
+  .glass-input:focus {
+    border-color: rgb(var(--sam-ember) / 0.6);
+    outline: none;
+  }
+}
+
+/* Belt-and-suspenders reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

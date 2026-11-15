@@ -1,13 +1,16 @@
 import { useLocation, Link } from "react-router-dom";
-import { FiMenu, FiSun, FiMoon, FiCpu, FiTerminal } from "react-icons/fi";
+import { FiMenu, FiSun, FiMoon, FiCpu, FiTerminal, FiDroplet } from "react-icons/fi";
 import { findRoute } from "@/app/routes";
 import { useTheme } from "@/app/theme";
 import { Button } from "@/components/Button";
 import { VoiceTopBarIndicator } from "@/features/voice/VoiceControls";
+import { TopBarProfile } from "@/features/profile/TopBarProfile";
+import { useProfile } from "@/features/profile/ProfileContext";
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const location = useLocation();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, colorTemplate } = useTheme();
+  const { openProfileModal } = useProfile();
   const route = findRoute(location.pathname);
   const Icon = route?.icon || FiTerminal;
 
@@ -28,7 +31,7 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         <Link
           to="/brain"
           className="hidden sm:flex items-center gap-1.5 rounded-full border border-line/60 bg-surface/60 px-2.5 py-1 text-xs text-mute hover:text-ink hover:border-ember/40 transition-all"
@@ -38,6 +41,19 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           <span className="font-mono text-[10px]">Brain Engine</span>
         </Link>
         <VoiceTopBarIndicator />
+
+        {/* Quick Color Presets / Appearance Button */}
+        <button
+          type="button"
+          onClick={() => openProfileModal("appearance")}
+          aria-label="Color Template & Appearance"
+          title={`Appearance: ${colorTemplate}`}
+          className="flex items-center justify-center rounded-lg h-8 w-8 border border-line/60 bg-surface/40 text-mute hover:text-ink hover:border-ember/40 hover:bg-surface transition-all"
+        >
+          <FiDroplet size={14} className="text-ember" />
+        </button>
+
+        {/* Light / Dark Toggle */}
         <Button
           variant="ghost"
           size="sm"
@@ -47,6 +63,11 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         >
           {theme === "dark" ? <FiSun size={15} /> : <FiMoon size={15} />}
         </Button>
+
+        {/* User Profile Avatar Pill */}
+        <div className="pl-1 border-l border-line/40">
+          <TopBarProfile />
+        </div>
       </div>
     </header>
   );

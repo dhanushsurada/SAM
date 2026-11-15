@@ -7,24 +7,25 @@
  * for an autonomous process, most legible dark); [data-theme="light"] on
  * <html> swaps the set below.
  *
- * Status colors intentionally differ in literal value between themes, not
- * just the neutrals — the brighter dark-mode success/warn/danger need to be
- * deepened for light backgrounds or they lose contrast. Same semantic role,
- * tuned per theme, same pattern as most mature design systems use.
+ * Theme Presets / Color Templates:
+ * Controlled via [data-color-template="..."] attribute on <html> or :root.
+ * Default template is "obsidian" (Minimal Glass / Obsidian Frost):
+ * sleek monochromatic silver/white glass accents, transparent surfaces,
+ * zero Anthropic orange/coral.
  */
 
 :root {
-  /* neutrals — refined deep midnight palette */
+  /* neutrals — refined deep minimalist obsidian glass */
   --sam-void: 10 12 16;       /* #0A0C10 ultra-sleek base background */
-  --sam-surface: 18 21 27;    /* #12151B panels, cards, glassmorphic surfaces */
+  --sam-surface: 18 21 27;    /* #12151B translucent glassmorphic surfaces */
   --sam-line: 32 38 48;       /* #202630 subtle hairline borders */
-  --sam-ink: 240 242 245;     /* #F0F2F5 high contrast primary text */
-  --sam-mute: 136 143 154;    /* #888F9A crisp secondary text */
+  --sam-ink: 242 244 247;     /* #F2F4F7 high contrast primary text */
+  --sam-mute: 138 145 156;    /* #8A919C crisp secondary text */
 
-  /* accent — luminous energetic ember */
-  --sam-ember: 242 118 30;      /* #F2761E */
-  --sam-ember-ink: 15 8 3;      /* near-black text for use ON ember fills */
-  --sam-ember-text: 242 118 30;
+  /* DEFAULT ACCENT: Obsidian Frost / Minimal Silver Glass (monochromatic, zero orange) */
+  --sam-ember: 240 242 245;   /* Crisp clean platinum / white */
+  --sam-ember-ink: 10 12 16;  /* Pitch near-black text for fills */
+  --sam-ember-text: 240 242 245;
 
   /* status semantics */
   --sam-success: 52 211 153;    /* #34D399 emerald green */
@@ -39,25 +40,121 @@
   --sam-motion-state: 200ms;
 }
 
-:root[data-theme="light"] {
-  --sam-void: 250 250 249;    /* #FAFAF9 */
-  --sam-surface: 255 255 255; /* #FFFFFF */
-  --sam-line: 227 224 219;    /* #E3E0DB */
-  --sam-ink: 23 24 26;        /* #17181A */
-  --sam-mute: 107 110 115;    /* #6B6E73 */
+/* -------------------------------------------------------------
+   COLOR TEMPLATES (Dark Mode)
+   ------------------------------------------------------------- */
 
-  /* Deepened from the base --sam-ember (242/118/30): that value against
-     this theme's near-white surfaces computed to ~2.7:1 as text, well
-     under the 4.5:1 AA floor. This computes to ~5.1-5.3:1. The fill use
-     (--sam-ember itself, with --sam-ember-ink text on top) doesn't have
-     this problem and is intentionally left alone — the two tokens exist
-     precisely so fixing one doesn't break the other. */
-  --sam-ember-text: 176 78 10; /* #B04E0A */
+/* Template 1: Obsidian Frost (Minimal Silver Glass - Default) */
+:root[data-color-template="obsidian"],
+html[data-color-template="obsidian"] {
+  --sam-ember: 240 242 245;
+  --sam-ember-ink: 10 12 16;
+  --sam-ember-text: 240 242 245;
+}
+
+/* Template 2: Ice Cyan (Nordic Frost / Minimal Arctic Glass) */
+:root[data-color-template="frost"],
+html[data-color-template="frost"] {
+  --sam-ember: 56 189 248;      /* #38BDF8 */
+  --sam-ember-ink: 8 18 28;
+  --sam-ember-text: 56 189 248;
+}
+
+/* Template 3: Sage Emerald (Organic Mint Glass) */
+:root[data-color-template="emerald"],
+html[data-color-template="emerald"] {
+  --sam-ember: 52 211 153;      /* #34D399 */
+  --sam-ember-ink: 6 34 22;
+  --sam-ember-text: 52 211 153;
+}
+
+/* Template 4: Lavender Haze (Soft Minimal Violet Glass) */
+:root[data-color-template="amethyst"],
+html[data-color-template="amethyst"] {
+  --sam-ember: 167 139 250;     /* #A78BFA */
+  --sam-ember-ink: 24 12 40;
+  --sam-ember-text: 167 139 250;
+}
+
+/* Template 5: Titanium Slate (Pure Industrial Monochromatic) */
+:root[data-color-template="titanium"],
+html[data-color-template="titanium"] {
+  --sam-ember: 203 213 225;     /* #CBD5E1 */
+  --sam-ember-ink: 15 23 42;
+  --sam-ember-text: 203 213 225;
+}
+
+/* Template 6: Warm Amber (Legacy Warm Glow - Optional) */
+:root[data-color-template="amber"],
+html[data-color-template="amber"] {
+  --sam-ember: 245 158 11;      /* #F59E0B */
+  --sam-ember-ink: 24 14 3;
+  --sam-ember-text: 245 158 11;
+}
+
+/* -------------------------------------------------------------
+   LIGHT MODE & LIGHT MODE TEMPLATES
+   ------------------------------------------------------------- */
+
+:root[data-theme="light"],
+html[data-theme="light"] {
+  --sam-void: 250 250 250;    /* #FAFAFA */
+  --sam-surface: 255 255 255; /* #FFFFFF */
+  --sam-line: 228 231 236;    /* #E4E7EC */
+  --sam-ink: 15 23 42;        /* #0F172A */
+  --sam-mute: 100 116 139;    /* #64748B */
+
+  /* Default Light Accent: Minimal Deep Obsidian Slate */
+  --sam-ember: 15 23 42;
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 15 23 42;
 
   --sam-success: 22 130 90;    /* #16825A deepened for contrast on white */
   --sam-warn: 161 111 8;       /* #A16F08 deepened — raw gold fails on white */
   --sam-danger: 197 48 53;     /* #C53035 deepened */
   --sam-unverified: 90 95 102; /* #5A5F66 */
+}
+
+:root[data-theme="light"][data-color-template="obsidian"],
+html[data-theme="light"][data-color-template="obsidian"] {
+  --sam-ember: 15 23 42;
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 15 23 42;
+}
+
+:root[data-theme="light"][data-color-template="frost"],
+html[data-theme="light"][data-color-template="frost"] {
+  --sam-ember: 2 132 199;      /* #0284C7 Sky-600 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 2 132 199;
+}
+
+:root[data-theme="light"][data-color-template="emerald"],
+html[data-theme="light"][data-color-template="emerald"] {
+  --sam-ember: 5 150 105;      /* #059669 Emerald-600 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 5 150 105;
+}
+
+:root[data-theme="light"][data-color-template="amethyst"],
+html[data-theme="light"][data-color-template="amethyst"] {
+  --sam-ember: 124 58 237;     /* #7C3AED Violet-600 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 124 58 237;
+}
+
+:root[data-theme="light"][data-color-template="titanium"],
+html[data-theme="light"][data-color-template="titanium"] {
+  --sam-ember: 51 65 85;       /* #334155 Slate-700 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 51 65 85;
+}
+
+:root[data-theme="light"][data-color-template="amber"],
+html[data-theme="light"][data-color-template="amber"] {
+  --sam-ember: 180 83 9;       /* #B45309 Amber-700 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 180 83 9;
 }
 
 @media (prefers-reduced-motion: reduce) {

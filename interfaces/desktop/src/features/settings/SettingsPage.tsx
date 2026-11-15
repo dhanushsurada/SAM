@@ -8,6 +8,9 @@ import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { isNative, launchAtLoginEnabled, setLaunchAtLogin, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
 import { getSettings, updateSettings } from "@/api/client";
+import { useProfile } from "@/features/profile/ProfileContext";
+import { ThemePicker } from "@/features/theme/ThemePicker";
+import { FiShield, FiLogOut, FiLogIn, FiEdit3 } from "react-icons/fi";
 
 type FormState = Record<string, string | number | boolean>;
 
@@ -120,6 +123,8 @@ export function SettingsPage() {
   const runtime = useRuntime();
   useRuntimePolling();
 
+  const { profile, isSignedIn, openProfileModal, openSignInModal, signOut } = useProfile();
+
   useEffect(() => {
     let current = true;
     void getSettings().then((stored) => {
@@ -208,6 +213,82 @@ export function SettingsPage() {
         mode="live"
         description="Settings are saved to this device and shared with SAM's runtime. Password fields are never shown after saving."
       />
+
+      {/* Operator Profile Section */}
+      <Card as="section" className="space-y-3.5">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-void border border-ember/30 text-ink text-sm font-bold shadow-sm">
+              <span>{profile.avatar}</span>
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface ${
+                  isSignedIn ? "bg-success" : "bg-mute"
+                }`}
+              />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-ink">{profile.name}</h2>
+                <span className="rounded-md border border-line bg-void px-1.5 py-0.5 font-mono text-[10px] text-mute">
+                  {profile.role}
+                </span>
+                {isSignedIn && (
+                  <span className="flex items-center gap-1 font-mono text-[10px] text-success">
+                    <FiShield size={11} /> Verified
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-mute mt-0.5 font-mono">
+                {profile.handle} · {profile.nodeId}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openProfileModal("edit")}
+              className="flex items-center gap-1"
+            >
+              <FiEdit3 size={12} />
+              Edit Profile
+            </Button>
+            {isSignedIn ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={signOut}
+                className="text-danger hover:bg-danger/10 hover:text-danger flex items-center gap-1"
+              >
+                <FiLogOut size={12} />
+                Sign Out
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={openSignInModal}
+                className="flex items-center gap-1"
+              >
+                <FiLogIn size={12} />
+                Sign In
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {profile.bio && (
+          <p className="text-xs text-mute/90 italic border-t border-line/40 pt-2.5">
+            "{profile.bio}"
+          </p>
+        )}
+      </Card>
+
+      {/* Appearance & Color Presets Section */}
+      <Card as="section" className="p-4 sm:p-5">
+        <ThemePicker />
+      </Card>
 
       <Card as="section" className="flex flex-wrap items-center justify-between gap-3">
         <div>
