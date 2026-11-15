@@ -1,26 +1,32 @@
-# SAM 2.0 — Unified Cross-Device AI Assistant
+# SAM 2.0 — Sovereign Autonomous Mind
 
-**Self-learning Autonomous Mind with Hermes Intelligence, Taste Heuristics & Cross-Device Coordination**
+**Self-learning Autonomous Mind with Multi-Tier Intelligence, Founder Mode Taste Heuristics & Cross-Device Coordination**
 
-> Fully local · Privacy-first · Desktop + Android · Voice & Text · Zero Cloud Dependency
+> Fully local · Privacy-first · Desktop (macOS / Windows / Linux) + Android · Voice & Text · Zero Cloud Dependency
+
+[![CI](https://github.com/dhanushsurada/SAM/actions/workflows/ci.yml/badge.svg)](https://github.com/dhanushsurada/SAM/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)](https://github.com/dhanushsurada/SAM/releases)
+[![Tests](https://img.shields.io/badge/python%20tests-491%20passed-brightgreen.svg)](tests/)
+[![Frontend Tests](https://img.shields.io/badge/frontend%20tests-118%20passed-brightgreen.svg)](interfaces/desktop/)
+[![Android Tests](https://img.shields.io/badge/android%20tests-78%20passed-brightgreen.svg)](sam-android/)
+[![License](https://img.shields.io/badge/license-AGPL%20v3-orange.svg)](LICENSE)
 
 ---
 
 ## What SAM 2.0 Does
 
-- **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android mobile companion with shared memory and automatic capability routing.
-- **Conversational Chat & Persistent Memory:** Dedicated instant dialogue with parallel chats, persistent SQLite conversation storage, and long-term memory across app restarts.
-- **Projects & Workspaces:** Bind tasks and chats to specific project directories with custom guidelines, tech stack constraints, and working folder paths.
-- **Model Context Protocol (MCP) & Plugins:** Plug-and-play integrations with GitHub, Google Workspace, Slack, local filesystems, and PostgreSQL databases.
+- **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android companion with capability-based routing and synchronized state.
+- **Modern Minimalist Desktop Interface:** Fast, distraction-free desktop application (Tauri v2 + React) with parallel chat threads, global Command Center palette (`Cmd+Shift+Space`), live system diagnostics, and zero branding.
 - **3-Tier Execution Architecture:**
-  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for calculations, app launches, WhatsApp messaging, YouTube media, and screenshots without unnecessary LLM calls.
-  - **Tier 2 (Fast Intent):** Fast single-step tool selection and routing using compact models.
-  - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, reflection, and recovery with local models.
-- **Native Mobile Companion:** Kotlin Jetpack Compose app with on-device AI inference, Scoped Storage file sync, notification mirroring, and USB reverse tunneling (`adb reverse tcp:8420 tcp:8420`).
-- **Cryptographic Security:** Mutual Ed25519 request signing, one-time pairing tokens, sliding replay-prevention nonces, and user confirmation gating for destructive actions.
-- **Voice & Hands Automation:** openWakeWord 24/7 listening, Whisper STT, Kokoro TTS, Playwright browser agent, and AppleScript/system automation.
-- **Taste & Memory Layer:** ChromaDB + SQLite episodic memory with **Founder Mode** capturing your taste, decisions, and reasoning across sessions.
-- **Zero Cloud by Default:** Runs fully on your hardware. Cloud API keys (Groq, Gemini, OpenRouter) are optional accelerators.
+  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for math calculations, application launch/close, WhatsApp direct messaging, YouTube playback, URL navigation, and screenshots without unnecessary LLM overhead.
+  - **Tier 2 (Fast Intent):** Fast single-step tool selection and device routing using compact local models.
+  - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, iterative execution, verification, and error recovery.
+- **Native Android Companion (`sam-android`):** Kotlin Jetpack Compose app featuring Ed25519 pairing, on-device mobile AI inference, Scoped Storage file sync, notification mirroring, and a 10-action task executor (`AndroidConnectTaskExecutor`).
+- **Cryptographic Security & Verification:** Mutual Ed25519 request signing, one-time pairing tokens, sliding nonce replay-prevention, 60s execution leases (`ExecutionLease`), and offline task queueing (`queued_offline`) with reconnect de-duplication.
+- **Voice, Ears & Mouth:** 24/7 background listening with openWakeWord ("Hey SAM"), Faster-Whisper on-demand STT, and Kokoro 82M neural TTS with in-app Web Audio playback.
+- **Founder Mode & Taste Heuristics:** Persistent SQLite + ChromaDB memory with **Founder Mode** capturing your taste, rationale, rules, and permanent rejections across sessions.
+- **Model Context Protocol (MCP) & BYOK:** Plug-and-play integrations with GitHub, Slack, local filesystems, and PostgreSQL databases, plus optional frontier cloud API keys (Groq, Gemini, Anthropic, OpenRouter) with automatic fallback to local Ollama.
+- **Zero Cloud by Default:** All core intelligence runs fully on your local machine.
 
 ---
 
@@ -28,172 +34,182 @@
 
 | Component | Minimum | Recommended |
 |---|---|---|
-| Desktop OS | Windows 10/11 · macOS 14+ · Ubuntu/Debian (x86_64) | macOS Apple Silicon / Windows 11 |
-| Mobile OS | Android 8.0+ (API 26) | Android 12+ (Snapdragon / Tensor SoC) |
-| Desktop Chip | Any 64-bit CPU (Apple Silicon recommended on Mac) | M2/M3/M4 or modern x86-64 |
-| RAM | 8GB (small models) | 16GB+ (14B default model) |
-| Storage | 20GB free | 50GB+ for several models |
+| **Desktop OS** | macOS 14+ (Apple Silicon / Intel) · Windows 10/11 · Ubuntu/Debian (x86_64) | macOS Apple Silicon (M2/M3/M4) / Windows 11 |
+| **Mobile OS** | Android 8.0+ (API 26) | Android 12+ (Snapdragon / Tensor SoC) |
+| **Desktop CPU** | Any 64-bit CPU | Apple Silicon (M-series) or modern x86_64 |
+| **RAM** | 8GB (compact 4B models) | 16GB+ (default 14B models) |
+| **Free Storage** | 20GB free | 50GB+ for multiple local models |
 
 ---
 
-## Install
+## Installation & Updates
 
-**Download the installer for your platform — no Python, Node, Rust or Git needed.**
+### Pre-built Installers (Version 2.0.1)
 
-| Windows 10/11 | macOS 14+ | Linux (Ubuntu/Debian) | Android Mobile |
+Download verified installers directly from the [GitHub Releases](https://github.com/dhanushsurada/SAM/releases) page:
+
+| macOS 14+ | Windows 10/11 | Linux (Ubuntu/Debian) | Android Mobile |
 |---|---|---|---|
-| `SAM_2.0.0_windows-x86_64-setup.exe` | `SAM_2.0.0_macos-arm64.dmg` / `…-x86_64.dmg` | `SAM_2.0.0_linux-x86_64.deb` | `SAM_2.0.0_android.apk` |
-| Double-click to install | Drag to Applications | `sudo apt install ./SAM_*.deb` | `adb install -r SAM_*.apk` or tap APK |
+| `SAM_2.0.1_macos-arm64.dmg`<br>`SAM_2.0.1_macos-x86_64.dmg` | `SAM_2.0.1_windows-x86_64-setup.exe` | `SAM_2.0.1_linux-x86_64.deb`<br>`SAM_2.0.1_linux-x86_64.AppImage` | `SAM_2.0.1_android.apk`<br>`SAM_2.0.1_android.aab` |
+| Drag to `/Applications` | Run setup executable | `sudo apt install ./SAM_*.deb` | Tap APK or `adb install -r` |
 
-Get them from the **Releases** page, or use the one-line installer (verifies SHA-256):
+### One-Line Automated Installer & Updater
+
+The automated installer downloads the release for your operating system, cryptographically verifies its SHA-256 checksum against `SHA256SUMS.txt`, and installs or updates SAM:
 
 ```bash
-# Desktop (macOS / Linux)
+# macOS & Linux Desktop (Fresh install or update to latest)
 curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash
 
-# Android (Downloads APK & installs via adb if phone connected)
+# Android (Downloads latest APK and installs via adb if phone is connected)
 curl -fsSL https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.sh | bash -s -- --android
 
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/dhanushsurada/SAM/main/scripts/install.ps1 | iex
 ```
 
-SAM bundles its own Python runtime. The only prerequisite is [Ollama](https://ollama.com) for local models. Full guide: **[INSTALL.md](INSTALL.md)**.
+SAM bundles its own managed Python runtime. The only prerequisite for local inference is [Ollama](https://ollama.com). See **[INSTALL.md](INSTALL.md)** for detailed environment troubleshooting.
 
-### Developers
+---
 
-Build from source with `setup.sh` (macOS), `setup_linux.sh` (Debian/Ubuntu
-backend) or `setup_windows.ps1`, or build the installers yourself — see
-[`docs/deployment/DESKTOP_INSTALL.md`](docs/deployment/DESKTOP_INSTALL.md).
+## Developer Setup & Building from Source
+
+```bash
+# 1. Clone repository
+git clone https://github.com/dhanushsurada/SAM.git
+cd SAM
+
+# 2. Setup Python environment and install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Build Desktop Frontend
+cd interfaces/desktop
+npm install
+npm test          # Runs 118 unit tests
+npm run build     # Production Vite build
+cd ../..
+
+# 4. Run Python Verification Suite
+python -m pytest tests -q --ignore=tests/test_founder_mode_live.py --ignore=tests/test_sovereign_e2e_live.py
+```
 
 ---
 
 ## Running SAM
 
-### Start SAM
+### 1. Launch the Desktop Application
+Open **SAM.app** from `/Applications` (or start via application launcher on Windows/Linux). The desktop shell automatically starts and monitors the local SAM API and worker processes.
 
+### 2. Command Line Development
 ```bash
-# For command-line development only; the installed desktop app starts the API.
 source .venv/bin/activate
 
-# Start the separate voice loop manually
-python main.py
+# Run health diagnostics
+python sam_cli.py doctor
+
+# Start backend services manually
+python sam_cli.py start api
+python sam_cli.py start voice
 ```
 
-The desktop app starts and manages the SAM API. “Open SAM at login” is
-controlled from Settings; setup does not install a second launchd manager.
-
-### Wake SAM
-
-Say: **"Hey SAM"**
-
-First time after boot: SAM loads Qwen (~20 seconds). Says *"SAM is ready."*
-
-After first load: responds immediately until you say *"SAM sleep"* or shut down.
+### 3. Voice Interaction
+Say: **"Hey SAM"**  
+- On first start, SAM loads the configured local brain model and announces *"SAM is ready."*
+- Responses are delivered with low latency via Kokoro TTS through the desktop Web Audio pipeline.
+- Say *"SAM sleep"* to unload model weights from RAM, or *"SAM stop"* to shut down.
 
 ---
 
-## Voice Commands
+## 3-Tier Execution Reference
 
-| You say | SAM does |
-|---|---|
-| "Hey SAM, what's 15% of 3400?" | Calculates and tells you |
-| "Hey SAM, open Safari" | Opens Safari via AppleScript |
-| "Hey SAM, take a screenshot" | Takes screenshot |
-| "Hey SAM, read my screen" | Describes what's on screen |
-| "Hey SAM, go to github.com" | Opens URL in browser |
-| "Hey SAM, run ls in terminal" | Executes terminal command |
-| "Hey SAM, incognito mode" | Switches to incognito — nothing stored |
-| "Hey SAM, exit incognito" | Back to normal mode |
-| "model" / "model qwen3:8b" | Shows the Brain and installed models / switches the Brain (saved for next start) |
-| "SAM sleep" | Unloads model from RAM |
-| "SAM stop" | Shuts down completely |
+SAM eliminates unnecessary LLM calls by routing instructions according to complexity:
+
+| Tier | Typical Latency | Examples | Mechanism |
+|---|---|---|---|
+| **Tier 1 (Direct)** | `< 5ms` | "open Chrome", "calculate 125 * 8", "open youtube and play aya sher", "take a screenshot", "text Alice 'Hello' on WhatsApp" | Deterministic pattern match & OS AppleScript/PyAutoGUI automation |
+| **Tier 2 (Fast Intent)** | `< 800ms` | "what is the weather today?", "find my notes about budget", "list mobile notifications" | Fast single-step tool execution with compact local model |
+| **Tier 3 (Advanced)** | `1.5s - 5s` | "organize my downloads folder, summarize invoices, and email the report" | ReAct planning loop with step-by-step verification and error recovery |
 
 ---
 
-## Founder Mode
+## Cross-Device Actions Matrix (`AndroidConnectTaskExecutor`)
 
-Founder Mode is SAM's taste layer — the feature no competitor has.
+When paired via SAM Connect, the desktop coordinator can dispatch tasks across 10 specialized Android capabilities:
 
-Every time you:
-- Reject something and explain why → stored permanently
-- Make a decision → stored with your reasoning
-- Express a preference → captured
+| Action | Description | Android Execution Mechanism |
+|---|---|---|
+| `show_notification` | Displays high-priority private notification on device | `SamNotifications` / `NotificationManagerCompat` |
+| `app_launch` | Launches mobile app by common name or Android package | `AndroidAppLauncher` intent dispatch |
+| `view_url` | Opens web URL in default mobile browser | `Intent.ACTION_VIEW` |
+| `share_content` | Sends text or link into Android system share sheet | `Intent.ACTION_SEND` chooser |
+| `get_notifications` | Reads active notifications for cross-device summarization | `SamNotificationListener` |
+| `accessibility_click` | Clicks accessibility node by target text or screen coordinates | `SamAccessibilityService` node inspection |
+| `accessibility_type` | Types text into the currently focused input field | `AccessibilityNodeInfo.ACTION_SET_TEXT` |
+| `accessibility_action` | Navigates Back, Home, or Recents on the phone | `performGlobalAction` |
+| `receive_file` | Writes incoming file with SHA-256 integrity validation | `SamFileManager` Scoped Storage engine |
+| `local_infer` | Runs on-device mobile AI inference with latency & token metrics | `SamMobileInferenceEngine` |
 
-Next session SAM starts already knowing your taste.
+---
 
-### Manual Founder Mode CLI
+## CLI Management Reference (`sam_cli.py`)
+
+`sam_cli.py` provides complete diagnostic, process, memory, and device management:
 
 ```bash
-# Add a decision
-python sam_cli.py decision "Using FastAPI over Flask" "Django is overkill for skill endpoints, FastAPI is faster" --category tech
-
-# Add a rejection
-python sam_cli.py rejection "Dark mode with pure black background" "Too harsh on eyes, prefer dark grey #1a1a1a" --category design
-
-# View all decisions
-python sam_cli.py founder
-
-# Export full decision log
-python sam_cli.py export
-```
-
----
-
-## CLI Reference
-
-`sam_cli.py` provides complete runtime, diagnostic, process, memory, and device management:
-
-```bash
-# System Diagnostics & Health Check
+# Diagnostics & System Health
 python sam_cli.py doctor                  # Run full diagnostic suite
 python sam_cli.py status                  # Inspect active SAM processes & Ollama health
 
-# Process Lifecycle Management
-python sam_cli.py start [voice|api|telegram]   # Start managed service (or all)
+# Service Lifecycle
+python sam_cli.py start [voice|api|telegram]   # Start managed service
 python sam_cli.py stop [voice|api|telegram]    # Stop service gracefully
 python sam_cli.py restart [voice|api|telegram] # Restart service
 
-# Local Model & Ollama Control
+# Local Model Control
 python sam_cli.py ollama status           # Check Ollama connection & pulled models
 python sam_cli.py ollama pull <model>     # Pull a new local LLM (e.g. qwen2.5:14b)
 
-# Cross-Device & Pairing Management
+# Cross-Device & Pairing
 python sam_cli.py devices                 # List trusted paired devices (phones, laptops)
 python sam_cli.py revoke-device <id>      # Instantly revoke trust for a paired device
 
 # Memory & Founder Mode
 python sam_cli.py memory --limit 10       # View recent episodic memories
 python sam_cli.py founder                 # View Founder Mode decisions & taste profile
+python sam_cli.py decision "Title" "Why"  # Record a founder decision with rationale
+python sam_cli.py rejection "Title" "Why" # Record a founder rejection with rationale
 python sam_cli.py skills                  # List auto-compiled task execution skills
 
-# Profile Portability & Maintenance
+# Maintenance & Reset
 python sam_cli.py export-profile <path>   # Export personal profile & memory archive
 python sam_cli.py import-profile <path>   # Restore personal profile
 python sam_cli.py sync-status             # Inspect cross-device sync state
 python sam_cli.py logs --lines 50         # View latest runtime logs
 python sam_cli.py reset-memory            # Clear episodic memory (retains identity)
-python sam_cli.py reset-all               # Factory reset SAM data
+python sam_cli.py reset-all               # Factory reset SAM local data
 ```
 
 ---
 
-## Architecture
+## System Architecture
 
 ```
 SAM/
-├── main.py                  ← Cross-device entry point & dispatch chokepoint
+├── main.py                  ← Cross-device entry point & dispatch coordinator
 ├── sam_cli.py               ← Comprehensive CLI management & diagnostic tool
 ├── core/
 │   ├── tiered_router.py     ← 3-tier execution optimizer (Tier 1 sub-5ms bypass)
-│   ├── brain.py             ← Ollama Brain integration (Qwen 2.5 14B default)
+│   ├── brain.py             ← Ollama Brain integration
 │   ├── model_manager.py     ← Dynamic model discovery & RAM-tier selection
+│   ├── cloud_providers.py   ← Frontier BYOK provider fallback (Groq, Anthropic, etc.)
 │   ├── instrumentation.py   ← Performance telemetry (TTFT, LLM ms, tool ms)
 │   └── session.py           ← Context assembly & session state
 ├── connect/
 │   ├── services/
 │   │   ├── coordinator.py   ← Cross-device coordinator with 60s execution leases
-│   │   ├── task_handoff.py  ← Device task router & handoff state machine
+│   │   ├── task_handoff.py  ← Device task router, offline queue & state machine
 │   │   └── workflows.py     ← End-to-end multi-device workflow recipes
 │   ├── transports/
 │   │   └── lan_http.py      ← Authenticated LAN HTTP & SSE with Ed25519 signatures
@@ -201,13 +217,13 @@ SAM/
 │   │   └── remote_relay.py  ← Outbound-only TLS 1.3 / WSS remote relay client
 │   └── core/
 │       ├── crypto.py        ← Asymmetric Ed25519 identity & canonical signing
+│       ├── device_registry.py ← SQLite device registry & connection state tracking
 │       ├── security_policy.py ← 3-tier risk classification & approval gating
-│       ├── shared_memory.py ← Scoped memory sync with vector clocking
 │       └── capabilities.py  ← Central capability discovery & registry
-├── sam-android/             ← Native Android mobile agent (Kotlin + Jetpack Compose)
+├── sam-android/             ← Native Android mobile companion (Kotlin + Jetpack Compose)
 │   ├── app/src/main/
 │   │   ├── ai/              ← On-device mobile AI (LiteRT / llama.cpp / GGUF)
-│   │   ├── automation/      ← AccessibilityService & NotificationListener
+│   │   ├── automation/      ← SamFileManager, AppLauncher, Accessibility & Notifications
 │   │   ├── data/transport/  ← OkHttp SSE client & Ed25519 identity store
 │   │   └── ui/              ← Compose screens (Pairing, Chat, Diagnostics)
 ├── hands/
@@ -231,51 +247,35 @@ SAM/
 
 ---
 
-## Session Flow
+## Verification & Status
 
-```
-Boot → openWakeWord starts (always on, ~0% CPU)
-     ↓
-"Hey SAM" detected
-     ↓
-Whisper STT activated → transcribes speech
-     ↓
-Identity loaded + memories retrieved + Founder Mode context injected
-     ↓
-Qwen 2.5 14B processes full context
-     ↓
-Agent decides: conversation | control | browser | terminal | vision
-     ↓
-Action executed (if needed) → observed → next step decided (ReAct)
-     ↓
-Kokoro TTS speaks response
-     ↓
-Memory extracted + saved
-     ↓
-Back to listening
-```
+For detailed feature-by-feature classification across 🟢 **Verified**, 🟡 **Implemented (Unverified)**, and 🔴 **Not Implemented**, consult the **[Feature Acceptance Checklist](docs/FEATURE_ACCEPTANCE_CHECKLIST.md)**.
+
+### Automated Test Suite Baseline
+- **Python Backend:** `491 passed, 0 failed` in `pytest`.
+- **Desktop Frontend:** `118 passed, 0 failed` in `node --test`.
+- **Desktop Production Build:** Clean build via `tsc -b && vite build`.
+- **Android JVM Unit Tests:** `78 passed, 0 failed` in `./gradlew testDebugUnitTest`.
 
 ---
 
-## Privacy
+## Privacy Principles
 
-- **Zero cloud.** Nothing leaves your machine. Ever.
-- **Incognito mode.** Cryptographically no storage — not even locally.
-- **Your data is yours.** All memory in local SQLite + ChromaDB.
-- **Open source.** AGPL v3. Audit every line.
+- **Zero Cloud by Default:** All AI inference, embeddings, and conversation histories remain strictly on your own hardware.
+- **Incognito Mode:** Zero trace execution — no queries or memories are stored in incognito sessions.
+- **Local Data Separation:** User account/device metadata and AI data (conversations, Founder Mode) are isolated locally in dedicated databases.
+- **Open Source:** AGPL v3 license. Every line of code is inspectable and auditable.
 
 ---
 
 ## License
 
-AGPL v3 for open source use.
-Commercial license available for products built on SAM.
+AGPL v3 for open source use.  
+Commercial licenses available for proprietary integrations.
 
 ---
 
-## Built By
+## Author & Acknowledgements
 
-Dhanush Surada — Visakhapatnam, India
-github.com/dhanushsurada | linkedin.com/in/dhanushsurada
-
-Waitlist: smtg-is-cmg.carrd.co
+Developed by **Dhanush Surada** — Visakhapatnam, India  
+GitHub: [github.com/dhanushsurada](https://github.com/dhanushsurada) · LinkedIn: [linkedin.com/in/dhanushsurada](https://www.linkedin.com/in/dhanushsurada)
