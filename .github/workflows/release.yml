@@ -251,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          VERSION="$(python3 -c "import json;print(json.load(open('interfaces/desktop/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo "2.0.1")"
+          VERSION="$(python3 -c "import json;print(json.load(open('interfaces/desktop/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo "2.1.1")"
           APK="$(find sam-android/app/build/outputs/apk/release -name "*.apk" | head -n1 || true)"
           if [[ -n "$APK" ]]; then
             SUFFIX="${{ steps.android_keystore.outputs.SIGNED == 'true' && '' || '-unsigned' }}"

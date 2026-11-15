@@ -1,6 +1,6 @@
 [package]
 name = "sam-desktop"
-version = "0.1.0"
+version = "2.1.1"
 description = "SAM — native desktop shell (Agent 1: agent/desktop-product)"
 authors = ["SAM"]
 edition = "2021"

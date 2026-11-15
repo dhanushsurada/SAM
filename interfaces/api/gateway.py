@@ -84,7 +84,7 @@ DEFAULT_TASK_TIMEOUT_SECONDS = 600
 # Single source of truth for the /api/iqoo/health "version" field below.
 # Update this one constant when the current phase changes — do not
 # hardcode the string inline at the call site.
-GATEWAY_VERSION = "iqoo-phase3b"
+GATEWAY_VERSION = "2.1.1"
 
 
 class TaskAlreadyActiveError(Exception):

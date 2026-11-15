@@ -5,7 +5,7 @@
 > Fully local · Privacy-first · Desktop (macOS / Windows / Linux) + Android · Voice & Text · Zero Cloud Dependency
 
 [![CI](https://github.com/dhanushsurada/SAM/actions/workflows/ci.yml/badge.svg)](https://github.com/dhanushsurada/SAM/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)](https://github.com/dhanushsurada/SAM/releases)
+[![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)](https://github.com/dhanushsurada/SAM/releases)
 [![Tests](https://img.shields.io/badge/python%20tests-491%20passed-brightgreen.svg)](tests/)
 [![Frontend Tests](https://img.shields.io/badge/frontend%20tests-118%20passed-brightgreen.svg)](interfaces/desktop/)
 [![Android Tests](https://img.shields.io/badge/android%20tests-78%20passed-brightgreen.svg)](sam-android/)
@@ -44,13 +44,13 @@
 
 ## Installation & Updates
 
-### Pre-built Installers (Version 2.0.1)
+### Pre-built Installers (Version 2.1.1)
 
 Download verified installers directly from the [GitHub Releases](https://github.com/dhanushsurada/SAM/releases) page:
 
 | macOS 14+ | Windows 10/11 | Linux (Ubuntu/Debian) | Android Mobile |
 |---|---|---|---|
-| `SAM_2.0.1_macos-arm64.dmg`<br>`SAM_2.0.1_macos-x86_64.dmg` | `SAM_2.0.1_windows-x86_64-setup.exe` | `SAM_2.0.1_linux-x86_64.deb`<br>`SAM_2.0.1_linux-x86_64.AppImage` | `SAM_2.0.1_android.apk`<br>`SAM_2.0.1_android.aab` |
+| `SAM_2.1.1_macos-arm64.dmg`<br>`SAM_2.1.1_macos-x86_64.dmg` | `SAM_2.1.1_windows-x86_64-setup.exe` | `SAM_2.1.1_linux-x86_64.deb`<br>`SAM_2.1.1_linux-x86_64.AppImage` | `SAM_2.1.1_android.apk`<br>`SAM_2.1.1_android.aab` |
 | Drag to `/Applications` | Run setup executable | `sudo apt install ./SAM_*.deb` | Tap APK or `adb install -r` |
 
 ### One-Line Automated Installer & Updater

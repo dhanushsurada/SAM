@@ -126,7 +126,7 @@ class EnvironmentRepairRequest(BaseModel):
 BASE_DIR = Path(__file__).parent.parent.parent
 CLIENT_DIR = BASE_DIR / "interfaces" / "web"
 
-app = FastAPI(title="SAM iQOO Phone Gateway", version="iqoo-phase3a")
+app = FastAPI(title="SAM Gateway", version="2.1.1")
 # The packaged Tauri webview has a distinct origin and cannot use Vite's
 # development proxy. Keep CORS limited to Tauri v2's platform origins and
 # the local Vite development server; this is transport configuration, not

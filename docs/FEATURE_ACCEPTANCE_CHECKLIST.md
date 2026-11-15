@@ -1,6 +1,6 @@
 # SAM Feature-Level Acceptance Checklist
-**Baseline Repository:** [SAM on GitHub](https://github.com/dhanushsurada/SAM) (Commit `cddaa70`)  
-**Target Version:** `2.0.1`  
+**Baseline Repository:** [SAM on GitHub](https://github.com/dhanushsurada/SAM) (Release `v2.1.1`)  
+**Target Version:** `2.1.1`  
 **Classification System:**
 - 🟢 **Verified:** Working implementation backed by reproducible automated test evidence in repository test suites.
 - 🟡 **Implemented, Unverified:** Complete code exists in the repository, but requires continuous physical hardware, carrier network, or third-party live account validation.
@@ -13,7 +13,7 @@
 | Area / Component | Status | Code Location | Test / Verification Evidence |
 |---|---|---|---|
 | **Android Release Signing Consistency** | 🟢 Verified | [.github/workflows/release.yml](../.github/workflows/release.yml#L206-L245)<br>[sam-android/app/build.gradle.kts](../sam-android/app/build.gradle.kts#L20-L44) | Reconciled CI workflow with `build.gradle.kts` policy: eliminated dummy keystores with hardcoded credentials; produces unsigned release artifacts when production secrets are absent. |
-| **Version Alignment (2.0.1)** | 🟢 Verified | [.github/workflows/release.yml](../.github/workflows/release.yml#L262)<br>[interfaces/desktop/src-tauri/tauri.conf.json](../interfaces/desktop/src-tauri/tauri.conf.json#L4)<br>[interfaces/desktop/package.json](../interfaces/desktop/package.json#L4)<br>[sam-android/app/build.gradle.kts](../sam-android/app/build.gradle.kts#L17) | Unified version string across desktop, Android, and CI workflows to `2.0.1`. |
+| **Version Alignment (2.1.1)** | 🟢 Verified | [.github/workflows/release.yml](../.github/workflows/release.yml#L262)<br>[interfaces/desktop/src-tauri/tauri.conf.json](../interfaces/desktop/src-tauri/tauri.conf.json#L4)<br>[interfaces/desktop/package.json](../interfaces/desktop/package.json#L4)<br>[sam-android/app/build.gradle.kts](../sam-android/app/build.gradle.kts#L17) | Unified version string across desktop, Android, and CI workflows to `2.1.1`. |
 | **Documentation Alignment** | 🟢 Verified | [sam-android/README.md](../sam-android/README.md#L11-L35)<br>[README.md](../README.md#L207-L230) | Reconciled documentation drift between top-level README and Android README; documented all 10 routed actions in `AndroidConnectTaskExecutor`. |
 | **Desktop Product Structure & Routes** | 🟢 Verified | [interfaces/desktop/src/app/routes.ts](../interfaces/desktop/src/app/routes.ts#L109-L116)<br>[interfaces/desktop/src/app/router.tsx](../interfaces/desktop/src/app/router.tsx#L45-L65) | Passes `test_desktop_product_structure` in `test_brain_model_management_offline.py`. |
 | **Sovereignty & Egress Network Guard** | 🟢 Verified | [sovereign/security/network_guard.py](../sovereign/security/network_guard.py#L40-L205) | Passes `test_snapshot_connections_real_path` and full sovereignty test suite. |

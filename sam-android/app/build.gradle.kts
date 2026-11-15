@@ -13,8 +13,8 @@ android {
         applicationId = "com.samcore.android"
         minSdk = 26 // Android 8.0 — required for adaptive icons + notification channels used below
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0.1"
+        versionCode = 4
+        versionName = "2.1.1"
     }
 
     signingConfigs {
