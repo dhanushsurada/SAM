@@ -213,20 +213,14 @@ jobs:
             fi
             echo "Using custom production release keystore from repository secrets."
             echo "$SAM_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
+            echo "SIGNED=true" >> "$GITHUB_OUTPUT"
           else
             echo "Notice: SAM_ANDROID_KEYSTORE_* secrets not configured in repository."
-            echo "Generating automated release signing key for this build so APK is valid and installable..."
-            keytool -genkeypair -v \
-              -keystore "$RUNNER_TEMP/release.keystore" \
-              -alias sam-release \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass samandroidrelease \
-              -keypass samandroidrelease \
-              -dname "CN=SAM Production, OU=Release, O=SAM, C=US"
+            echo "Following app/build.gradle.kts secure production policy: producing unsigned release artifacts."
+            echo "KEYSTORE_PATH=" >> "$GITHUB_OUTPUT"
+            echo "SIGNED=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
       - name: Build Android Release APK and AAB
         working-directory: sam-android
         env:
@@ -235,11 +229,9 @@ jobs:
           SAM_ANDROID_KEY_ALIAS: ${{ env.SAM_ANDROID_KEY_ALIAS }}
           SAM_ANDROID_KEY_PASSWORD: ${{ env.SAM_ANDROID_KEY_PASSWORD }}
         run: |
-          export SAM_ANDROID_KEYSTORE_PASSWORD="${SAM_ANDROID_KEYSTORE_PASSWORD:-samandroidrelease}"
-          export SAM_ANDROID_KEY_ALIAS="${SAM_ANDROID_KEY_ALIAS:-sam-release}"
-          export SAM_ANDROID_KEY_PASSWORD="${SAM_ANDROID_KEY_PASSWORD:-samandroidrelease}"
           ./gradlew assembleRelease bundleRelease --no-daemon
       - name: Verify Android signature
+        if: steps.android_keystore.outputs.SIGNED == 'true'
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n1)"
@@ -259,14 +251,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          VERSION="$(python3 -c "import json;print(json.load(open('interfaces/desktop/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo "2.0.0")"
+          VERSION="$(python3 -c "import json;print(json.load(open('interfaces/desktop/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo "2.0.1")"
           APK="$(find sam-android/app/build/outputs/apk/release -name "*.apk" | head -n1 || true)"
           if [[ -n "$APK" ]]; then
-            cp "$APK" "dist/SAM_${VERSION}_android.apk"
+            SUFFIX="${{ steps.android_keystore.outputs.SIGNED == 'true' && '' || '-unsigned' }}"
+            cp "$APK" "dist/SAM_${VERSION}_android${SUFFIX}.apk"
           fi
           AAB="$(find sam-android/app/build/outputs/bundle/release -name "*.aab" | head -n1 || true)"
           if [[ -n "$AAB" ]]; then
-            cp "$AAB" "dist/SAM_${VERSION}_android.aab"
+            SUFFIX="${{ steps.android_keystore.outputs.SIGNED == 'true' && '' || '-unsigned' }}"
+            cp "$AAB" "dist/SAM_${VERSION}_android${SUFFIX}.aab"
           fi
           ls -la dist
       - uses: actions/upload-artifact@v4

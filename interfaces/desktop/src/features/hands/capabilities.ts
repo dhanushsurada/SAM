@@ -107,6 +107,16 @@ export const CAPABILITIES: HandsCapability[] = [
     ],
   },
   {
+    id: "office-kit",
+    name: "Office kit",
+    summary:
+      "Direct integration with productivity apps (LibreOffice, Microsoft 365, Google Docs/Sheets).",
+    abilities: [],
+    needs: "Third-party APIs and desktop automations not currently bundled in SAM core.",
+    source: "docs/iqoo/PERCEPTION.md",
+    availability: "not-implemented",
+  },
+  {
     id: "device-companion",
     name: "Companion device control",
     summary: "Screen mirroring, shared clipboard, file transfer and remote control between phone and PC.",

@@ -38,6 +38,7 @@ delivers the capability itself, fully tested standalone.
 """
 
 import json
+import os
 import socket
 import time
 from dataclasses import dataclass, field
