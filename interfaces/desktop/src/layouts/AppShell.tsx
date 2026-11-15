@@ -4,6 +4,7 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { ProfileModal } from "@/features/profile/ProfileModal";
 import { SignInModal } from "@/features/profile/SignInModal";
+import { VoiceListeningOverlay } from "@/features/voice/VoiceListeningOverlay";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -36,9 +37,10 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* Global Modals */}
+      {/* Global Modals & Voice Listening HUD */}
       <ProfileModal />
       <SignInModal />
+      <VoiceListeningOverlay />
     </div>
   );
 }

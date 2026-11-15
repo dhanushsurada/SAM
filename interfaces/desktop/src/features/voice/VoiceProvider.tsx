@@ -24,6 +24,7 @@ import type { VoiceEnvironment } from "./voiceText";
 import { createWebviewVoice } from "./webviewVoice";
 import type { UtteranceLike } from "./webviewVoice";
 import { replyToSpeak } from "./speechText";
+import { detectWakeWord, formatTranscript } from "./liveTranscription";
 
 /**
  * Touch-to-talk for the desktop app: the React side. The behaviour lives in
@@ -37,8 +38,25 @@ import { replyToSpeak } from "./speechText";
  */
 
 const SPEAK_REPLIES_KEY = "sam.desktop.voice.speak-replies.v1";
+const WAKE_WORD_ENABLED_KEY = "sam.desktop.voice.wake-word-enabled.v1";
 /** After this long on one step, say what the likely reason is. */
 const SLOW_AFTER_MS = 8000;
+
+function readWakeWordEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(WAKE_WORD_ENABLED_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function writeWakeWordEnabled(on: boolean): void {
+  try {
+    window.localStorage.setItem(WAKE_WORD_ENABLED_KEY, on ? "on" : "off");
+  } catch {
+    // ignore
+  }
+}
 
 // ─── the browser, behind the shapes the voice modules expect ─────────────
 
@@ -123,6 +141,17 @@ export interface VoiceValue {
   setAudioConfig: (cfg: Partial<VoiceAudioConfig>) => void;
   /** Explicitly speak a text snippet out loud using SAM's voice */
   speak: (text: string) => Promise<void>;
+  /** Live simultaneous transcript being spoken in real-time */
+  liveTranscript: string;
+  setLiveTranscript: (text: string) => void;
+  /** Whether wake word detection is active */
+  wakeWordEnabled: boolean;
+  setWakeWordEnabled: (on: boolean) => void;
+  /** Transient flag when wake word is detected to trigger visual animations */
+  wakeWordDetected: boolean;
+  clearWakeWordDetected: () => void;
+  /** Submits the user-rectified text as an execution task to SAM */
+  submitRectifiedText: (text: string) => Promise<void>;
   /** A quiet, one-off message that is not an error; null when there is none. */
   notice: string | null;
   dismissNotice: () => void;
@@ -134,9 +163,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const { sessionTasks, events, health, submitTask, cancelTask } = useTaskSession();
   const [speakReplies, setSpeakRepliesState] = useState<boolean>(readSpeakReplies);
   const [audioConfig, setAudioConfigState] = useState<VoiceAudioConfig>(getVoiceAudioConfig);
+  const [liveTranscript, setLiveTranscript] = useState<string>("");
+  const [wakeWordEnabled, setWakeWordEnabledState] = useState<boolean>(readWakeWordEnabled);
+  const [wakeWordDetected, setWakeWordDetected] = useState<boolean>(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
   const shownNotices = useRef(new Set<string>());
+
+  const setWakeWordEnabled = useCallback((on: boolean) => {
+    setWakeWordEnabledState(on);
+    writeWakeWordEnabled(on);
+  }, []);
+
+  const clearWakeWordDetected = useCallback(() => {
+    setWakeWordDetected(false);
+  }, []);
 
   const showNotice = useCallback((text: string) => {
     if (shownNotices.current.has(text)) return; // once per session is enough
@@ -293,6 +334,170 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     }
   }, [sessionTasks, speakReplies, speakText]);
 
+  // Live simultaneous real-time transcription while listening
+  useEffect(() => {
+    if (state.kind !== "listening") return;
+    if (typeof window === "undefined") return;
+
+    interface SpeechRecognitionLike {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      onresult: ((event: unknown) => void) | null;
+      onerror: ((event: unknown) => void) | null;
+      onend: (() => void) | null;
+      start(): void;
+      stop(): void;
+    }
+
+    const scope = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const SpeechRecognition = scope.SpeechRecognition || scope.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    let recognition: SpeechRecognitionLike | null = null;
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (e: unknown) => {
+        const event = e as {
+          results: Array<Array<{ transcript: string }> & { isFinal: boolean }>;
+        };
+        let final = "";
+        let interim = "";
+        for (let i = 0; i < event.results.length; i++) {
+          const item = event.results[i];
+          if (item.isFinal) {
+            final += item[0].transcript + " ";
+          } else {
+            interim += item[0].transcript;
+          }
+        }
+        const formatted = formatTranscript(final + interim);
+        if (formatted) {
+          setLiveTranscript(formatted);
+        }
+      };
+
+      recognition.onerror = () => {};
+      recognition.start();
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [state.kind]);
+
+  // Passive wake-word listener when idle and wakeWordEnabled
+  useEffect(() => {
+    if (state.kind !== "idle" || !wakeWordEnabled) return;
+    if (typeof window === "undefined") return;
+
+    interface SpeechRecognitionLike {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      onresult: ((event: unknown) => void) | null;
+      onerror: ((event: unknown) => void) | null;
+      onend: (() => void) | null;
+      start(): void;
+      stop(): void;
+    }
+
+    const scope = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const SpeechRecognition = scope.SpeechRecognition || scope.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    let recognition: SpeechRecognitionLike | null = null;
+    let active = true;
+
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (e: unknown) => {
+        const event = e as {
+          resultIndex: number;
+          results: Array<Array<{ transcript: string }>>;
+        };
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+          const match = detectWakeWord(text);
+          if (match.detected) {
+            setWakeWordDetected(true);
+            setTimeout(() => setWakeWordDetected(false), 3500);
+            if (match.commandText) {
+              setLiveTranscript(formatTranscript(match.commandText));
+            } else {
+              setLiveTranscript("");
+            }
+            controller.press();
+            break;
+          }
+        }
+      };
+
+      recognition.onend = () => {
+        if (active && state.kind === "idle" && wakeWordEnabled) {
+          try {
+            recognition?.start();
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      recognition.onerror = () => {};
+      recognition.start();
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      active = false;
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [state.kind, wakeWordEnabled, controller]);
+
+  const submitRectifiedText = useCallback(
+    async (rectified: string) => {
+      const text = rectified.trim();
+      if (!text) return;
+      controller.stop();
+      setLiveTranscript("");
+      await latest.current.submitTask({
+        instruction: text,
+        input_type: "text",
+        attachments: [],
+      });
+    },
+    [controller],
+  );
+
   const value = useMemo<VoiceValue>(
     () => ({
       state,
@@ -308,6 +513,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       audioConfig,
       setAudioConfig,
       speak: speakText,
+      liveTranscript,
+      setLiveTranscript,
+      wakeWordEnabled,
+      setWakeWordEnabled,
+      wakeWordDetected,
+      clearWakeWordDetected,
+      submitRectifiedText,
       notice,
       dismissNotice: () => setNotice(null),
     }),
@@ -323,6 +535,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       audioConfig,
       setAudioConfig,
       speakText,
+      liveTranscript,
+      wakeWordEnabled,
+      setWakeWordEnabled,
+      wakeWordDetected,
+      clearWakeWordDetected,
+      submitRectifiedText,
       notice,
     ],
   );

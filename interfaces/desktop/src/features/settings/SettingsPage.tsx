@@ -125,7 +125,7 @@ export function SettingsPage() {
   useRuntimePolling();
 
   const { profile, isSignedIn, openProfileModal, openSignInModal, signOut } = useProfile();
-  const { audioConfig, setAudioConfig, speak } = useVoice();
+  const { audioConfig, setAudioConfig, speak, wakeWordEnabled, setWakeWordEnabled } = useVoice();
   const [testingVoice, setTestingVoice] = useState(false);
 
   useEffect(() => {
@@ -374,6 +374,20 @@ export function SettingsPage() {
               </div>
             </div>
           )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-line/40 pt-3">
+            <div>
+              <p className="text-xs font-semibold text-ink">Wake Word Activation ("Hey SAM")</p>
+              <p className="text-[11px] text-mute">
+                Passive listening for "Hey SAM" with floating animated HUD and real-time simultaneous transcription.
+              </p>
+            </div>
+            <Switch
+              checked={wakeWordEnabled}
+              onChange={(on) => setWakeWordEnabled(on)}
+              label="Wake Word Activation"
+            />
+          </div>
         </div>
       </Card>
 

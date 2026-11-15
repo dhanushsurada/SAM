@@ -7,6 +7,7 @@ import { phaseToSamState, phaseLabel } from "@/features/iqoo/phase";
 import { hideQuickAssistant } from "@/lib/native";
 import { VoiceProvider } from "@/features/voice/VoiceProvider";
 import { useTaskLabel, VoiceMicButton, VoiceStatusLine } from "@/features/voice/VoiceControls";
+import { VoiceListeningOverlay } from "@/features/voice/VoiceListeningOverlay";
 import { useVoice } from "@/features/voice/VoiceProvider";
 import { isVoiceTask } from "@/features/voice/taskLabel";
 import { shouldStopOnQuickAssistantEscape } from "@/features/voice/voiceMachine";
@@ -116,6 +117,7 @@ export function QuickAssistantApp() {
     <TaskSessionProvider>
       <VoiceProvider>
         <QuickAssistantInner />
+        <VoiceListeningOverlay />
       </VoiceProvider>
     </TaskSessionProvider>
   );

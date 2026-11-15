@@ -83,9 +83,9 @@ export function VoiceSpeakToggle({ size = 16 }: { size?: number }) {
   );
 }
 
-/** Controls silent mode priority override and digital volume boost. */
+/** Controls silent mode priority override, volume boost, and wake word settings. */
 export function VoiceAudioPriorityControl({ size = 16 }: { size?: number }) {
-  const { audioConfig, setAudioConfig, speak } = useVoice();
+  const { audioConfig, setAudioConfig, speak, wakeWordEnabled, setWakeWordEnabled } = useVoice();
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -200,6 +200,31 @@ export function VoiceAudioPriorityControl({ size = 16 }: { size?: number }) {
                 </div>
               </div>
             )}
+
+            {/* Wake Word Activation */}
+            <div className="flex items-start justify-between gap-2 pt-1 border-t border-line/30">
+              <div>
+                <p className="text-xs font-medium text-ink">Wake Word ("Hey SAM")</p>
+                <p className="text-[10px] text-mute leading-snug mt-0.5">
+                  Listen hands-free for "Hey SAM" and pop up live listening HUD with simultaneous STT.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={wakeWordEnabled}
+                onClick={() => setWakeWordEnabled(!wakeWordEnabled)}
+                className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                  wakeWordEnabled ? "bg-ember" : "bg-line"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-void shadow-md transition duration-200 ease-in-out ${
+                    wakeWordEnabled ? "translate-x-3.5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
 
             {/* Test Audibility Button */}
             <div className="pt-1 border-t border-line/30">
