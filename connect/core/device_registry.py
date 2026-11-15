@@ -362,6 +362,30 @@ class DeviceRegistry:
             conn.commit()
             return cur.rowcount > 0
 
+    def update_device_heartbeat(self, external_id: str, connection_state: str = "online",
+                                channel: str = DIRECT_CHANNEL) -> bool:
+        """Explicitly updates heartbeat timestamp and connection state."""
+        with sqlite3.connect(DEVICES_DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE devices SET last_active = ?, connection_state = ? "
+                "WHERE channel = ? AND external_id = ? AND status = 'trusted'",
+                (datetime.now().isoformat(), connection_state, channel, external_id)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def set_connection_state(self, external_id: str, state: str,
+                             channel: str = DIRECT_CHANNEL) -> bool:
+        """Explicitly sets connection_state ('online' or 'offline')."""
+        with sqlite3.connect(DEVICES_DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE devices SET connection_state = ? "
+                "WHERE channel = ? AND external_id = ? AND status = 'trusted'",
+                (state, channel, external_id)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
     def sweep_offline(self, stale_after_seconds: int = HEARTBEAT_STALE_SECONDS,
                        channel: str = DIRECT_CHANNEL) -> List[Dict]:
         """Flips every trusted device on `channel` whose last_active is

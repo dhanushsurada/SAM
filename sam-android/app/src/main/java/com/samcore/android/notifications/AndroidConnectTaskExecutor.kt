@@ -24,13 +24,13 @@ import kotlinx.serialization.json.put
  * - On-device local AI inference
  */
 class AndroidConnectTaskExecutor(
-    context: Context,
+    context: Context? = null,
     private val transport: SamTransport,
-    private val appLauncher: AndroidAppLauncher = AndroidAppLauncher(context.applicationContext),
-    private val fileManager: SamFileManager = SamFileManager(context.applicationContext),
-    private val mobileInference: SamMobileInferenceEngine = SamMobileInferenceEngine(context.applicationContext)
+    private val appLauncher: AndroidAppLauncher = AndroidAppLauncher(context?.applicationContext),
+    private val fileManager: SamFileManager = SamFileManager(context?.applicationContext),
+    private val mobileInference: SamMobileInferenceEngine = SamMobileInferenceEngine(context?.applicationContext)
 ) {
-    private val appContext = context.applicationContext
+    private val appContext = context?.applicationContext
 
     suspend fun execute(task: ConnectDeviceTask): TransportResult<ConnectDeviceTask> {
         val acknowledged = transport.acknowledgeConnectTask(task.taskId)
@@ -57,7 +57,7 @@ class AndroidConnectTaskExecutor(
             ?: return transport.failConnectTask(task.taskId, "Notification task payload requires a non-empty 'message'.")
 
         transport.reportConnectTaskProgress(task.taskId, "Posting a notification", 50)
-        if (!SamNotifications.notifyRouted(appContext, task.taskId, title, message)) {
+        if (appContext == null || !SamNotifications.notifyRouted(appContext, task.taskId, title, message)) {
             return transport.failConnectTask(task.taskId, "Notification permission is unavailable.")
         }
         transport.reportConnectTaskAction(task.taskId, "Submitted private notification")
@@ -181,7 +181,15 @@ class AndroidConnectTaskExecutor(
         val filename = task.payload["filename"]?.let { (it as? JsonPrimitive)?.content } ?: "received_file"
         val base64Data = task.payload["data"]?.let { (it as? JsonPrimitive)?.content } ?: ""
         val expectedSha256 = task.payload["sha256"]?.let { (it as? JsonPrimitive)?.content }
-        val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+        val bytes = try {
+            java.util.Base64.getDecoder().decode(base64Data)
+        } catch (e: Exception) {
+            try {
+                android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+            } catch (e2: Exception) {
+                return transport.failConnectTask(task.taskId, "Base64 decode failed: ${e2.message}")
+            }
+        }
 
         transport.reportConnectTaskProgress(task.taskId, "Writing file to scoped storage", 50)
         val result = fileManager.saveReceivedFile(filename, bytes, expectedSha256)

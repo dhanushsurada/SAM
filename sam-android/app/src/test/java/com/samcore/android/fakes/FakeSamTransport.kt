@@ -108,13 +108,34 @@ class FakeSamTransport : SamTransport {
 
     override suspend fun checkConnection(): TransportResult<Unit> = checkConnectionResult
 
+    val acknowledgedTasks = mutableListOf<String>()
+    val completedTasks = mutableListOf<Pair<String, kotlinx.serialization.json.JsonObject?>>()
+    val failedTasks = mutableListOf<Pair<String, String>>()
+    val progressReports = mutableListOf<Triple<String, String, Int?>>()
+    val verificationReports = mutableListOf<Triple<String, Boolean, String>>()
+
     override suspend fun refreshConnectTasks(): TransportResult<List<ConnectDeviceTask>> = connectTasksResult
-    override suspend fun acknowledgeConnectTask(taskId: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
-    override suspend fun reportConnectTaskProgress(taskId: String, message: String, pct: Int?): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun acknowledgeConnectTask(taskId: String): TransportResult<ConnectDeviceTask> {
+        acknowledgedTasks.add(taskId)
+        return connectTaskUpdateResult
+    }
+    override suspend fun reportConnectTaskProgress(taskId: String, message: String, pct: Int?): TransportResult<ConnectDeviceTask> {
+        progressReports.add(Triple(taskId, message, pct))
+        return connectTaskUpdateResult
+    }
     override suspend fun reportConnectTaskAction(taskId: String, description: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
-    override suspend fun reportConnectTaskVerification(taskId: String, verified: Boolean, detail: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
-    override suspend fun completeConnectTask(taskId: String, result: kotlinx.serialization.json.JsonObject?): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
-    override suspend fun failConnectTask(taskId: String, error: String): TransportResult<ConnectDeviceTask> = connectTaskUpdateResult
+    override suspend fun reportConnectTaskVerification(taskId: String, verified: Boolean, detail: String): TransportResult<ConnectDeviceTask> {
+        verificationReports.add(Triple(taskId, verified, detail))
+        return connectTaskUpdateResult
+    }
+    override suspend fun completeConnectTask(taskId: String, result: kotlinx.serialization.json.JsonObject?): TransportResult<ConnectDeviceTask> {
+        completedTasks.add(taskId to result)
+        return connectTaskUpdateResult
+    }
+    override suspend fun failConnectTask(taskId: String, error: String): TransportResult<ConnectDeviceTask> {
+        failedTasks.add(taskId to error)
+        return connectTaskUpdateResult
+    }
 
     override suspend fun sendTask(request: TaskRequest): TransportResult<TaskSnapshot> = sendTaskResult
 

@@ -12,12 +12,12 @@ import java.security.MessageDigest
  * Handles scoped storage and received file operations.
  * Complies with Android 11+ scoped storage requirements (no broad MANAGE_EXTERNAL_STORAGE).
  */
-class SamFileManager(private val context: Context) {
+open class SamFileManager(protected val context: Context?) {
 
-    private val downloadsDir: File
-        get() = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+    protected open val downloadsDir: File
+        get() = context?.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context?.filesDir ?: File(System.getProperty("java.io.tmpdir", "/tmp"))
 
-    fun saveReceivedFile(filename: String, bytes: ByteArray, expectedSha256: String? = null): FileResult {
+    open fun saveReceivedFile(filename: String, bytes: ByteArray, expectedSha256: String? = null): FileResult {
         return try {
             val sanitized = filename.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
             val targetFile = File(downloadsDir, sanitized)

@@ -9,10 +9,11 @@ import android.util.Log
 /**
  * Handles intent-based application launching, web browsing, and sharing.
  */
-class AndroidAppLauncher(private val context: Context) {
+open class AndroidAppLauncher(protected val context: Context?) {
 
-    fun launchAppByNameOrPackage(appNameOrPkg: String): Boolean {
-        val pm = context.packageManager
+    open fun launchAppByNameOrPackage(appNameOrPkg: String): Boolean {
+        val ctx = context ?: return false
+        val pm = ctx.packageManager
 
         // 1. Direct package match
         val directIntent = pm.getLaunchIntentForPackage(appNameOrPkg)
@@ -42,7 +43,8 @@ class AndroidAppLauncher(private val context: Context) {
         return false
     }
 
-    fun openUrl(url: String): Boolean {
+    open fun openUrl(url: String): Boolean {
+        val ctx = context ?: return false
         return try {
             val validUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
                 "https://$url"
@@ -50,7 +52,7 @@ class AndroidAppLauncher(private val context: Context) {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(validUrl)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            ctx.startActivity(intent)
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open URL $url: ${e.message}", e)
@@ -58,7 +60,8 @@ class AndroidAppLauncher(private val context: Context) {
         }
     }
 
-    fun shareContent(text: String, title: String = "Share"): Boolean {
+    open fun shareContent(text: String, title: String = "Share"): Boolean {
+        val ctx = context ?: return false
         return try {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -69,7 +72,7 @@ class AndroidAppLauncher(private val context: Context) {
             val chooser = Intent.createChooser(intent, title).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(chooser)
+            ctx.startActivity(chooser)
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to share content: ${e.message}", e)

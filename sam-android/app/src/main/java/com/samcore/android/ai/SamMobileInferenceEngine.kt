@@ -41,17 +41,19 @@ data class InferenceMetrics(
  * Native Android Mobile AI Inference Engine.
  * Supports on-device inference via mobile LLM runtimes (LiteRT / llama.cpp mobile / MediaPipe).
  */
-class SamMobileInferenceEngine(private val context: Context) {
+open class SamMobileInferenceEngine(protected val context: Context?) {
 
-    private val modelsDir: File
-        get() = File(context.filesDir, "models").apply { mkdirs() }
+    protected open val modelsDir: File
+        get() = context?.let { File(it.filesDir, "models") } ?: File(System.getProperty("java.io.tmpdir", "/tmp"), "sam_models")
 
-    private var activeModel: MobileModelInfo? = null
-    private var isModelLoaded: Boolean = false
+    protected var activeModel: MobileModelInfo? = null
+    protected var isModelLoaded: Boolean = false
 
-    val hardwareTier: MobileHardwareTier
+    open val hardwareTier: MobileHardwareTier
         get() {
-            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val ctx = context ?: return MobileHardwareTier.MEDIUM
+            val actManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                ?: return MobileHardwareTier.MEDIUM
             val memInfo = ActivityManager.MemoryInfo()
             actManager.getMemoryInfo(memInfo)
             val totalRamGb = (memInfo.totalMem / (1024 * 1024 * 1024)).toInt()
@@ -137,7 +139,7 @@ class SamMobileInferenceEngine(private val context: Context) {
         }
     }
 
-    suspend fun infer(prompt: String): Pair<String, InferenceMetrics> = withContext(Dispatchers.IO) {
+    open suspend fun infer(prompt: String): Pair<String, InferenceMetrics> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         
         val responseText = if (isModelLoaded && activeModel != null) {
