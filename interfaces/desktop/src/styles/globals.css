@@ -22,17 +22,40 @@
     overflow-x: hidden;
   }
 
-  /* Subtle ambient lighting effect at top of app — translucent minimal frosted glow */
+  /* Dynamic atmospheric canvas lighting — gives optical depth in both light & dark */
   body::before {
     content: "";
     position: fixed;
     top: -140px;
-    left: 15%;
-    right: 15%;
-    height: 380px;
-    background: radial-gradient(ellipse 65% 50% at 50% 0%, rgb(var(--sam-ember) / 0.05), transparent 75%);
+    left: 8%;
+    right: 8%;
+    height: 420px;
+    background: radial-gradient(ellipse 70% 60% at 50% 0%, rgb(var(--sam-ember) / 0.08), transparent 75%);
     pointer-events: none;
     z-index: 0;
+    transition: background 300ms ease;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    bottom: -120px;
+    right: 5%;
+    width: 520px;
+    height: 420px;
+    background: radial-gradient(circle at 60% 60%, rgb(var(--sam-ember) / 0.05), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+    transition: background 300ms ease;
+  }
+
+  /* Rich atmospheric ambient light in daytime light mode */
+  html[data-theme="light"] body::before {
+    background: radial-gradient(ellipse 75% 65% at 50% -20px, rgb(var(--sam-ember) / 0.14), transparent 75%);
+  }
+
+  html[data-theme="light"] body::after {
+    background: radial-gradient(circle at 60% 60%, rgb(var(--sam-ember) / 0.09), transparent 70%);
   }
 
   /* Custom sleek scrollbar */
@@ -48,7 +71,7 @@
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--sam-mute) / 0.5);
+    background: rgb(var(--sam-ember) / 0.5);
   }
 
   code,
@@ -67,49 +90,53 @@
   }
 
   ::selection {
-    background: rgb(var(--sam-ember) / 0.22);
+    background: rgb(var(--sam-ember) / 0.25);
   }
 }
 
-/* Glassmorphism & Translucent Minimal Utilities */
+/* Glassmorphism & Translucent Depth Utilities */
 @layer utilities {
   .glass-panel {
-    background-color: rgb(var(--sam-surface) / 0.72);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgb(var(--sam-line) / 0.6);
+    background-color: rgb(var(--sam-surface) / 0.82);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgb(var(--sam-line) / 0.75);
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
   }
 
   .glass-card {
-    background-color: rgb(var(--sam-surface) / 0.55);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgb(var(--sam-line) / 0.5);
+    background-color: rgb(var(--sam-surface) / 0.78);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--sam-line) / 0.65);
+    box-shadow: 0 4px 18px -2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
     transition: all var(--sam-motion-state) ease;
   }
 
   .glass-card:hover {
-    background-color: rgb(var(--sam-surface) / 0.75);
-    border-color: rgb(var(--sam-line) / 0.8);
+    background-color: rgb(var(--sam-surface) / 0.95);
+    border-color: rgb(var(--sam-ember) / 0.4);
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.08), 0 0 16px -2px rgb(var(--sam-ember) / 0.18);
   }
 
   .glass-pill {
-    background-color: rgb(var(--sam-surface) / 0.45);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgb(var(--sam-line) / 0.5);
+    background-color: rgb(var(--sam-surface) / 0.65);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgb(var(--sam-line) / 0.6);
   }
 
   .glass-input {
-    background-color: rgb(var(--sam-void) / 0.55);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgb(var(--sam-line) / 0.7);
+    background-color: rgb(var(--sam-void) / 0.65);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgb(var(--sam-line) / 0.75);
   }
 
   .glass-input:focus {
-    border-color: rgb(var(--sam-ember) / 0.6);
+    border-color: rgb(var(--sam-ember) / 0.7);
     outline: none;
+    box-shadow: 0 0 0 1px rgb(var(--sam-ember) / 0.25);
   }
 }
 

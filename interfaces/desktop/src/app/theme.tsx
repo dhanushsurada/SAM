@@ -5,6 +5,9 @@ import {
   type ColorTemplate,
   type ColorTemplateMeta,
   COLOR_TEMPLATES,
+  hexToRgb,
+  rgbToTriplet,
+  getContrastInk,
 } from "./themePresets";
 
 export type { Theme, ColorTemplate, ColorTemplateMeta };
@@ -12,22 +15,29 @@ export { COLOR_TEMPLATES };
 
 const THEME_STORAGE_KEY = "sam.theme";
 const TEMPLATE_STORAGE_KEY = "sam.color_template";
+const CUSTOM_COLOR_STORAGE_KEY = "sam.custom_color";
+
+const DEFAULT_CUSTOM_COLOR = "#3B82F6"; // Electric Sapphire Blue
 
 interface ThemeContextValue {
   theme: Theme;
   colorTemplate: ColorTemplate;
+  customColor: string;
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
   setColorTemplate: (tpl: ColorTemplate) => void;
+  setCustomColor: (hex: string) => void;
   templates: ColorTemplateMeta[];
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: "dark",
   colorTemplate: "obsidian",
+  customColor: DEFAULT_CUSTOM_COLOR,
   toggleTheme: () => {},
   setTheme: () => {},
   setColorTemplate: () => {},
+  setCustomColor: () => {},
   templates: COLOR_TEMPLATES,
 });
 
@@ -43,17 +53,23 @@ function getInitialColorTemplate(): ColorTemplate {
   const stored = window.localStorage.getItem(TEMPLATE_STORAGE_KEY) as ColorTemplate | null;
   if (
     stored &&
-    ["obsidian", "frost", "emerald", "amethyst", "titanium", "amber"].includes(stored)
+    ["obsidian", "frost", "emerald", "amethyst", "coral", "titanium", "amber", "custom"].includes(stored)
   ) {
     return stored;
   }
-  // Default to obsidian frost (minimal glass, zero orange)
   return "obsidian";
+}
+
+function getInitialCustomColor(): string {
+  if (typeof window === "undefined") return DEFAULT_CUSTOM_COLOR;
+  const stored = window.localStorage.getItem(CUSTOM_COLOR_STORAGE_KEY);
+  return stored && /^#[0-9A-Fa-f]{3,6}$/.test(stored) ? stored : DEFAULT_CUSTOM_COLOR;
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(getInitialTheme);
   const [colorTemplate, setColorTemplateState] = useState<ColorTemplate>(getInitialColorTemplate);
+  const [customColor, setCustomColorState] = useState<string>(getInitialCustomColor);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -63,20 +79,51 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.colorTemplate = colorTemplate;
     window.localStorage.setItem(TEMPLATE_STORAGE_KEY, colorTemplate);
-  }, [colorTemplate]);
+
+    if (colorTemplate === "custom") {
+      const rgb = hexToRgb(customColor);
+      if (rgb) {
+        const triplet = rgbToTriplet(rgb.r, rgb.g, rgb.b);
+        const ink = getContrastInk(rgb.r, rgb.g, rgb.b);
+        document.documentElement.style.setProperty("--sam-ember", triplet);
+        document.documentElement.style.setProperty("--sam-ember-ink", ink);
+        document.documentElement.style.setProperty("--sam-ember-text", triplet);
+      }
+    } else {
+      // Clear manual style properties so CSS template rules apply
+      document.documentElement.style.removeProperty("--sam-ember");
+      document.documentElement.style.removeProperty("--sam-ember-ink");
+      document.documentElement.style.removeProperty("--sam-ember-text");
+    }
+  }, [colorTemplate, customColor, theme]);
 
   const setTheme = (t: Theme) => setThemeState(t);
   const toggleTheme = () => setThemeState((prev) => (prev === "dark" ? "light" : "dark"));
-  const setColorTemplate = (tpl: ColorTemplate) => setColorTemplateState(tpl);
+
+  const setColorTemplate = (tpl: ColorTemplate) => {
+    setColorTemplateState(tpl);
+  };
+
+  const setCustomColor = (hex: string) => {
+    setCustomColorState(hex);
+    setColorTemplateState("custom");
+    try {
+      window.localStorage.setItem(CUSTOM_COLOR_STORAGE_KEY, hex);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <ThemeContext.Provider
       value={{
         theme,
         colorTemplate,
+        customColor,
         toggleTheme,
         setTheme,
         setColorTemplate,
+        setCustomColor,
         templates: COLOR_TEMPLATES,
       }}
     >

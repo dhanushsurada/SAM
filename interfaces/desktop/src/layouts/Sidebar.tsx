@@ -39,9 +39,9 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     <div className="flex h-full flex-col bg-void/60 backdrop-blur-xl">
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-line/40">
         <div className="flex items-center gap-2.5">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-surface border border-line/80 text-ink font-bold text-xs shadow-sm">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-ember/25 to-ember/10 border border-ember/40 text-ember-text font-bold text-xs shadow-sm">
             S
-            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-ember" />
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-ember shadow-[0_0_8px_rgb(var(--sam-ember)/0.8)]" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">

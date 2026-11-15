@@ -3,15 +3,13 @@
  *
  * Values are space-separated RGB triplets (not hex) so Tailwind's
  * `rgb(var(--x) / <alpha-value>)` pattern can apply opacity per-use — see
- * tailwind.config.ts. Dark is the default (SAM reads as an instrument panel
- * for an autonomous process, most legible dark); [data-theme="light"] on
- * <html> swaps the set below.
+ * tailwind.config.ts.
  *
  * Theme Presets / Color Templates:
  * Controlled via [data-color-template="..."] attribute on <html> or :root.
- * Default template is "obsidian" (Minimal Glass / Obsidian Frost):
- * sleek monochromatic silver/white glass accents, transparent surfaces,
- * zero Anthropic orange/coral.
+ * In Dark Mode: default is Obsidian Frost (monochromatic platinum / silver glass).
+ * In Light Mode: default is Cobalt Sapphire (#2563EB), giving rich crisp depth
+ * instead of a flat dull grey board.
  */
 
 :root {
@@ -22,7 +20,7 @@
   --sam-ink: 242 244 247;     /* #F2F4F7 high contrast primary text */
   --sam-mute: 138 145 156;    /* #8A919C crisp secondary text */
 
-  /* DEFAULT ACCENT: Obsidian Frost / Minimal Silver Glass (monochromatic, zero orange) */
+  /* DEFAULT ACCENT (Dark Mode): Obsidian Frost / Minimal Silver Glass */
   --sam-ember: 240 242 245;   /* Crisp clean platinum / white */
   --sam-ember-ink: 10 12 16;  /* Pitch near-black text for fills */
   --sam-ember-text: 240 242 245;
@@ -44,7 +42,7 @@
    COLOR TEMPLATES (Dark Mode)
    ------------------------------------------------------------- */
 
-/* Template 1: Obsidian Frost (Minimal Silver Glass - Default) */
+/* Template 1: Obsidian Frost (Minimal Silver Glass - Default Dark) */
 :root[data-color-template="obsidian"],
 html[data-color-template="obsidian"] {
   --sam-ember: 240 242 245;
@@ -76,7 +74,15 @@ html[data-color-template="amethyst"] {
   --sam-ember-text: 167 139 250;
 }
 
-/* Template 5: Titanium Slate (Pure Industrial Monochromatic) */
+/* Template 5: Sunset Coral (Luminous Rose Coral) */
+:root[data-color-template="coral"],
+html[data-color-template="coral"] {
+  --sam-ember: 251 113 133;     /* #FB7185 */
+  --sam-ember-ink: 28 8 14;
+  --sam-ember-text: 251 113 133;
+}
+
+/* Template 6: Titanium Slate (Pure Industrial Monochromatic) */
 :root[data-color-template="titanium"],
 html[data-color-template="titanium"] {
   --sam-ember: 203 213 225;     /* #CBD5E1 */
@@ -84,7 +90,7 @@ html[data-color-template="titanium"] {
   --sam-ember-text: 203 213 225;
 }
 
-/* Template 6: Warm Amber (Legacy Warm Glow - Optional) */
+/* Template 7: Warm Amber (Legacy Warm Glow - Optional) */
 :root[data-color-template="amber"],
 html[data-color-template="amber"] {
   --sam-ember: 245 158 11;      /* #F59E0B */
@@ -93,66 +99,74 @@ html[data-color-template="amber"] {
 }
 
 /* -------------------------------------------------------------
-   LIGHT MODE & LIGHT MODE TEMPLATES
+   LIGHT MODE (Daytime / High-Depth Luminous Theme)
    ------------------------------------------------------------- */
 
 :root[data-theme="light"],
 html[data-theme="light"] {
-  --sam-void: 250 250 250;    /* #FAFAFA */
-  --sam-surface: 255 255 255; /* #FFFFFF */
-  --sam-line: 228 231 236;    /* #E4E7EC */
-  --sam-ink: 15 23 42;        /* #0F172A */
-  --sam-mute: 100 116 139;    /* #64748B */
+  --sam-void: 247 249 253;    /* #F7F9FD soft luminous porcelain with cool depth */
+  --sam-surface: 255 255 255; /* #FFFFFF crisp elevated glass */
+  --sam-line: 226 232 240;    /* #E2E8F0 hairline border */
+  --sam-ink: 15 23 42;        /* #0F172A sharp readable text */
+  --sam-mute: 100 116 139;    /* #64748B deep slate secondary */
 
-  /* Default Light Accent: Minimal Deep Obsidian Slate */
-  --sam-ember: 15 23 42;
+  /* Default Light Accent: Vibrant Royal Cobalt Sapphire (#2563EB) — rich, crisp depth */
+  --sam-ember: 37 99 235;
   --sam-ember-ink: 255 255 255;
-  --sam-ember-text: 15 23 42;
+  --sam-ember-text: 29 78 216; /* #1D4ED8 */
 
-  --sam-success: 22 130 90;    /* #16825A deepened for contrast on white */
-  --sam-warn: 161 111 8;       /* #A16F08 deepened — raw gold fails on white */
-  --sam-danger: 197 48 53;     /* #C53035 deepened */
-  --sam-unverified: 90 95 102; /* #5A5F66 */
+  --sam-success: 16 185 129;   /* #10B981 emerald */
+  --sam-warn: 217 119 6;       /* #D97706 warm amber */
+  --sam-danger: 225 29 72;     /* #E11D48 vivid rose coral */
+  --sam-unverified: 100 116 139;
 }
 
+/* Light Mode Specific Presets */
 :root[data-theme="light"][data-color-template="obsidian"],
 html[data-theme="light"][data-color-template="obsidian"] {
-  --sam-ember: 15 23 42;
+  --sam-ember: 37 99 235;      /* #2563EB Royal Cobalt */
   --sam-ember-ink: 255 255 255;
-  --sam-ember-text: 15 23 42;
+  --sam-ember-text: 29 78 216;
 }
 
 :root[data-theme="light"][data-color-template="frost"],
 html[data-theme="light"][data-color-template="frost"] {
   --sam-ember: 2 132 199;      /* #0284C7 Sky-600 */
   --sam-ember-ink: 255 255 255;
-  --sam-ember-text: 2 132 199;
+  --sam-ember-text: 3 105 161;
 }
 
 :root[data-theme="light"][data-color-template="emerald"],
 html[data-theme="light"][data-color-template="emerald"] {
   --sam-ember: 5 150 105;      /* #059669 Emerald-600 */
   --sam-ember-ink: 255 255 255;
-  --sam-ember-text: 5 150 105;
+  --sam-ember-text: 4 120 87;
 }
 
 :root[data-theme="light"][data-color-template="amethyst"],
 html[data-theme="light"][data-color-template="amethyst"] {
   --sam-ember: 124 58 237;     /* #7C3AED Violet-600 */
   --sam-ember-ink: 255 255 255;
-  --sam-ember-text: 124 58 237;
+  --sam-ember-text: 109 40 217;
+}
+
+:root[data-theme="light"][data-color-template="coral"],
+html[data-theme="light"][data-color-template="coral"] {
+  --sam-ember: 225 29 72;      /* #E11D48 Rose-600 */
+  --sam-ember-ink: 255 255 255;
+  --sam-ember-text: 190 18 60;
 }
 
 :root[data-theme="light"][data-color-template="titanium"],
 html[data-theme="light"][data-color-template="titanium"] {
-  --sam-ember: 51 65 85;       /* #334155 Slate-700 */
+  --sam-ember: 71 85 105;      /* #475569 Slate-600 */
   --sam-ember-ink: 255 255 255;
   --sam-ember-text: 51 65 85;
 }
 
 :root[data-theme="light"][data-color-template="amber"],
 html[data-theme="light"][data-color-template="amber"] {
-  --sam-ember: 180 83 9;       /* #B45309 Amber-700 */
+  --sam-ember: 217 119 6;      /* #D97706 Amber-600 */
   --sam-ember-ink: 255 255 255;
   --sam-ember-text: 180 83 9;
 }

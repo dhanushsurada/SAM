@@ -1,5 +1,5 @@
 import { useLocation, Link } from "react-router-dom";
-import { FiMenu, FiSun, FiMoon, FiCpu, FiTerminal, FiDroplet } from "react-icons/fi";
+import { FiMenu, FiSun, FiMoon, FiCpu, FiTerminal } from "react-icons/fi";
 import { findRoute } from "@/app/routes";
 import { useTheme } from "@/app/theme";
 import { Button } from "@/components/Button";
@@ -48,9 +48,12 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           onClick={() => openProfileModal("appearance")}
           aria-label="Color Template & Appearance"
           title={`Appearance: ${colorTemplate}`}
-          className="flex items-center justify-center rounded-lg h-8 w-8 border border-line/60 bg-surface/40 text-mute hover:text-ink hover:border-ember/40 hover:bg-surface transition-all"
+          className="flex items-center justify-center rounded-lg h-8 w-8 border border-line/60 bg-surface/60 text-mute hover:text-ink hover:border-ember/60 hover:bg-surface transition-all shadow-sm"
         >
-          <FiDroplet size={14} className="text-ember" />
+          <span
+            className="h-3.5 w-3.5 rounded-full border border-white/30 shadow-[0_0_8px_rgb(var(--sam-ember)/0.6)]"
+            style={{ backgroundColor: "rgb(var(--sam-ember))" }}
+          />
         </button>
 
         {/* Light / Dark Toggle */}
