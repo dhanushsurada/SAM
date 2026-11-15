@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 _user_pkgs = Path.home() / ".sam_data" / "python-packages"
-if _user_pkgs.exists():
+if _user_pkgs.exists() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_user_pkgs))
     except Exception:

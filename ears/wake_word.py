@@ -14,7 +14,7 @@ from typing import Callable
 try:
     from config.settings import SAM_DATA_DIR
     _pkgs = SAM_DATA_DIR / "python-packages"
-    if _pkgs.exists():
+    if _pkgs.exists() and sys.version_info >= (3, 10):
         site.addsitedir(str(_pkgs))
 except Exception:
     pass

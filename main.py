@@ -23,7 +23,7 @@ from pathlib import Path
 from config.settings import SAM_DATA_DIR
 
 _user_pkgs = SAM_DATA_DIR / "python-packages"
-if _user_pkgs.exists():
+if _user_pkgs.exists() and sys.version_info >= (3, 10):
     try:
         site.addsitedir(str(_user_pkgs))
     except Exception:
@@ -31,7 +31,7 @@ if _user_pkgs.exists():
 
 _cur = Path(__file__).resolve().parent
 for _ in range(5):
-    if (_cur / "site-packages").is_dir():
+    if (_cur / "site-packages").is_dir() and sys.version_info >= (3, 10):
         try:
             site.addsitedir(str(_cur / "site-packages"))
         except Exception:
