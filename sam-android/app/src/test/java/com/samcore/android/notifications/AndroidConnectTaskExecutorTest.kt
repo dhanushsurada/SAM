@@ -348,31 +348,30 @@ class AndroidConnectTaskExecutorTest {
     fun execute_receiveFile_withRealFileManager_calculatesSha256AndSavesToDisk() = runBlocking {
         val transport = FakeSamTransport()
         transport.connectTaskUpdateResult = TransportResult.Success(createTask(AndroidConnectTaskExecutor.ACTION_RECEIVE_FILE))
-        val realFileManager = SamFileManager(context = null)
-        val executor = AndroidConnectTaskExecutor(context = null, transport = transport, fileManager = realFileManager)
+        val testDir = File(System.getProperty("java.io.tmpdir") ?: "/tmp", "sam_exec_test_${System.currentTimeMillis()}").apply { mkdirs() }
+        try {
+            val realFileManager = SamFileManager(context = null, baseDir = testDir)
+            val executor = AndroidConnectTaskExecutor(context = null, transport = transport, fileManager = realFileManager)
 
-        val rawText = "Verified end-to-end payload for executor file reception"
-        val rawBytes = rawText.toByteArray(Charsets.UTF_8)
-        val calculatedSha = realFileManager.computeSha256(rawBytes)
-        val base64Data = Base64.getEncoder().encodeToString(rawBytes)
+            val rawText = "Verified end-to-end payload for executor file reception"
+            val rawBytes = rawText.toByteArray(Charsets.UTF_8)
+            val calculatedSha = realFileManager.computeSha256(rawBytes)
+            val base64Data = Base64.getEncoder().encodeToString(rawBytes)
 
-        val task = createTask(AndroidConnectTaskExecutor.ACTION_RECEIVE_FILE, buildJsonObject {
-            put("filename", "real_file_test.txt")
-            put("data", base64Data)
-            put("sha256", calculatedSha)
-        })
-        val result = executor.execute(task)
+            val task = createTask(AndroidConnectTaskExecutor.ACTION_RECEIVE_FILE, buildJsonObject {
+                put("filename", "real_file_test.txt")
+                put("data", base64Data)
+                put("sha256", calculatedSha)
+            })
+            val result = executor.execute(task)
 
-        assertTrue(result is TransportResult.Success)
-        assertEquals(1, transport.completedTasks.size)
-        val payload = transport.completedTasks[0].second
-        assertEquals(JsonPrimitive(true), payload!!["saved"])
-        assertEquals(JsonPrimitive(calculatedSha), payload["sha256"])
-
-        // Clean up written file
-        val writtenPath = (payload["path"] as? JsonPrimitive)?.content
-        if (writtenPath != null) {
-            File(writtenPath).delete()
+            assertTrue(result is TransportResult.Success)
+            assertEquals(1, transport.completedTasks.size)
+            val payload = transport.completedTasks[0].second
+            assertEquals(JsonPrimitive(true), payload!!["saved"])
+            assertEquals(JsonPrimitive(calculatedSha), payload["sha256"])
+        } finally {
+            testDir.deleteRecursively()
         }
     }
 

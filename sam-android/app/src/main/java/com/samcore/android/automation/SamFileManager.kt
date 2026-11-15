@@ -12,11 +12,14 @@ import java.security.MessageDigest
  * Handles scoped storage and received file operations.
  * Complies with Android 11+ scoped storage requirements (no broad MANAGE_EXTERNAL_STORAGE).
  */
-open class SamFileManager(protected val context: Context? = null) {
+open class SamFileManager(
+    protected val context: Context? = null,
+    protected val baseDir: File? = null
+) {
 
     protected open val downloadsDir: File
         get() {
-            val dir = try {
+            val dir = baseDir ?: try {
                 context?.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                     ?: context?.filesDir
                     ?: File(System.getProperty("java.io.tmpdir") ?: "/tmp", "sam_downloads")
