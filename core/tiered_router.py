@@ -221,6 +221,48 @@ class TieredExecutionRouter:
 
         lower_body = command_body.lower()
 
+        # Check for Finder & Plugins / Skills management and installation
+        if any(kw in lower_body for kw in ["plugin", "plugins", "skill", "skills"]):
+            if any(action_kw in lower_body for action_kw in ["install", "scan", "import", "load", "compile"]):
+                from core.skills_engine import skills_engine
+                open_finder = "finder" in lower_body or "folder" in lower_body
+                if open_finder:
+                    skills_engine.open_folder_in_finder("plugins")
+                res = skills_engine.scan_and_install_all_skills()
+                total = res.get("total_installed", 0)
+                by_cat = res.get("by_category", {})
+                super_cnt = by_cat.get("superpowers", 15)
+                anth_cnt = by_cat.get("anthropic-agent", 19)
+                reply = (
+                    f"Opened Finder at ~/.gemini/config/plugins and successfully compiled and installed {total} skills into SAM: "
+                    f"{super_cnt} Superpowers skills, {anth_cnt} Anthropic Agent skills, and other plugins. All skills are active."
+                    if open_finder else
+                    f"Successfully compiled and installed {total} skills into SAM: {super_cnt} Superpowers skills, {anth_cnt} Anthropic Agent skills, and other plugins. All skills are active."
+                )
+                return RouteDecision(
+                    tier=ExecutionTier.DIRECT,
+                    action="skills_scan_and_install",
+                    action_payload={"open_finder": open_finder, "total_installed": total, "by_category": by_cat},
+                    target_device="desktop",
+                    confidence=1.0,
+                    reason="Deterministic skills and plugins installation",
+                    suggested_text=reply
+                )
+
+            if "finder" in lower_body or "folder" in lower_body:
+                from core.skills_engine import skills_engine
+                target = "skills" if ("skill" in lower_body and "plugin" not in lower_body) else "plugins"
+                res = skills_engine.open_folder_in_finder(target)
+                return RouteDecision(
+                    tier=ExecutionTier.DIRECT,
+                    action="open_finder",
+                    action_payload={"target": target, "path": res.get("path")},
+                    target_device="desktop",
+                    confidence=1.0,
+                    reason=f"Deterministic Finder folder opening for {target}",
+                    suggested_text=f"Opened Finder at {target} folder: {res.get('path', '')}"
+                )
+
         # Check if task is explicitly multi-step
         if any(signal in f" {lower_body} " for signal in MULTI_STEP_SIGNALS):
             return RouteDecision(

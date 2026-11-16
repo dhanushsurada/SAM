@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import shutil
@@ -113,13 +114,27 @@ def _version_tuple(value: str) -> Tuple[int, ...]:
     return tuple(int(part or 0) for part in match.groups())
 
 
+def _tool_env() -> dict:
+    env = os.environ.copy()
+    current = env.get("PATH", "")
+    prefixes = [p for p in ("/usr/local/bin", "/opt/homebrew/bin") if Path(p).is_dir() and p not in current]
+    if prefixes:
+        env["PATH"] = ":".join(prefixes) + (f":{current}" if current else "")
+    return env
+
+
 def _reported_version(executable: str,
                        runner: Callable = subprocess.run) -> Optional[str]:
     try:
         result = runner([executable, "--version"], capture_output=True,
-                        text=True, timeout=5, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
+                        text=True, timeout=5, check=False, env=_tool_env())
+    except (OSError, subprocess.SubprocessError, TypeError):
+        try:
+            # Fallback if runner doesn't accept env argument (e.g. custom mock in test)
+            result = runner([executable, "--version"], capture_output=True,
+                            text=True, timeout=5, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
     output = (result.stdout or "") + " " + (result.stderr or "")
     match = VERSION_RE.search(output)
     if result.returncode != 0 or not match:
@@ -290,7 +305,14 @@ def check_tools(manifest: Optional[dict] = None,
         policy = data.get("tools", {}).get(name)
         if not policy:
             raise CompatibilityError("No compatibility policy is defined for tool {!r}".format(name))
-        executable = which(executable_names[name])
+        cmd = executable_names[name]
+        executable = which(cmd)
+        if not executable:
+            for prefix in ("/usr/local/bin", "/opt/homebrew/bin"):
+                candidate = Path(prefix) / cmd
+                if candidate.is_file():
+                    executable = str(candidate)
+                    break
         if not executable:
             formula = policy.get("homebrew_formula")
             if platform.system() == "Darwin" and formula:

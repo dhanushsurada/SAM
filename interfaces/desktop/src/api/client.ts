@@ -583,13 +583,98 @@ export function testMCPServer(id: string): Promise<{ ok: boolean; message?: stri
 }
 
 export interface SkillItem {
+  id?: string;
   name: string;
+  title?: string;
   description: string;
+  category?: string;
   compiled: boolean;
+  enabled?: boolean;
+  execution_type?: string;
+  triggers?: string[];
+  command?: string | null;
+  content?: string;
+  source_path?: string;
   use_count: number;
   last_used: string | null;
 }
 
-export function listSkills(): Promise<{ skills: SkillItem[] }> {
-  return request<{ skills: SkillItem[] }>("/skills", undefined, CORE_BASE);
+export function listSkills(category?: string, search?: string): Promise<{ skills: SkillItem[]; total?: number }> {
+  const params = new URLSearchParams();
+  if (category && category !== "all") params.append("category", category);
+  if (search) params.append("search", search);
+  const q = params.toString() ? `?${params.toString()}` : "";
+  return request<{ skills: SkillItem[]; total?: number }>(`/skills${q}`, undefined, CORE_BASE);
+}
+
+export function scanAndInstallSkills(target?: string): Promise<{
+  ok: boolean;
+  total_installed: number;
+  by_category: Record<string, number>;
+  error?: string;
+}> {
+  return request("/skills/scan-and-install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target: target || "plugins" }),
+  }, CORE_BASE);
+}
+
+export function openSkillsFolder(target: "plugins" | "skills" | "compiled" = "plugins"): Promise<{
+  ok: boolean;
+  path?: string;
+  error?: string;
+}> {
+  return request("/skills/open-folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }),
+  }, CORE_BASE);
+}
+
+export function createCustomSkill(skill: {
+  name: string;
+  title?: string;
+  description: string;
+  category?: string;
+  triggers?: string[];
+  execution_type?: string;
+  command?: string;
+  content?: string;
+}): Promise<{ ok: boolean; skill: SkillItem }> {
+  return request("/skills/custom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(skill),
+  }, CORE_BASE);
+}
+
+export function toggleSkill(name: string, enabled?: boolean): Promise<{ ok: boolean; skill: SkillItem }> {
+  return request(`/skills/${encodeURIComponent(name)}/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  }, CORE_BASE);
+}
+
+export function deleteCustomSkill(name: string): Promise<{ ok: boolean; deleted: string }> {
+  return request(`/skills/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  }, CORE_BASE);
+}
+
+export function executeSkill(name: string, input?: string, params?: Record<string, unknown>): Promise<{
+  ok: boolean;
+  stdout?: string;
+  stderr?: string;
+  returncode?: number;
+  message?: string;
+  error?: string;
+  guidance_preview?: string;
+}> {
+  return request(`/skills/${encodeURIComponent(name)}/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input: input || "", params }),
+  }, CORE_BASE);
 }

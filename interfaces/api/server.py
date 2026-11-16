@@ -780,32 +780,97 @@ def reject_founder_capture(req: FounderReviewRequest):
 
 # ─── Live Skills Endpoint ──────────────────────────────────────────────────
 
+class CreateSkillRequest(BaseModel):
+    name: str
+    title: Optional[str] = None
+    description: str
+    category: Optional[str] = "custom"
+    triggers: Optional[List[str]] = []
+    execution_type: Optional[str] = "system_command"
+    command: Optional[str] = None
+    content: Optional[str] = ""
+
+class ExecuteSkillRequest(BaseModel):
+    input: Optional[str] = ""
+    params: Optional[Dict[str, Any]] = None
+
+class ToggleSkillRequest(BaseModel):
+    enabled: Optional[bool] = None
+
+class OpenFolderRequest(BaseModel):
+    target: Optional[str] = "plugins"
+
+
 @app.get("/api/skills", dependencies=[Depends(require_local_caller)])
-def list_skills():
-    """List compiled skills from ~/.sam_data/skills/compiled."""
-    from config.settings import SAM_DATA_DIR
-    skills_dir = SAM_DATA_DIR / "skills" / "compiled"
-    skills = []
-    if skills_dir.exists():
-        for f in sorted(skills_dir.glob("*.json")):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                skills.append({
-                    "name": data.get("name", f.stem),
-                    "description": data.get("description", "Compiled autonomous execution path"),
-                    "compiled": True,
-                    "use_count": data.get("use_count", 1),
-                    "last_used": data.get("last_used", None),
-                })
-            except Exception:
-                skills.append({
-                    "name": f.stem,
-                    "description": "Compiled autonomous execution path",
-                    "compiled": True,
-                    "use_count": 1,
-                    "last_used": None,
-                })
-    return {"skills": skills}
+def list_skills(category: Optional[str] = None, search: Optional[str] = None):
+    """List compiled, discovered, and built-in execution skills."""
+    from core.skills_engine import skills_engine
+    skills = skills_engine.list_skills(category=category, search=search)
+    return {"skills": skills, "total": len(skills)}
+
+
+@app.post("/api/skills/scan-and-install", dependencies=[Depends(require_local_caller)])
+def scan_and_install_skills(req: Optional[OpenFolderRequest] = None):
+    """Scan ~/.gemini/config/plugins and compile all discovered skills."""
+    from core.skills_engine import skills_engine
+    target_path = Path(req.target).expanduser().resolve() if req and req.target and req.target not in ("plugins", "skills", "compiled") else None
+    res = skills_engine.scan_and_install_all_skills(source_dir=target_path)
+    return res
+
+
+@app.post("/api/skills/open-folder", dependencies=[Depends(require_local_caller)])
+def open_skills_folder(req: Optional[OpenFolderRequest] = None):
+    """Open Finder to the plugins or skills directory."""
+    from core.skills_engine import skills_engine
+    target = req.target if req and req.target else "plugins"
+    res = skills_engine.open_folder_in_finder(target)
+    return res
+
+
+@app.post("/api/skills/custom", dependencies=[Depends(require_local_caller)])
+def create_custom_skill(req: CreateSkillRequest):
+    """Create a manual user execution skill."""
+    from core.skills_engine import skills_engine
+    skill = skills_engine.create_custom_skill(
+        name=req.name,
+        title=req.title,
+        description=req.description,
+        category=req.category or "custom",
+        triggers=req.triggers or [],
+        execution_type=req.execution_type or "system_command",
+        command=req.command,
+        content=req.content or "",
+    )
+    return {"ok": True, "skill": skill}
+
+
+@app.post("/api/skills/{skill_name}/toggle", dependencies=[Depends(require_local_caller)])
+def toggle_skill_endpoint(skill_name: str, req: Optional[ToggleSkillRequest] = None):
+    """Toggle a skill's active/disabled state."""
+    from core.skills_engine import skills_engine
+    enabled = req.enabled if req else None
+    res = skills_engine.toggle_skill(skill_name, enabled=enabled)
+    return {"ok": True, "skill": res}
+
+
+@app.delete("/api/skills/{skill_name}", dependencies=[Depends(require_local_caller)])
+def delete_custom_skill_endpoint(skill_name: str):
+    """Delete a custom execution skill."""
+    from core.skills_engine import skills_engine
+    deleted = skills_engine.delete_custom_skill(skill_name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found or cannot be deleted")
+    return {"ok": True, "deleted": skill_name}
+
+
+@app.post("/api/skills/{skill_name}/execute", dependencies=[Depends(require_local_caller)])
+def execute_skill_endpoint(skill_name: str, req: Optional[ExecuteSkillRequest] = None):
+    """Execute a skill and return results."""
+    from core.skills_engine import skills_engine
+    test_input = req.input if req else ""
+    params = req.params if req else None
+    res = skills_engine.execute_skill(skill_name, test_input=test_input, params=params)
+    return res
 
 
 # ─── Model Context Protocol (MCP) & Plugins ──────────────────────────────

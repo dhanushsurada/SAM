@@ -23,6 +23,8 @@ import {
   toggleMCPServer,
   deleteMCPServer,
   testMCPServer,
+  openSkillsFolder,
+  scanAndInstallSkills,
   type MCPServer,
   type MCPCatalogItem,
 } from "@/api/client";
@@ -55,6 +57,8 @@ export function PluginsPage() {
   const [tokenInput, setTokenInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; message: string } | null>(null);
+  const [pluginNotice, setPluginNotice] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -141,13 +145,79 @@ export function PluginsPage() {
     }
   };
 
+  const handleOpenPluginsFolder = async () => {
+    try {
+      const res = await openSkillsFolder("plugins");
+      if (res.ok) {
+        setPluginNotice("Opened Plugins folder in macOS Finder.");
+        setTimeout(() => setPluginNotice(null), 5000);
+      }
+    } catch {
+      setPluginNotice("Failed to open Plugins folder.");
+    }
+  };
+
+  const handleScanPlugins = async () => {
+    setScanning(true);
+    try {
+      const res = await scanAndInstallSkills("plugins");
+      if (res.ok) {
+        setPluginNotice(`Discovered & registered ${res.total_installed} plugin tools and skills!`);
+        setTimeout(() => setPluginNotice(null), 6000);
+        await refresh();
+      }
+    } catch {
+      setPluginNotice("Scan encountered an error.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 pb-12">
-      <PageHeader
-        title="Plugins & MCP Integrations"
-        mode="live"
-        description="Connect SAM to your developer tools and workspace services via the Model Context Protocol (MCP). Extends SAM with GitHub, Google Workspace, Slack, filesystem, and custom tools."
-      />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <PageHeader
+          title="Plugins & MCP Integrations"
+          mode="live"
+          description="Connect SAM to your developer tools and workspace services via the Model Context Protocol (MCP). Extends SAM with GitHub, Google Workspace, Slack, filesystem, and custom tools."
+        />
+        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleOpenPluginsFolder()}
+            title="Reveal Plugins folder in macOS Finder"
+            className="flex items-center gap-1.5"
+          >
+            <FiFolder size={14} />
+            <span>Open in Finder</span>
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleScanPlugins()}
+            loading={scanning}
+            title="Scan local plugins folder and compile integrations"
+            className="flex items-center gap-1.5"
+          >
+            <FiRefreshCw size={14} className={scanning ? "animate-spin" : ""} />
+            <span>Scan Plugins</span>
+          </Button>
+        </div>
+      </div>
+
+      {pluginNotice && (
+        <div className="rounded-lg border border-ember/30 bg-ember/10 p-3 text-xs font-medium text-ink flex items-center justify-between animate-fadeIn">
+          <span>{pluginNotice}</span>
+          <button
+            type="button"
+            onClick={() => setPluginNotice(null)}
+            className="text-mute hover:text-ink text-sm ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-danger/25 bg-danger/5 p-3 text-sm text-danger">

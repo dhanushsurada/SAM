@@ -349,13 +349,23 @@ class EnvironmentCompatibilityManager:
             ))
             shutil.copytree(install_target, staged_target, dirs_exist_ok=True)
             command.extend(["--upgrade", "--target", str(staged_target)])
-        command.extend(plan["requirements"])
+        reqs = list(plan["requirements"])
+        if sys.version_info < (3, 10):
+            # kokoro requires Python >= 3.10; on Python 3.9, skip kokoro to avoid blocking pip
+            reqs = [r for r in reqs if not (r.startswith("kokoro") or r.startswith("kokoro>=") or r == "kokoro")]
+        if not reqs:
+            if staged_target:
+                shutil.rmtree(staged_target, ignore_errors=True)
+            self.record_setup_step("dependency-repair", "completed",
+                                   "Required dependencies satisfied. (Kokoro TTS requires Python >= 3.10; using system speech synthesizers).")
+            return
+        command.extend(reqs)
 
         pip_env = os.environ.copy()
         if platform.system() == "Darwin":
-            brew_bin = "/opt/homebrew/bin"
-            if Path(brew_bin).exists() and brew_bin not in pip_env.get("PATH", ""):
-                pip_env["PATH"] = f"{brew_bin}:{pip_env.get('PATH', '')}"
+            for prefix_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
+                if Path(prefix_bin).exists() and prefix_bin not in pip_env.get("PATH", ""):
+                    pip_env["PATH"] = f"{prefix_bin}:{pip_env.get('PATH', '')}"
             homebrew_prefix = Path("/opt/homebrew") if Path("/opt/homebrew").exists() else Path("/usr/local")
             if homebrew_prefix.exists():
                 inc = str(homebrew_prefix / "include")

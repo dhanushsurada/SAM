@@ -94,7 +94,30 @@
   }
 }
 
-/* Glassmorphism & Translucent Depth Utilities */
+  /* Daytime mode crisp elevation and contrast */
+  html[data-theme="light"] .shadow-card {
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 8px 24px -4px rgba(15, 23, 42, 0.07), 0 0 0 1px rgb(var(--sam-line) / 0.8) !important;
+  }
+
+  html[data-theme="light"] .bg-surface {
+    background-color: #ffffff !important;
+  }
+
+  html[data-theme="light"] .bg-surface\/90 {
+    background-color: rgba(255, 255, 255, 0.96) !important;
+  }
+
+  html[data-theme="light"] .bg-surface-raised,
+  html[data-theme="light"] .bg-surface\/60 {
+    background-color: #f8fafc !important;
+  }
+
+  /* Vibrant Theme Reflections — radiates into interactive elements */
+  .shadow-card:hover {
+    box-shadow: 0 8px 26px -4px rgba(0, 0, 0, 0.08), 0 0 18px -2px rgb(var(--sam-ember) / 0.22) !important;
+  }
+
+  /* Glassmorphism & Translucent Depth Utilities */
 @layer utilities {
   .glass-panel {
     background-color: rgb(var(--sam-surface) / 0.82);

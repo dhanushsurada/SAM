@@ -104,11 +104,11 @@ html[data-color-template="amber"] {
 
 :root[data-theme="light"],
 html[data-theme="light"] {
-  --sam-void: 247 249 253;    /* #F7F9FD soft luminous porcelain with cool depth */
-  --sam-surface: 255 255 255; /* #FFFFFF crisp elevated glass */
-  --sam-line: 226 232 240;    /* #E2E8F0 hairline border */
-  --sam-ink: 15 23 42;        /* #0F172A sharp readable text */
-  --sam-mute: 100 116 139;    /* #64748B deep slate secondary */
+  --sam-void: 241 245 249;    /* #F1F5F9 crisp slate-100 canvas with distinct contrast */
+  --sam-surface: 255 255 255; /* #FFFFFF pure luminous elevated card surface */
+  --sam-line: 219 226 237;    /* #DBE2ED clear, defined structural borders */
+  --sam-ink: 15 23 42;        /* #0F172A deep slate-900 primary text */
+  --sam-mute: 100 116 139;    /* #64748B clear secondary text */
 
   /* Default Light Accent: Vibrant Royal Cobalt Sapphire (#2563EB) — rich, crisp depth */
   --sam-ember: 37 99 235;
