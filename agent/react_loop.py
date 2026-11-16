@@ -155,6 +155,8 @@ class ReactLoop:
                 return self._execute_calculate(payload)
             elif action_str == "create_document":
                 return self._execute_create_document(payload)
+            elif action_str in ("skill", "execute_skill"):
+                return self._execute_skill(payload)
             else:
                 return f"Unknown action: {action}"
 
@@ -197,6 +199,23 @@ class ReactLoop:
             output_dir=self.settings.sovereign_output_dir,
             source_documents=payload.get("source_documents"),
         )
+
+    def _execute_skill(self, payload: Dict[str, Any]) -> str:
+        from core.skills_engine import skills_engine
+        skill_name = payload.get("name") or payload.get("skill") or payload.get("id") or ""
+        test_input = payload.get("input") or payload.get("task") or ""
+        params = payload.get("parameters") or payload.get("params") or {}
+        res = skills_engine.execute_skill(skill_name, test_input=test_input, params=params)
+        if res.get("ok"):
+            if res.get("stdout"):
+                return f"Skill {skill_name} executed successfully:\n{res['stdout']}"
+            elif res.get("guidance_preview"):
+                return f"Skill {skill_name} active:\n{res['guidance_preview']}"
+            else:
+                return res.get("message", f"Skill {skill_name} completed.")
+        if res.get("guidance_preview"):
+            return f"Skill {skill_name} guidance active:\n{res['guidance_preview']}"
+        return f"Skill {skill_name} failed: {res.get('error') or res.get('stderr') or 'Execution error'}"
 
     def _execute_verified(self, action: str, payload: Dict[str, Any], step_label: str) -> Dict:
         """

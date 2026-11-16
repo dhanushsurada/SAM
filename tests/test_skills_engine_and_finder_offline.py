@@ -158,3 +158,66 @@ def test_api_skills_endpoints():
     r_del = client.delete("/api/skills/custom-echo")
     assert r_del.status_code == 200
     assert r_del.json()["ok"] is True
+
+
+def test_builtin_skills_catalog_loaded_on_startup():
+    with tempfile.TemporaryDirectory() as td:
+        empty_dir = Path(td) / "empty_skills"
+        empty_plugins = Path(td) / "empty_plugins"
+        engine = SkillsEngine(data_dir=empty_dir, plugins_dir=empty_plugins)
+        
+        all_skills = engine.list_skills()
+        # Must load all 944 built-in capabilities even with completely empty directories
+        assert len(all_skills) >= 944
+
+        # Verify key built-in capabilities
+        superpowers = [s for s in all_skills if s.get("category") == "superpowers"]
+        assert len(superpowers) >= 15
+        assert any(s["name"] == "systematic-debugging" for s in superpowers)
+        assert any(s["name"] == "test-driven-development" for s in superpowers)
+
+        anthropic = [s for s in all_skills if s.get("category") == "anthropic-agent"]
+        assert len(anthropic) >= 19
+        assert any(s["name"] == "docx" for s in anthropic)
+        assert any(s["name"] == "pdf" for s in anthropic)
+        assert any(s["name"] == "frontend-design" for s in anthropic)
+
+        # Builtin capabilities are explicitly tagged builtin: True
+        assert all(s.get("builtin") is True for s in superpowers)
+        assert all(s.get("builtin") is True for s in anthropic)
+
+
+def test_builtin_skills_cannot_be_deleted():
+    with tempfile.TemporaryDirectory() as td:
+        empty_dir = Path(td) / "empty_skills"
+        engine = SkillsEngine(data_dir=empty_dir)
+
+        # Attempt to delete built-in skill
+        deleted = engine.delete_custom_skill("systematic-debugging")
+        assert deleted is False
+
+        # Attempt to delete via API
+        r_del = client.delete("/api/skills/systematic-debugging")
+        assert r_del.status_code in (400, 403, 404, 200)
+        # Even if 200, ok must be False
+        if r_del.status_code == 200:
+            assert r_del.json().get("ok") is False
+
+        # Ensure skill still exists in engine
+        skill = engine.get_skill("systematic-debugging")
+        assert skill is not None
+        assert skill["name"] == "systematic-debugging"
+
+
+def test_react_loop_executes_builtin_skill():
+    from config.settings import Settings
+    from agent.react_loop import ReactLoop
+    settings = Settings()
+    react = ReactLoop(settings)
+    
+    # Execute built-in skill via ReAct loop handler
+    res = react.execute("skill", {"skill": "systematic-debugging"})
+    assert isinstance(res, str)
+    assert "systematic-debugging" in res
+    assert "active" in res.lower() or "executed" in res.lower() or "root cause" in res.lower()
+

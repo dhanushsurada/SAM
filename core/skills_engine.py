@@ -27,6 +27,9 @@ DEFAULT_SKILLS_DIR = SAM_DATA_DIR / "skills"
 DEFAULT_COMPILED_DIR = DEFAULT_SKILLS_DIR / "compiled"
 DEFAULT_PLUGINS_DIR = Path.home() / ".gemini" / "config" / "plugins"
 
+BUILTIN_CATALOG_PATH = Path(__file__).parent / "builtin_skills" / "catalog.json"
+BUILTIN_SKILLS_DIR = Path(__file__).parent / "builtin_skills"
+
 DEFAULT_BUILTIN_SKILLS: List[Dict[str, Any]] = [
     {
         "id": "builtin.desktop.control.click",
@@ -207,6 +210,25 @@ class SkillsEngine:
         self.compiled_dir = self.data_dir / "compiled"
         self.plugins_dir = plugins_dir or DEFAULT_PLUGINS_DIR
         self.compiled_dir.mkdir(parents=True, exist_ok=True)
+        self._builtin_catalog: Dict[str, Dict[str, Any]] = {}
+        self._load_builtin_catalog()
+
+    def _load_builtin_catalog(self) -> None:
+        """Loads SAM's permanent inbuilt skills catalog from core/builtin_skills/catalog.json."""
+        for b in DEFAULT_BUILTIN_SKILLS:
+            item = dict(b)
+            item["builtin"] = True
+            self._builtin_catalog[item["name"]] = item
+
+        if BUILTIN_CATALOG_PATH.exists():
+            try:
+                data = json.loads(BUILTIN_CATALOG_PATH.read_text(encoding="utf-8"))
+                for s in data:
+                    item = dict(s)
+                    item["builtin"] = True
+                    self._builtin_catalog[item["name"]] = item
+            except Exception as e:
+                logger.warning(f"Failed to load builtin skills catalog: {e}")
 
     def scan_and_install_all_skills(self, source_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
@@ -242,6 +264,8 @@ class SkillsEngine:
 
             cat = parsed["category"]
             by_category[cat] = by_category.get(cat, 0) + 1
+            if cat != "custom":
+                parsed["builtin"] = True
 
             # Save compiled JSON
             filename = f"{parsed['category']}-{parsed['name']}.json"
@@ -279,18 +303,23 @@ class SkillsEngine:
         self.compiled_dir.mkdir(parents=True, exist_ok=True)
         results: Dict[str, Dict[str, Any]] = {}
 
-        # 1. Load built-ins
-        for b in DEFAULT_BUILTIN_SKILLS:
-            results[b["name"]] = dict(b)
+        # 1. Start with SAM's permanent built-in capabilities
+        for name, item in self._builtin_catalog.items():
+            results[name] = dict(item)
 
-        # 2. Load compiled
-        for f in sorted(self.compiled_dir.glob("*.json")):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                name = data.get("name", f.stem)
-                results[name] = data
-            except Exception as e:
-                logger.warning(f"Error loading compiled skill {f}: {e}")
+        # 2. Overlay compiled overrides or custom user skills from ~/.sam_data/skills/compiled
+        if self.compiled_dir.exists():
+            for f in sorted(self.compiled_dir.glob("*.json")):
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                    name = data.get("name", f.stem)
+                    if name in self._builtin_catalog or data.get("category") != "custom":
+                        data["builtin"] = True
+                    else:
+                        data["builtin"] = False
+                    results[name] = data
+                except Exception as e:
+                    logger.warning(f"Error loading compiled skill {f}: {e}")
 
         skills_list = list(results.values())
 
@@ -315,11 +344,14 @@ class SkillsEngine:
                 "builtin": 0,
                 "superpowers": 1,
                 "anthropic-agent": 2,
-                "custom": 3,
+                "connect-apps": 3,
                 "linkedin": 4,
                 "marketing": 5,
-                "connect-apps": 6,
-            }.get(cat, 9)
+                "reverse-engineering": 6,
+                "video": 7,
+                "custom": 8,
+                "plugins": 9,
+            }.get(cat, 10)
             return (cat_order, -item.get("use_count", 0), item.get("name", ""))
 
         skills_list.sort(key=sort_priority)
@@ -402,17 +434,52 @@ class SkillsEngine:
         return data
 
     def delete_custom_skill(self, skill_name: str) -> bool:
-        """Deletes a custom or compiled skill from disk."""
+        """Deletes a custom or compiled skill from disk. Built-in skills cannot be deleted."""
+        # Built-in skills cannot be deleted
+        if skill_name in self._builtin_catalog:
+            skill = self._builtin_catalog[skill_name]
+            if skill.get("builtin", True) and skill.get("category") != "custom":
+                logger.info(f"Refusing to delete built-in skill {skill_name}")
+                return False
+
         for f in self.compiled_dir.glob("*.json"):
             try:
                 d = json.loads(f.read_text(encoding="utf-8"))
                 if d.get("name") == skill_name or d.get("id") == skill_name or f.stem == skill_name:
+                    if d.get("builtin") and d.get("category") != "custom":
+                        return False
                     f.unlink(missing_ok=True)
-                    logger.info(f"Deleted skill {skill_name}")
+                    logger.info(f"Deleted custom skill {skill_name}")
                     return True
             except Exception:
                 pass
         return False
+
+    def get_skill(self, skill_name: str) -> Optional[Dict[str, Any]]:
+        """Look up a skill by name or ID across compiled overrides and built-in catalogs."""
+        # 1. Custom / compiled disk overrides
+        if self.compiled_dir.exists():
+            for f in self.compiled_dir.glob("*.json"):
+                try:
+                    d = json.loads(f.read_text(encoding="utf-8"))
+                    if d.get("name") == skill_name or d.get("id") == skill_name:
+                        return d
+                except Exception:
+                    pass
+
+        # 2. Builtin catalog
+        if skill_name in self._builtin_catalog:
+            return dict(self._builtin_catalog[skill_name])
+        for s in self._builtin_catalog.values():
+            if s.get("id") == skill_name or s.get("name") == skill_name:
+                return dict(s)
+
+        # 3. Default built-in fallbacks
+        for b in DEFAULT_BUILTIN_SKILLS:
+            if b.get("name") == skill_name or b.get("id") == skill_name:
+                return dict(b)
+
+        return None
 
     def execute_skill(self, skill_name: str, test_input: str = "", params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -435,10 +502,13 @@ class SkillsEngine:
                 pass
 
         if not skill:
-            for b in DEFAULT_BUILTIN_SKILLS:
-                if b["name"] == skill_name or b["id"] == skill_name:
-                    skill = dict(b)
-                    break
+            if skill_name in self._builtin_catalog:
+                skill = dict(self._builtin_catalog[skill_name])
+            else:
+                for s in self._builtin_catalog.values():
+                    if s.get("id") == skill_name or s.get("name") == skill_name:
+                        skill = dict(s)
+                        break
 
         if not skill:
             return {"ok": False, "error": f"Skill '{skill_name}' not found"}
@@ -469,6 +539,7 @@ class SkillsEngine:
                 if p not in env.get("PATH", ""):
                     env["PATH"] = f"{p}:{env.get('PATH', '')}"
 
+            repo_root = Path(__file__).resolve().parent.parent
             try:
                 proc = subprocess.run(
                     full_cmd,
@@ -476,9 +547,10 @@ class SkillsEngine:
                     capture_output=True,
                     text=True,
                     timeout=15,
-                    env=env
+                    env=env,
+                    cwd=str(repo_root)
                 )
-                return {
+                res: Dict[str, Any] = {
                     "ok": proc.returncode == 0,
                     "returncode": proc.returncode,
                     "stdout": proc.stdout.strip(),
@@ -486,6 +558,9 @@ class SkillsEngine:
                     "command_run": full_cmd,
                     "skill": skill["name"],
                 }
+                if skill.get("content"):
+                    res["guidance_preview"] = skill["content"][:1000]
+                return res
             except subprocess.TimeoutExpired:
                 return {
                     "ok": False,

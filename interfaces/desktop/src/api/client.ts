@@ -590,6 +590,7 @@ export interface SkillItem {
   category?: string;
   compiled: boolean;
   enabled?: boolean;
+  builtin?: boolean;
   execution_type?: string;
   triggers?: string[];
   command?: string | null;

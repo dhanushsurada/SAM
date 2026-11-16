@@ -89,9 +89,13 @@ const DEFAULT_BUILTIN_SKILLS: SkillItem[] = [
 const CATEGORIES = [
   { id: "all", label: "All Skills" },
   { id: "superpowers", label: "Superpowers (15)" },
-  { id: "anthropic-agent", label: "Anthropic Skills (19)" },
+  { id: "anthropic-agent", label: "Anthropic Skills (21)" },
+  { id: "connect-apps", label: "Connect & Apps" },
+  { id: "linkedin", label: "LinkedIn Agent" },
+  { id: "marketing", label: "Marketing & Growth" },
+  { id: "reverse-engineering", label: "Reverse Engineering" },
+  { id: "plugins", label: "App Plugins (820)" },
   { id: "custom", label: "Custom Skills" },
-  { id: "builtin", label: "Built-in" },
 ];
 
 export function SkillsPage() {
@@ -279,13 +283,9 @@ export function SkillsPage() {
       // Category filter
       if (selectedCategory !== "all") {
         if (selectedCategory === "custom") {
-          if (s.category !== "custom") return false;
-        } else if (selectedCategory === "superpowers") {
-          if (s.category !== "superpowers") return false;
-        } else if (selectedCategory === "anthropic-agent") {
-          if (s.category !== "anthropic-agent") return false;
-        } else if (selectedCategory === "builtin") {
-          if (s.category !== "builtin") return false;
+          if (s.category !== "custom" || s.builtin) return false;
+        } else if (s.category !== selectedCategory) {
+          return false;
         }
       }
 
@@ -294,7 +294,7 @@ export function SkillsPage() {
         const q = searchQuery.toLowerCase();
         const matchesName = s.name.toLowerCase().includes(q);
         const matchesTitle = (s.title || "").toLowerCase().includes(q);
-        const matchesDesc = s.description.toLowerCase().includes(q);
+        const matchesDesc = (s.description || "").toLowerCase().includes(q);
         const matchesTriggers = (s.triggers || []).some((t) => t.toLowerCase().includes(q));
         return matchesName || matchesTitle || matchesDesc || matchesTriggers;
       }
@@ -309,6 +309,16 @@ export function SkillsPage() {
         return <FiShield className="text-amber-400" size={16} />;
       case "anthropic-agent":
         return <FiFileText className="text-blue-400" size={16} />;
+      case "connect-apps":
+        return <FiFolder className="text-emerald-400" size={16} />;
+      case "linkedin":
+        return <FiCode className="text-cyan-400" size={16} />;
+      case "marketing":
+        return <FiZap className="text-rose-400" size={16} />;
+      case "reverse-engineering":
+        return <FiTerminal className="text-orange-400" size={16} />;
+      case "plugins":
+        return <FiLayers className="text-indigo-400" size={16} />;
       case "custom":
         return <FiTerminal className="text-purple-400" size={16} />;
       default:
@@ -524,6 +534,11 @@ export function SkillsPage() {
                       <FiCheckCircle size={10} className="text-success" />
                       {s.use_count} runs
                     </span>
+                    {s.builtin && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/30 text-[9px] font-semibold text-emerald-400">
+                        <FiCheckCircle size={9} /> Inbuilt
+                      </span>
+                    )}
                     {s.category && (
                       <span className="px-1.5 py-0.2 rounded bg-surface-raised border border-line text-[9px] uppercase font-bold text-mute">
                         {s.category}
@@ -553,7 +568,7 @@ export function SkillsPage() {
                       <FiPlay size={10} className="mr-1 text-ember" /> Test
                     </Button>
 
-                    {s.category === "custom" && (
+                    {s.category === "custom" && !s.builtin && (
                       <button
                         type="button"
                         onClick={() => void handleDelete(s.name)}
@@ -660,9 +675,16 @@ export function SkillsPage() {
                   {getCategoryIcon(activeDetailSkill.category)}
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">
-                    {activeDetailSkill.title || activeDetailSkill.name}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-ink">
+                      {activeDetailSkill.title || activeDetailSkill.name}
+                    </h3>
+                    {activeDetailSkill.builtin && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/30 text-[9px] font-semibold text-emerald-400">
+                        <FiCheckCircle size={9} /> Inbuilt
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] font-mono text-mute">{activeDetailSkill.name}</p>
                 </div>
               </div>

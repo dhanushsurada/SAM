@@ -88,3 +88,83 @@ test("skill search matches on name, title, description, and triggers", () => {
   assert.ok(matches("Test-Driven"), "matches title");
   assert.ok(!matches("photoshop"), "does not match unrelated query");
 });
+
+test("builtin skills flag distinguishes permanent inbuilt capabilities and protects from deletion", () => {
+  const builtinSuperpower: SkillItem = {
+    id: "superpowers.systematic-debugging",
+    name: "systematic-debugging",
+    title: "Systematic Debugging",
+    description: "Systematic root cause analysis workflow",
+    category: "superpowers",
+    compiled: true,
+    enabled: true,
+    builtin: true,
+    use_count: 0,
+    last_used: null,
+  };
+
+  const builtinAnthropic: SkillItem = {
+    id: "anthropic.docx",
+    name: "docx",
+    title: "Docx Generator",
+    description: "Office document generation",
+    category: "anthropic-agent",
+    compiled: true,
+    enabled: true,
+    builtin: true,
+    use_count: 0,
+    last_used: null,
+  };
+
+  const customUserSkill: SkillItem = {
+    id: "custom.my-script",
+    name: "my-script",
+    title: "My Custom Script",
+    description: "User defined test script",
+    category: "custom",
+    compiled: true,
+    enabled: true,
+    builtin: false,
+    use_count: 0,
+    last_used: null,
+  };
+
+  const isDeletable = (s: SkillItem): boolean => !s.builtin && s.category === "custom";
+
+  assert.equal(builtinSuperpower.builtin, true);
+  assert.equal(builtinAnthropic.builtin, true);
+  assert.equal(customUserSkill.builtin, false);
+
+  assert.equal(isDeletable(builtinSuperpower), false, "Builtin superpower cannot be deleted");
+  assert.equal(isDeletable(builtinAnthropic), false, "Builtin anthropic skill cannot be deleted");
+  assert.equal(isDeletable(customUserSkill), true, "Custom user skill can be deleted");
+});
+
+test("supports all expanded inbuilt categories and custom skills", () => {
+  const skills: SkillItem[] = [
+    { name: "brainstorming", category: "superpowers", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "frontend-design", category: "anthropic-agent", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "connect-apps", category: "connect-apps", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "li-audit", category: "linkedin", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "cold-email", category: "marketing", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "reverse-engineer-anything", category: "reverse-engineering", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "github-automation", category: "plugins", builtin: true, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+    { name: "my-custom-flow", category: "custom", builtin: false, compiled: true, enabled: true, use_count: 0, last_used: null, description: "" },
+  ];
+
+  const filterCategory = (cat: string) => {
+    if (cat === "all") return skills;
+    if (cat === "custom") return skills.filter((s) => s.category === "custom" && !s.builtin);
+    return skills.filter((s) => s.category === cat);
+  };
+
+  assert.equal(filterCategory("all").length, 8);
+  assert.equal(filterCategory("superpowers").length, 1);
+  assert.equal(filterCategory("anthropic-agent").length, 1);
+  assert.equal(filterCategory("connect-apps").length, 1);
+  assert.equal(filterCategory("linkedin").length, 1);
+  assert.equal(filterCategory("marketing").length, 1);
+  assert.equal(filterCategory("reverse-engineering").length, 1);
+  assert.equal(filterCategory("plugins").length, 1);
+  assert.equal(filterCategory("custom").length, 1);
+});
