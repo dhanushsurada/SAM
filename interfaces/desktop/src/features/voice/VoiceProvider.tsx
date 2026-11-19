@@ -319,20 +319,55 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     [player, webviewSpeak]
   );
 
-  // Spoken replies for completed tasks in the session when speakReplies is on
+  // Spoken replies for completed tasks in the session when speakReplies is on.
+  // CRITICAL: We seed existing historical/restored tasks so SAM NEVER speaks past tasks on app startup!
+  const initialRestoredSeen = useRef(false);
   const spokenTaskIds = useRef(new Set<string>());
+  const activeTaskIdsInSession = useRef(new Set<string>());
+
   useEffect(() => {
-    if (!speakReplies) return;
-    for (const task of sessionTasks) {
-      if (TERMINAL_PHASES.has(task.status as never) && !spokenTaskIds.current.has(task.task_id)) {
+    // 1. Initial mount / session restore: mark all existing tasks as already seen
+    if (!initialRestoredSeen.current) {
+      for (const task of sessionTasks) {
         spokenTaskIds.current.add(task.task_id);
+        if (!TERMINAL_PHASES.has(task.status as never)) {
+          activeTaskIdsInSession.current.add(task.task_id);
+        }
+      }
+      if (sessionTasks.length > 0) {
+        initialRestoredSeen.current = true;
+      }
+      return;
+    }
+
+    // 2. Track newly submitted active tasks in this live session
+    for (const task of sessionTasks) {
+      if (!TERMINAL_PHASES.has(task.status as never)) {
+        activeTaskIdsInSession.current.add(task.task_id);
+      }
+    }
+
+    // 3. Only speak replies for tasks that were actively run IN THIS SESSION and just completed
+    if (!speakReplies) return;
+    const currentVoiceTaskId = "taskId" in state ? state.taskId : undefined;
+    for (const task of sessionTasks) {
+      if (
+        TERMINAL_PHASES.has(task.status as never) &&
+        activeTaskIdsInSession.current.has(task.task_id) &&
+        !spokenTaskIds.current.has(task.task_id)
+      ) {
+        spokenTaskIds.current.add(task.task_id);
+        activeTaskIdsInSession.current.delete(task.task_id);
+        // Avoid duplicate speech if the voice controller already owns and speaks this task
+        if (currentVoiceTaskId === task.task_id) continue;
+
         const reply = replyToSpeak(task);
         if (reply) {
           void speakText(reply);
         }
       }
     }
-  }, [sessionTasks, speakReplies, speakText]);
+  }, [sessionTasks, speakReplies, speakText, state]);
 
   // Live simultaneous real-time transcription while listening
   useEffect(() => {
