@@ -222,11 +222,12 @@ class Brain:
                         "num_ctx": self.settings.model_context_length,
                     }
                 }
+                req_timeout = (15, getattr(self.settings, "ollama_timeout", 300))
                 response = requests.post(
                     f"{self.settings.ollama_host}/api/chat",
                     json=payload,
                     stream=True,
-                    timeout=120
+                    timeout=req_timeout
                 )
                 if response.status_code != 200:
                     raise RuntimeError(f"Ollama returned {response.status_code}: {response.text}")
@@ -254,10 +255,11 @@ class Brain:
                     }
                 }
 
+                req_timeout = (15, getattr(self.settings, "ollama_timeout", 300))
                 response = requests.post(
                     f"{self.settings.ollama_host}/api/chat",
                     json=payload,
-                    timeout=120
+                    timeout=req_timeout
                 )
 
                 if response.status_code != 200:
@@ -302,6 +304,17 @@ class Brain:
                 action=action,
                 action_payload=action_payload,
                 raw=raw
+            )
+
+        except requests.exceptions.Timeout:
+            timeout_sec = getattr(self.settings, "ollama_timeout", 300)
+            logger.error(f"Ollama request timed out after {timeout_sec}s for model {model}")
+            return BrainResponse(
+                text=(
+                    f"Model '{model}' timed out after {timeout_sec}s. "
+                    "The task or context may be too large for local generation, or Ollama is under heavy load. "
+                    "You can increase 'ollama_timeout' in Settings or select a faster/cloud model."
+                )
             )
 
         except json.JSONDecodeError:

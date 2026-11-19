@@ -6,6 +6,7 @@ user_name: "Dhanush"
 
 # Brain
 ollama_host: "http://localhost:11434"
+ollama_timeout: 300
 temperature: 0.7
 max_tokens: 1024
 

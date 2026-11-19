@@ -78,6 +78,7 @@ class Settings:
     model_context_length: int = 8192
     temperature: float = 0.7
     max_tokens: int = 1024
+    ollama_timeout: int = 300
 
     # Ears
     wake_word: str = "hey sam"
