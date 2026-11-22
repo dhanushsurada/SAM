@@ -79,6 +79,10 @@ from connect.services.task_handoff import DeviceTaskRouter
 from connect.services.coordinator import UnifiedTaskCoordinator
 from connect.core.security_policy import SecurityPolicyEngine
 from connect.core.capabilities import APP_LAUNCH
+from memory.notes_vault import NotesVaultRetriever
+from core.briefing_agent import MorningBriefingAgent
+from core.jev_reflex_engine import JevReflexEngine
+from core.engine_manager import EngineManager
 
 
 def run_task_with_optional_sovereign_mode(
@@ -180,6 +184,15 @@ class SAM:
         self.brain = Brain(self.settings)
         self.react_loop = ReactLoop(self.settings, founder_mode=self.founder_mode)
         self.tiered_router = TieredExecutionRouter(self.settings)
+        self.notes_vault = NotesVaultRetriever()
+        self.briefing_agent = MorningBriefingAgent(notes_vault=self.notes_vault, controller=getattr(self.react_loop, "controller", None))
+        self.engine_manager = EngineManager(settings=self.settings)
+        self.jev_reflex = JevReflexEngine(
+            settings=self.settings,
+            controller=getattr(self.react_loop, "controller", None),
+            notes_vault=self.notes_vault,
+            briefing_agent=self.briefing_agent
+        )
         self.profiler = default_profiler
         self.event_bus = ConnectEventBus()
         self.device_registry = DeviceRegistry()
@@ -222,9 +235,12 @@ class SAM:
     # ─── Input Handlers ───────────────────────────────────────────────────
 
     def on_wake_voice(self):
-        """Called by wake word listener — records and transcribes speech."""
+        """Called by wake word listener — records and transcribes speech with streaming JEV reflexes."""
         logger.info("Wake word detected — recording...")
-        user_input = self.stt.listen()
+        self.jev_reflex.reset_stream()
+        user_input = self.stt.listen(
+            on_partial_transcript=lambda partial: self.jev_reflex.evaluate_partial(partial)
+        )
         if user_input and user_input.strip():
             self._process(user_input)
 
@@ -295,10 +311,21 @@ class SAM:
                     else:
                         result_msg = "No paired phone available to execute this."
                 else:
-                    start_exec = time.time()
-                    obs = self.react_loop.execute(route_decision.action, route_decision.action_payload or {})
-                    turn_ctx.record_tool_call(route_decision.action, (time.time() - start_exec) * 1000.0, success=True)
-                    result_msg = route_decision.suggested_text or obs
+                    # Check if JEV Reflex already executed this exact app launch mid-sentence
+                    already_executed = False
+                    for reflex in self.jev_reflex.get_triggered_actions():
+                        if reflex.executed and reflex.action == "open_app":
+                            app_name = reflex.payload.get("app")
+                            if route_decision.action_payload and route_decision.action_payload.get("app") == app_name:
+                                already_executed = True
+                                result_msg = f"Opened {app_name} (JEV Reflex: {reflex.latency_ms:.1f}ms)."
+                                logger.info(f"Using pre-executed JEV reflex for {app_name}")
+                                break
+                    if not already_executed:
+                        start_exec = time.time()
+                        obs = self.react_loop.execute(route_decision.action, route_decision.action_payload or {})
+                        turn_ctx.record_tool_call(route_decision.action, (time.time() - start_exec) * 1000.0, success=True)
+                        result_msg = route_decision.suggested_text or obs
 
                 turn_ctx.finish(success=True)
                 print(f"\nSAM: {result_msg}\n")
@@ -312,11 +339,16 @@ class SAM:
                                              retention_days=self._memory_retention_days())
             turn_ctx.record_memory_retrieval((time.time() - start_mem) * 1000.0)
 
+            founder_context = self.founder_mode.get_context()
+            speculative_context = self.jev_reflex.get_speculative_context()
+            if speculative_context:
+                founder_context = f"{founder_context}\n[Pre-fetched Notes Context]:\n{speculative_context}" if founder_context else f"[Pre-fetched Notes Context]:\n{speculative_context}"
+
             session = Session(
                 user_input=user_input,
                 identity=self.identity.load(),
                 memories=memories,
-                founder_context=self.founder_mode.get_context(),
+                founder_context=founder_context,
                 settings=self.settings
             )
 
@@ -373,6 +405,12 @@ class SAM:
 
             # Founder Mode capture — same, sees the real outcome
             self.founder_mode.capture_if_relevant(user_input, final_response)
+
+            # Auto-log to Daily Note in Notes Vault (Bidirectional Note Sync)
+            self.notes_vault.append_daily_log(
+                f"{user_input} -> {final_response.text[:120]}",
+                category="Task"
+            )
             turn_ctx.finish(success=True)
 
         except Exception as e:

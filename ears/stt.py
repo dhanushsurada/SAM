@@ -118,9 +118,10 @@ class SpeechToText:
 
         return np.concatenate(frames) if frames else np.array([])
 
-    def listen(self) -> str:
+    def listen(self, on_partial_transcript: Optional[Any] = None) -> str:
         """
         Record speech and transcribe to text.
+        Accepts optional on_partial_transcript callback for mid-sentence JEV reflex streaming.
         Returns transcribed string or empty string on failure.
         """
         self._load_model()
@@ -132,7 +133,13 @@ class SpeechToText:
                 return ""
 
             if self._model is None:
-                return self._fallback_transcribe(audio_data)
+                transcript = self._fallback_transcribe(audio_data)
+                if on_partial_transcript and transcript:
+                    try:
+                        on_partial_transcript(transcript)
+                    except Exception as e:
+                        logger.debug(f"Partial transcript callback error: {e}")
+                return transcript
 
             # Save to temp file for Whisper
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -149,7 +156,16 @@ class SpeechToText:
                 vad_filter=True
             )
 
-            transcript = " ".join(seg.text for seg in segments).strip()
+            collected = []
+            for seg in segments:
+                collected.append(seg.text)
+                if on_partial_transcript:
+                    try:
+                        on_partial_transcript(" ".join(collected).strip())
+                    except Exception as exc:
+                        logger.debug(f"Partial transcript callback error: {exc}")
+
+            transcript = " ".join(collected).strip()
             os.unlink(tmp_path)
 
             logger.info(f"Transcribed: '{transcript}'")
@@ -158,6 +174,13 @@ class SpeechToText:
         except Exception as e:
             logger.error(f"STT error: {e}", exc_info=True)
             return ""
+
+    def listen_streaming(self, on_partial_transcript: Any) -> str:
+        """
+        Streaming listener specifically designed for JEV reflex integration.
+        Streams partial transcript segments mid-sentence.
+        """
+        return self.listen(on_partial_transcript=on_partial_transcript)
 
     def _fallback_transcribe(self, audio_data: np.ndarray) -> str:
         """Fallback using speech_recognition library."""

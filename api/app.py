@@ -281,6 +281,151 @@ def get_sovereignty(task_id: str) -> SovereigntyResponse:
     )
 
 
+# ─── Morning Briefing & Daily Digest (OpenJarvis Parity) ───────────────────
+
+@app.get("/api/briefing")
+def get_morning_briefing():
+    """Generates an executive morning briefing aggregating Calendar, Mail, Notes, and Optimization."""
+    from core.briefing_agent import MorningBriefingAgent
+    from memory.notes_vault import NotesVaultRetriever
+    agent = MorningBriefingAgent(notes_vault=NotesVaultRetriever())
+    briefing = agent.generate_briefing()
+    return {
+        "greeting": briefing.greeting,
+        "date": briefing.date_str,
+        "events": [
+            {"title": e.title, "start": e.start_time, "is_virtual": e.is_virtual}
+            for e in briefing.events
+        ],
+        "urgent_emails": [
+            {"subject": m.subject, "sender": m.sender, "is_urgent": m.is_urgent}
+            for m in briefing.urgent_emails
+        ],
+        "notes_tasks": briefing.notes_tasks,
+        "recommendations": briefing.optimization.recommended_focus_blocks,
+        "next_meeting_prep": briefing.optimization.next_meeting_prep,
+        "spoken_summary": briefing.spoken_summary,
+        "markdown": briefing.executive_markdown
+    }
+
+
+# ─── OpenAI-Compatible Server (/v1/models & /v1/chat/completions) ──────────
+
+@app.get("/v1/models")
+def list_v1_models():
+    """OpenAI-compatible models catalog endpoint."""
+    primary = getattr(_settings, "primary_model", "sam-brain")
+    return {
+        "object": "list",
+        "data": [
+            {"id": primary, "object": "model", "created": int(time.time()), "owned_by": "sam"},
+            {"id": "sam-brain", "object": "model", "created": int(time.time()), "owned_by": "sam"},
+            {"id": "sam-fast-reflex", "object": "model", "created": int(time.time()), "owned_by": "sam"},
+        ]
+    }
+
+
+@app.post("/v1/chat/completions")
+def chat_completions(payload: dict):
+    """OpenAI-compatible chat completions endpoint (streaming + non-streaming)."""
+    messages = payload.get("messages", [])
+    stream = payload.get("stream", False)
+    model = payload.get("model", getattr(_settings, "primary_model", "sam-brain"))
+
+    user_text = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            user_text = msg.get("content", "")
+            break
+
+    # Process through SAM Brain / TieredRouter
+    from core.session import Session
+    from core.tiered_router import TieredExecutionRouter, ExecutionTier
+
+    router = TieredExecutionRouter(_settings)
+    route_dec = router.route(user_text)
+
+    if route_dec.tier == ExecutionTier.DIRECT and route_dec.suggested_text:
+        reply_content = route_dec.suggested_text
+    else:
+        memories = state.memory_retriever.retrieve(user_text, _settings) if hasattr(state, "memory_retriever") else []
+        session = Session(
+            user_input=user_text,
+            identity=_identity.load(),
+            memories=memories,
+            founder_context="",
+            settings=_settings
+        )
+        response = _brain.process(session)
+        reply_content = response.text or "I have processed your request."
+
+    completion_id = f"chatcmpl-{int(time.time()*1000)}"
+    created_ts = int(time.time())
+
+    if not stream:
+        return {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply_content},
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": len(user_text.split()),
+                "completion_tokens": len(reply_content.split()),
+                "total_tokens": len(user_text.split()) + len(reply_content.split())
+            }
+        }
+
+    # Streaming response
+    from fastapi.responses import StreamingResponse
+
+    def event_stream():
+        # Stream word-by-word chunks
+        words = reply_content.split(" ")
+        for i, word in enumerate(words):
+            chunk_text = word if i == 0 else f" {word}"
+            data = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": chunk_text},
+                        "finish_reason": None
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(data)}\n\n"
+            time.sleep(0.01)
+
+        # End chunk
+        end_data = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }
+            ]
+        }
+        yield f"data: {json.dumps(end_data)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 # ─── static frontend — MUST be mounted last ────────────────────────────────
 # Starlette matches routes in registration order. Every @app.get/@app.post
 # above is registered before this Mount("/"), so requests to /api/* are

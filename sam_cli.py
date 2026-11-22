@@ -931,6 +931,53 @@ def cmd_reset_all():
     print("SAM will start fresh on next run.")
 
 
+def cmd_briefing(spoken: bool = False):
+    """Generate and display/speak executive morning briefing."""
+    from core.briefing_agent import MorningBriefingAgent
+    from memory.notes_vault import NotesVaultRetriever
+    agent = MorningBriefingAgent(notes_vault=NotesVaultRetriever())
+    briefing = agent.generate_briefing()
+    print(f"\n{briefing.executive_markdown}\n")
+    if spoken:
+        from config.settings import Settings
+        from mouth.tts import TextToSpeech
+        s = Settings()
+        tts = TextToSpeech(s)
+        tts.speak(briefing.spoken_summary)
+
+
+def cmd_notes():
+    """Show active tasks and priorities from local notes vault."""
+    from memory.notes_vault import NotesVaultRetriever
+    vault = NotesVaultRetriever()
+    print(f"\n{vault.get_active_plate()}\n")
+
+
+def cmd_hardware():
+    """Inspect local hardware acceleration and probe multi-engine inference runtimes."""
+    from core.engine_manager import EngineManager
+    mgr = EngineManager()
+    hw = mgr.hardware
+    print(f"\nHardware Accelerator: {hw.accelerator.value}")
+    print(f"Chip: {hw.chip_name}")
+    print(f"Total Memory: {hw.total_memory_mb} MB")
+    print(f"Available Memory: {hw.available_memory_mb} MB")
+    print(f"VRAM: {hw.vram_mb} MB")
+    print("\nProbing Inference Engines...")
+    probes = mgr.probe_engines()
+    for eng, info in probes.items():
+        status = "ONLINE" if info["healthy"] else "OFFLINE"
+        print(f"  [{status}] {eng} ({info['url']}) - latency: {info['latency_ms']}ms - models: {len(info['models'])}")
+    print()
+
+
+def cmd_serve(host: str = "127.0.0.1", port: int = 8420):
+    """Run OpenAI-compatible and SAM API server."""
+    import uvicorn
+    print(f"\nStarting SAM OpenAI-compatible API server on {host}:{port}...")
+    uvicorn.run("api.app:app", host=host, port=port, log_level="info")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -976,6 +1023,16 @@ def main():
     subparsers.add_parser("license")
     activate_p = subparsers.add_parser("activate")
     activate_p.add_argument("license_file")
+
+    briefing_p = subparsers.add_parser("briefing")
+    briefing_p.add_argument("--speak", action="store_true", help="Speak the briefing using TTS")
+
+    subparsers.add_parser("notes")
+    subparsers.add_parser("hardware")
+
+    serve_p = subparsers.add_parser("serve")
+    serve_p.add_argument("--host", default="127.0.0.1", help="API server bind host")
+    serve_p.add_argument("--port", type=int, default=8420, help="API server bind port")
 
     logs_p = subparsers.add_parser("logs")
     logs_p.add_argument("--lines", type=int, default=50)
@@ -1037,6 +1094,14 @@ def main():
             args.name, json_output=args.json)
         if args.json:
             raise SystemExit(code)
+    elif args.command == "briefing":
+        cmd_briefing(spoken=args.speak)
+    elif args.command == "notes":
+        cmd_notes()
+    elif args.command == "hardware":
+        cmd_hardware()
+    elif args.command == "serve":
+        cmd_serve(host=args.host, port=args.port)
     elif args.command == "activate":
         cmd_activate(args.license_file)
     elif args.command == "revoke-device":

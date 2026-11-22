@@ -309,7 +309,38 @@ class TieredExecutionRouter:
                     suggested_text=f"Playing '{clean_query}' on YouTube: {direct_url}"
                 )
 
-        # 3. Direct Messaging (WhatsApp / Messages)
+        # 3. Morning Briefing / Daily Digest
+        if any(kw in lower_body for kw in ["morning briefing", "daily briefing", "daily digest", "executive briefing", "give me my briefing"]):
+            from core.briefing_agent import MorningBriefingAgent
+            from memory.notes_vault import NotesVaultRetriever
+            agent = MorningBriefingAgent(notes_vault=NotesVaultRetriever())
+            briefing = agent.generate_briefing()
+            return RouteDecision(
+                tier=ExecutionTier.DIRECT,
+                action="morning_briefing",
+                action_payload={"briefing": briefing},
+                target_device="desktop",
+                confidence=1.0,
+                reason="Deterministic Morning Briefing generation",
+                suggested_text=briefing.spoken_summary
+            )
+
+        # 4. Real-life Plate & Notes Query ("what's on my plate from my real life")
+        if any(kw in lower_body for kw in ["what's on my plate", "whats on my plate", "on my plate from my real life", "check my notes", "look at my notes"]):
+            from memory.notes_vault import NotesVaultRetriever
+            retriever = NotesVaultRetriever()
+            plate_summary = retriever.get_active_plate()
+            return RouteDecision(
+                tier=ExecutionTier.DIRECT,
+                action="check_plate",
+                action_payload={"summary": plate_summary},
+                target_device="desktop",
+                confidence=1.0,
+                reason="Deterministic local notes plate query",
+                suggested_text=plate_summary
+            )
+
+        # 5. Direct Messaging (WhatsApp / Messages)
         msg_match = MESSAGING_PATTERN_TO.match(command_body)
         msg_content = ""
         recipient = ""

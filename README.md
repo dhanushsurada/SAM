@@ -16,9 +16,18 @@
 ## What SAM 2.0 Does
 
 - **Unified Cross-Device Intelligence:** Seamlessly bridges your Desktop (macOS, Windows, Linux) and Android companion with capability-based routing and synchronized state.
+- **System 1 Streaming Reflex Engine with JEV Integration:** Evaluates speech mid-sentence in sub-80ms to trigger speculative app launching, window focusing, and web search *before* you finish speaking.
+  - *Leap-Ahead:* **Speculative Context Injection** — pre-fetches notes and agenda into the Brain's prompt buffer while you speak, slashing time-to-first-token.
+- **Autonomous Morning Briefing & Daily Digest (`sam briefing`):** Aggregates Calendar, Mail, daily Notes, and weather into spoken and executive markdown briefings without cloud subscriptions.
+  - *Leap-Ahead:* **Proactive Actionable Agenda Optimizer** — analyzes schedule conflicts, schedules deep-work focus blocks, and auto-stages meeting windows 5 minutes in advance.
+- **Local Notes Vault & Personal Memory (`sam notes`):** "My own notes are the memory." Indexes local markdown vaults (Obsidian / local notes) to answer "what's on my plate from my real life".
+  - *Leap-Ahead:* **Bidirectional Note Auto-Log** — automatically logs completed actions, decisions, and outcomes into today's daily note under `# SAM Activity Log`.
+- **Multi-Engine Hardware & Energy Profiler (`sam hardware`):** Auto-detects Apple Silicon Metal, NVIDIA CUDA, and CPU runtimes, probing Ollama, vLLM, llama.cpp, and SGLang.
+  - *Leap-Ahead:* **Constraint-Aware Intelligence Per Watt** — profiles energy consumption (Joules/token), token throughput (tokens/sec), and memory footprint.
+- **OpenAI-Compatible Local Server (`sam serve`):** Exposes standard `/v1/chat/completions` and `/v1/models` endpoints with streaming support so Claude Code, Cursor, and Open-WebUI can connect directly.
 - **Modern Minimalist Desktop Interface:** Fast, distraction-free desktop application (Tauri v2 + React) with parallel chat threads, global Command Center palette (`Cmd+Shift+Space`), live system diagnostics, and zero branding.
 - **3-Tier Execution Architecture:**
-  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for math calculations, application launch/close, WhatsApp direct messaging, YouTube playback, URL navigation, and screenshots without unnecessary LLM overhead.
+  - **Tier 1 (Direct Deterministic):** Sub-5ms execution for math calculations, application launch/close, morning briefings, notes plate queries, WhatsApp direct messaging, YouTube playback, URL navigation, and screenshots without unnecessary LLM overhead.
   - **Tier 2 (Fast Intent):** Fast single-step tool selection and device routing using compact local models.
   - **Tier 3 (Advanced Reasoning):** Deep multi-step planning, iterative execution, verification, and error recovery.
 - **Native Android Companion (`sam-android`):** Kotlin Jetpack Compose app featuring Ed25519 pairing, on-device mobile AI inference, Scoped Storage file sync, notification mirroring, and a 10-action task executor (`AndroidConnectTaskExecutor`).
@@ -167,6 +176,13 @@ python sam_cli.py start [voice|api|telegram]   # Start managed service
 python sam_cli.py stop [voice|api|telegram]    # Stop service gracefully
 python sam_cli.py restart [voice|api|telegram] # Restart service
 
+# OpenJarvis & JEV Reflex Extensions
+python sam_cli.py briefing                # Generate executive morning briefing (Calendar + Mail + Notes)
+python sam_cli.py briefing --speak        # Spoken morning briefing via Kokoro TTS
+python sam_cli.py notes                   # Query 'what is on my plate from my real life' (local vault)
+python sam_cli.py hardware                # Inspect Apple Silicon Metal / CUDA hardware & probe engines
+python sam_cli.py serve --port 8420       # Launch OpenAI-compatible API server (/v1/chat/completions)
+
 # Local Model Control
 python sam_cli.py ollama status           # Check Ollama connection & pulled models
 python sam_cli.py ollama pull <model>     # Pull a new local LLM (e.g. qwen2.5:14b)
@@ -200,6 +216,9 @@ SAM/
 ├── main.py                  ← Cross-device entry point & dispatch coordinator
 ├── sam_cli.py               ← Comprehensive CLI management & diagnostic tool
 ├── core/
+│   ├── jev_reflex_engine.py ← Sub-80ms streaming reflex & speculative context injection
+│   ├── briefing_agent.py    ← Autonomous morning briefing & agenda optimizer
+│   ├── engine_manager.py    ← Multi-engine hardware probe & Intelligence-Per-Watt profiler
 │   ├── tiered_router.py     ← 3-tier execution optimizer (Tier 1 sub-5ms bypass)
 │   ├── brain.py             ← Ollama Brain integration
 │   ├── model_manager.py     ← Dynamic model discovery & RAM-tier selection
@@ -239,6 +258,7 @@ SAM/
 ├── founder_mode/
 │   └── manager.py           ← Taste heuristics, decisions & permanent rejections
 ├── memory/
+│   ├── notes_vault.py       ← Local markdown vault & bidirectional auto-log
 │   ├── store.py             ← ChromaDB embeddings + SQLite episodic storage
 │   └── retrieve.py          ← Semantic vector memory search
 └── interfaces/
