@@ -8,6 +8,7 @@ import path from "node:path";
 const SAM_API_PORT = 8420;
 
 export default defineConfig({
+  base: "./",
   plugins: [react()],
   resolve: {
     alias: {

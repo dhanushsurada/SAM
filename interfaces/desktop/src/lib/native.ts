@@ -106,8 +106,21 @@ export async function setLaunchAtLogin(enabled: boolean): Promise<boolean> {
  * browser tab can be. */
 export async function currentWindowLabel(): Promise<string> {
   if (!isNative()) return "main";
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  return getCurrentWindow().label;
+  try {
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const current = getCurrentWebviewWindow();
+    if (current?.label) return current.label;
+  } catch {
+    // fallback to window API
+  }
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const current = getCurrentWindow();
+    if (current?.label) return current.label;
+  } catch {
+    // fallback to main
+  }
+  return "main";
 }
 
 /* ────────────────────────────────────────────────────────────────────────

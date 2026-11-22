@@ -6,6 +6,7 @@ import path from "node:path";
 // a CORS dance. Adjust if your local settings override the port.
 var SAM_API_PORT = 8420;
 export default defineConfig({
+    base: "./",
     plugins: [react()],
     resolve: {
         alias: {

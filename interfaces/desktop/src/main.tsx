@@ -11,19 +11,33 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 import "./styles/globals.css";
 
-const container = document.getElementById("root");
-if (!container) {
-  throw new Error("Root element #root not found in index.html");
+function getRootContainer(): HTMLElement {
+  let el = document.getElementById("root");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "root";
+    document.body.appendChild(el);
+  }
+  return el;
 }
 
-// Two Tauri windows load this exact same built bundle. Which tree mounts
-// is decided by window *label* (read via native.ts), not by URL/route —
-// that way the quick-assistant window never depends on the dev server or
-// production asset server correctly resolving an arbitrary client-side
-// path, which is a real SPA-hosting detail worth not assuming works. A
-// plain browser tab has no Tauri window to label at all, so this always
-// resolves to the ordinary app there.
-currentWindowLabel().then((label) => {
+function renderApp(label: string) {
+  const container = getRootContainer();
   const tree = label === "quick-assistant" ? <QuickAssistantApp /> : <App />;
   createRoot(container).render(tree);
-});
+}
+
+function start() {
+  currentWindowLabel()
+    .then(renderApp)
+    .catch((err) => {
+      console.error("SAM failed to resolve window label, rendering main application:", err);
+      renderApp("main");
+    });
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", start);
+} else {
+  start();
+}

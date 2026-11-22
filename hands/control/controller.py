@@ -241,28 +241,50 @@ class ComputerController:
 
         try:
             saved = False
-            if self._pyautogui:
-                try:
+            if IS_MAC:
+                # Tier 1: Direct native screencapture invocation
+                result = subprocess.run(
+                    [SCREENCAPTURE_BIN, "-x", path],
+                    capture_output=True, text=True,
+                )
+                if result.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+                    saved = True
+
+                # Tier 2: macOS WindowServer GUI session execution via osascript
+                # Bypasses detached daemon session limitations when running inside packaged bundles
+                if not saved:
+                    try:
+                        osa_cmd = f'do shell script "{SCREENCAPTURE_BIN} -x " & quoted form of "{path}"'
+                        osa_res = subprocess.run(["osascript", "-e", osa_cmd], capture_output=True, text=True)
+                        if osa_res.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+                            saved = True
+                    except Exception as osa_err:
+                        logger.debug(f"AppleScript screencapture fallback attempt: {osa_err}")
+
+                # Tier 3: PyAutoGUI / Quartz fallback
+                if not saved and self._pyautogui:
+                    try:
+                        img = self._pyautogui.screenshot(path)
+                        if not os.path.exists(path) and hasattr(img, "save"):
+                            img.save(path)
+                        if os.path.exists(path) and os.path.getsize(path) > 1000:
+                            saved = True
+                    except Exception:
+                        pass
+
+                if not saved:
+                    diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
+                    raise RuntimeError(f"screencapture failed (exit {result.returncode}): {diagnostic}")
+
+            elif IS_WIN:
+                self._screenshot_windows(path)
+                saved = os.path.exists(path) and os.path.getsize(path) > 0
+            else:
+                if self._pyautogui:
                     img = self._pyautogui.screenshot(path)
                     if not os.path.exists(path) and hasattr(img, "save"):
                         img.save(path)
-                    if os.path.exists(path):
-                        saved = True
-                except Exception:
-                    pass
-
-            if not saved:
-                if IS_MAC:
-                    result = subprocess.run(
-                        [SCREENCAPTURE_BIN, "-x", path],
-                        capture_output=True, text=True,
-                    )
-                    if result.returncode != 0:
-                        diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
-                        raise RuntimeError(
-                            f"screencapture failed (exit {result.returncode}): {diagnostic}")
-                elif IS_WIN:
-                    self._screenshot_windows(path)
+                    saved = os.path.exists(path) and os.path.getsize(path) > 0
         except Exception as e:
             if IS_MAC:
                 raise RuntimeError(

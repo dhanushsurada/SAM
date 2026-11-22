@@ -125,7 +125,8 @@ class EnvironmentRepairRequest(BaseModel):
 # (One level deeper than the old iqoo/server.py -> iqoo -> repo root, since
 # this file now lives one directory deeper.)
 BASE_DIR = Path(__file__).parent.parent.parent
-CLIENT_DIR = BASE_DIR / "interfaces" / "web"
+DESKTOP_DIST = BASE_DIR / "interfaces" / "desktop" / "dist"
+CLIENT_DIR = DESKTOP_DIST if (DESKTOP_DIST / "index.html").exists() else (BASE_DIR / "interfaces" / "web")
 
 app = FastAPI(title="SAM Gateway", version="2.1.1")
 # The packaged Tauri webview has a distinct origin and cannot use Vite's
@@ -1137,10 +1138,21 @@ def update_voice_silent_override(req: VoiceOverrideRequest):
     }
 
 
-# ─── Phone client (mounted last so it never shadows /api routes) ────────
+# ─── Client frontend (mounted last so it never shadows /api routes) ────────
 
 if CLIENT_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(CLIENT_DIR), html=True), name="client")
+    index_file = CLIENT_DIR / "index.html"
+    if index_file.exists():
+        from fastapi.responses import FileResponse
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_client_fallback(full_path: str):
+            target = CLIENT_DIR / full_path
+            if full_path and target.is_file():
+                return FileResponse(target)
+            return FileResponse(index_file)
+    else:
+        app.mount("/", StaticFiles(directory=str(CLIENT_DIR), html=True), name="client")
 
 
 def main():

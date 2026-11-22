@@ -149,6 +149,9 @@ fn main() {
             runtime::model_pull_cancel,
         ])
         .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                eprintln!("SAM: main window exists, url = {:?}", w.url());
+            }
             if let Err(error) = runtime::initialize_packaged_runtime(app.handle()) {
                 eprintln!("SAM: could not initialize bundled runtime configuration: {error}");
             }

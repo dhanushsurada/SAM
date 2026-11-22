@@ -5,6 +5,7 @@ Primary: Moondream (1.8B, fast)
 Fallback: LLaVA (7B, more capable)
 """
 
+import os
 import logging
 import base64
 import json
@@ -28,25 +29,45 @@ class ScreenReader:
 
     def _take_screenshot(self) -> str:
         """
-        Take a screenshot via macOS's screencapture and return the saved
-        PNG's path.
-
-        Raises RuntimeError (with the tool's own stderr plus a permission
-        hint) instead of silently returning a path to a missing/corrupt
-        image when capture itself fails. The most common real-world cause
-        (see docs/VISION_COORDINATE_FIX.md item #1) is macOS not having
-        granted Screen Recording permission to the app SAM is running in —
-        previously this was invisible here and surfaced only as a
-        confusing downstream "could not find X on screen" from
-        find_element(), with no hint about the real cause.
+        Take a screenshot via macOS multi-tiered capture (screencapture CLI,
+        AppleScript WindowServer session bypass, PyAutoGUI fallback) and return
+        the saved PNG's path.
         """
         with tempfile.NamedTemporaryFile(suffix=".png", dir="/tmp", delete=False) as f:
             path = f.name
+
+        saved = False
+        # Tier 1: Direct screencapture binary invocation
         result = subprocess.run(
             [SCREENCAPTURE_BIN, "-x", path],
             capture_output=True, text=True,
         )
-        if result.returncode != 0:
+        if result.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+            saved = True
+
+        # Tier 2: macOS WindowServer GUI session execution via osascript
+        if not saved:
+            try:
+                osa_cmd = f'do shell script "{SCREENCAPTURE_BIN} -x " & quoted form of "{path}"'
+                osa_res = subprocess.run(["osascript", "-e", osa_cmd], capture_output=True, text=True)
+                if osa_res.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+                    saved = True
+            except Exception as e:
+                logger.debug(f"AppleScript screencapture fallback failed: {e}")
+
+        # Tier 3: PyAutoGUI / PIL fallback
+        if not saved:
+            try:
+                import pyautogui
+                img = pyautogui.screenshot(path)
+                if not os.path.exists(path) and hasattr(img, "save"):
+                    img.save(path)
+                if os.path.exists(path) and os.path.getsize(path) > 1000:
+                    saved = True
+            except Exception:
+                pass
+
+        if not saved:
             diagnostic = (result.stderr or result.stdout or "").strip() or "no output"
             raise RuntimeError(
                 f"screencapture failed (exit {result.returncode}): {diagnostic}. "

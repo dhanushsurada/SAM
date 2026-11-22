@@ -100,11 +100,11 @@ export const ROUTES: RouteMeta[] = [
   },
   {
     path: "/connect",
-    label: "Device Connect",
+    label: "Connect & Bridges",
     icon: FiSmartphone,
     group: "workspaces",
     plannedStep: "Agent 3 + Android",
-    description: "Pair trusted mobile devices, set up Wi-Fi or USB tunnels, and troubleshoot phone connection.",
+    description: "Pair trusted mobile devices, set up Wi-Fi or USB tunnels, and manage omnichannel WhatsApp/Telegram/iOS bridges.",
   },
   {
     path: "/iqoo",

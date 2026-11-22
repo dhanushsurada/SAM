@@ -5,8 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SAM</title>
     <meta name="description" content="SAM — local-first autonomous AI assistant." />
-
-    <!-- Fonts are bundled from @fontsource (imported in src/main.tsx): zero third-party requests at runtime. -->
+    <script>
+      window.onerror = function(msg, url, line, col, err) {
+        var el = document.getElementById("sam-fallback-error");
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "sam-fallback-error";
+          el.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:#111;color:#ff5555;padding:24px;font-family:monospace;font-size:13px;z-index:999999;overflow:auto;white-space:pre-wrap;";
+          document.body ? document.body.appendChild(el) : document.documentElement.appendChild(el);
+        }
+        el.textContent = "SAM Startup Error:\n" + msg + "\nAt: " + url + ":" + line + ":" + col + "\n\nStack:\n" + (err ? err.stack : "none");
+      };
+      window.onunhandledrejection = function(e) {
+        var el = document.getElementById("sam-fallback-error");
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "sam-fallback-error";
+          el.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:#111;color:#ffaa00;padding:24px;font-family:monospace;font-size:13px;z-index:999999;overflow:auto;white-space:pre-wrap;";
+          document.body ? document.body.appendChild(el) : document.documentElement.appendChild(el);
+        }
+        el.textContent = "SAM Startup Rejection:\n" + (e.reason ? (e.reason.stack || e.reason) : e);
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>
