@@ -49,6 +49,98 @@ function TaskComposer({ onSubmit, busy, error, placeholder }) {
   );
 }
 
+function ExecutiveBriefingWidget({ onRunPrompt }) {
+  const [briefing, setBriefing] = useState(null);
+  const [activeTab, setActiveTab] = useState('briefing');
+
+  useEffect(() => {
+    fetch('/api/briefing')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setBriefing(d); })
+      .catch(() => {});
+  }, []);
+
+  if (!briefing) return null;
+
+  return (
+    <Card className="p-5 flex flex-col gap-4 border-line/80">
+      <div className="flex items-center justify-between border-b border-line/50 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+          <span className="text-xs font-semibold uppercase tracking-wider">Executive Morning Briefing & Real-Life Plate</span>
+          <span className="text-xs text-muted font-mono">({briefing.date})</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 text-[11px] font-mono font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            JEV Reflex: &lt;50ms
+          </span>
+          <button
+            onClick={() => onRunPrompt && onRunPrompt("give me my morning briefing")}
+            className="px-2.5 py-1 rounded-md border border-line bg-surface text-xs font-medium hover:border-ink/40 transition-colors"
+          >
+            Run Briefing
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveTab('briefing')}
+          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${activeTab === 'briefing' ? 'bg-ink text-white' : 'bg-black/5 text-muted hover:text-ink'}`}
+        >
+          Today's Agenda ({briefing.events ? briefing.events.length : 0})
+        </button>
+        <button
+          onClick={() => setActiveTab('plate')}
+          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${activeTab === 'plate' ? 'bg-ink text-white' : 'bg-black/5 text-muted hover:text-ink'}`}
+        >
+          On My Plate ({briefing.notes_tasks ? briefing.notes_tasks.length : 0})
+        </button>
+      </div>
+
+      {activeTab === 'briefing' ? (
+        <div className="space-y-2">
+          {(!briefing.events || briefing.events.length === 0) ? (
+            <p className="text-xs text-muted italic">Calendar is open today. No scheduled meetings.</p>
+          ) : (
+            briefing.events.map((ev, i) => (
+              <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/5 text-xs">
+                <span className="font-mono text-muted">{ev.start}</span>
+                <span className="font-medium">{ev.title}</span>
+                {ev.is_virtual && <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 font-mono text-[10px]">Virtual</span>}
+              </div>
+            ))
+          )}
+          {briefing.next_meeting_prep && (
+            <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-800 text-xs border border-amber-500/20">
+              💡 {briefing.next_meeting_prep}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {(!briefing.notes_tasks || briefing.notes_tasks.length === 0) ? (
+            <p className="text-xs text-muted italic">Notes vault is clear — no pending checklist items for today.</p>
+          ) : (
+            briefing.notes_tasks.map((task, i) => (
+              <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-black/5 text-xs">
+                <input type="checkbox" readOnly className="rounded border-line" />
+                <span>{task}</span>
+              </div>
+            ))
+          )}
+          {briefing.recommendations && briefing.recommendations[0] && (
+            <div className="p-2.5 rounded-lg bg-black/5 text-muted text-xs border border-line">
+              ⚡ Recommendation: {briefing.recommendations[0]}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function WorkspaceScreen({ status, model, documents, lastTask, onSubmitTask, taskBusy, taskError, onNavigate }) {
   return (
     <div className="p-8 max-w-5xl mx-auto flex flex-col gap-6">
@@ -63,6 +155,8 @@ function WorkspaceScreen({ status, model, documents, lastTask, onSubmitTask, tas
         <StatBlock label="Sovereign Mode" value={status ? (status.sovereign_mode ? 'ON' : 'OFF') : '—'} dark={!!status?.sovereign_mode} sub="network guard" />
         <StatBlock label="Last Task" value={lastTask ? lastTask.status.toUpperCase() : '—'} sub={lastTask ? `${lastTask.steps.length} step(s) recorded` : 'none run yet'} />
       </div>
+
+      <ExecutiveBriefingWidget onRunPrompt={onSubmitTask} />
 
       <TaskComposer onSubmit={onSubmitTask} busy={taskBusy} error={taskError} />
 

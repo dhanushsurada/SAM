@@ -1,22 +1,33 @@
 import { useState } from "react";
-import { FiCamera, FiMusic, FiActivity, FiFolder, FiZap } from "react-icons/fi";
+import { FiCamera, FiMusic, FiActivity, FiFolder, FiZap, FiSun, FiCheckSquare } from "react-icons/fi";
 import { useTaskSession } from "@/stores/taskSession";
 import { TaskComposer } from "@/features/iqoo/TaskComposer";
 import { ActiveTask } from "@/features/iqoo/ActiveTask";
 import { BrainCard } from "./BrainCard";
 import { SystemPulse } from "./SystemPulse";
 import { RecentTasks } from "./RecentTasks";
+import { ExecutiveBriefingCard } from "./ExecutiveBriefingCard";
 
 const QUICK_ACTIONS = [
   {
-    icon: FiCamera,
-    label: "Screenshot to Desktop",
-    prompt: "Take a screenshot of the current screen and save it to the Desktop",
+    icon: FiSun,
+    label: "Morning Briefing",
+    prompt: "Give me an executive morning briefing of my schedule, priority mail, and daily goals",
+  },
+  {
+    icon: FiCheckSquare,
+    label: "On My Plate",
+    prompt: "What's on my plate from my real life today? Check my notes and priorities",
   },
   {
     icon: FiMusic,
     label: "Play Lofi on YouTube",
     prompt: "Open YouTube in the browser and search for lofi chill beats to relax",
+  },
+  {
+    icon: FiCamera,
+    label: "Screenshot to Desktop",
+    prompt: "Take a screenshot of the current screen and save it to the Desktop",
   },
   {
     icon: FiActivity,
@@ -103,6 +114,8 @@ export function CommandCenterPage() {
           retrying={retrying}
         />
       )}
+
+      <ExecutiveBriefingCard onRunTask={(prompt) => setPresetText(prompt)} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <SystemPulse health={health} loading={healthLoading} error={healthError} />
