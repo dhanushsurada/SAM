@@ -58,7 +58,7 @@ NOT_PAIRED_MESSAGE = (
 class TelegramBridge:
     def __init__(self, settings, registry=None):
         self.settings = settings
-        self._task_lock = asyncio.Lock()  # ReactLoop/hands aren't built for concurrent tasks
+        self._task_lock = None  # ReactLoop/hands aren't built for concurrent tasks; initialized lazily inside loop
 
         from connect.core.device_registry import DeviceRegistry
         self.registry = registry or DeviceRegistry()
@@ -117,6 +117,8 @@ class TelegramBridge:
 
         self.registry.touch_last_active(chat_id)
 
+        if self._task_lock is None:
+            self._task_lock = asyncio.Lock()
         async with self._task_lock:
             await update.message.chat.send_action("typing")
             try:

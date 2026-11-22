@@ -76,7 +76,7 @@ class WhatsAppBridge:
     def __init__(self, settings, registry: Optional[DeviceRegistry] = None):
         self.settings = settings
         self.registry = registry or DeviceRegistry()
-        self._task_lock = asyncio.Lock()
+        self._task_lock = None
         self._sent_messages: List[Dict[str, Any]] = []
 
         self.identity = Identity()
