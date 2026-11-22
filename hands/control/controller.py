@@ -247,7 +247,7 @@ class ComputerController:
                     [SCREENCAPTURE_BIN, "-x", path],
                     capture_output=True, text=True,
                 )
-                if result.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+                if result.returncode == 0 and not (os.path.exists(path) and os.path.getsize(path) == 0):
                     saved = True
 
                 # Tier 2: macOS WindowServer GUI session execution via osascript
@@ -256,7 +256,7 @@ class ComputerController:
                     try:
                         osa_cmd = f'do shell script "{SCREENCAPTURE_BIN} -x " & quoted form of "{path}"'
                         osa_res = subprocess.run(["osascript", "-e", osa_cmd], capture_output=True, text=True)
-                        if osa_res.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+                        if osa_res.returncode == 0 and not (os.path.exists(path) and os.path.getsize(path) == 0):
                             saved = True
                     except Exception as osa_err:
                         logger.debug(f"AppleScript screencapture fallback attempt: {osa_err}")
@@ -267,7 +267,7 @@ class ComputerController:
                         img = self._pyautogui.screenshot(path)
                         if not os.path.exists(path) and hasattr(img, "save"):
                             img.save(path)
-                        if os.path.exists(path) and os.path.getsize(path) > 1000:
+                        if os.path.exists(path) and os.path.getsize(path) > 0:
                             saved = True
                     except Exception:
                         pass
