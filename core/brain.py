@@ -84,7 +84,6 @@ class Brain:
         self._cached_ollama_status = None
         self._cached_ollama_time = 0.0
         self._cache_ttl_seconds = 30.0
-        self._session = requests.Session()
 
     def _check_ollama(self) -> bool:
         """Check if Ollama is running, with short-term caching to avoid redundant calls."""
@@ -93,7 +92,7 @@ class Brain:
         if self._cached_ollama_status is not None and (now - self._cached_ollama_time) < self._cache_ttl_seconds:
             return self._cached_ollama_status
         try:
-            r = self._session.get(f"{self.settings.ollama_host}/api/tags", timeout=3)
+            r = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=3)
             status = (r.status_code == 200)
             self._cached_ollama_status = status
             self._cached_ollama_time = now
@@ -148,7 +147,7 @@ class Brain:
             models = self._cached_models
         else:
             try:
-                r = self._session.get(f"{self.settings.ollama_host}/api/tags", timeout=5)
+                r = requests.get(f"{self.settings.ollama_host}/api/tags", timeout=5)
                 models = [m.get("name") or m.get("model") for m in r.json().get("models", [])]
                 self._cached_models = models
                 self._cached_models_time = now
@@ -224,7 +223,7 @@ class Brain:
                     }
                 }
                 req_timeout = (15, getattr(self.settings, "ollama_timeout", 300))
-                response = self._session.post(
+                response = requests.post(
                     f"{self.settings.ollama_host}/api/chat",
                     json=payload,
                     stream=True,
@@ -257,7 +256,7 @@ class Brain:
                 }
 
                 req_timeout = (15, getattr(self.settings, "ollama_timeout", 300))
-                response = self._session.post(
+                response = requests.post(
                     f"{self.settings.ollama_host}/api/chat",
                     json=payload,
                     timeout=req_timeout

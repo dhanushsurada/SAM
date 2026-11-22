@@ -42,7 +42,7 @@ SOURCE_DIRS = (
     "mouth", "multimodal", "runtime", "skills", "sovereign",
 )
 SOURCE_FILES = ("sam_cli.py", "main.py", "requirements.txt", "LICENSE")
-INTERFACES_DIRS = ("api", "telegram", "web")  # not "desktop": that is the GUI
+INTERFACES_DIRS = ("api", "telegram", "web", "whatsapp")  # not "desktop": that is the GUI
 IGNORE = shutil.ignore_patterns(
     "__pycache__", "*.pyc", "tests", ".git", ".venv", "node_modules", "*.db",
     "chroma",
