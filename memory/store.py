@@ -193,32 +193,64 @@ class MemoryStore:
         )
         return response.json()["embedding"]
 
-    def extract_and_save(self, user_input: str, response: str):
-        try:
-            import requests
-            prompt = f"""Extract important facts or preferences about the user from this conversation.
+    _PERSONAL_FACT_INDICATORS = (
+        "my name", "i am", "i'm", "i live", "i work", "i prefer", "i like",
+        "i hate", "i love", "my favorite", "my favourite", "remember that",
+        "never", "always", "call me", "my email", "my phone", "i have",
+        "don't like", "dont like", "i want you to remember", "keep in mind",
+        "i decided", "my company", "my project"
+    )
+
+    def extract_and_save(self, user_input: str, response: str, async_mode: bool = False):
+        if not user_input or not response:
+            return
+
+        # Pre-filter check to prevent queuing blocking LLM jobs for operational tasks:
+        # If neither the input nor the response mentions personal preferences or facts,
+        # or if the user input is an operational command, skip expensive LLM generation.
+        combined = f"{user_input} {response}".lower()
+        has_indicator = any(indicator in combined for indicator in self._PERSONAL_FACT_INDICATORS)
+        if not has_indicator:
+            words = user_input.strip().split()
+            if len(words) < 5 or any(user_input.lower().strip().startswith(cmd) for cmd in (
+                "open", "launch", "run", "calculate", "check", "stop", "volume",
+                "screen", "what is", "what's", "how much", "play", "close", "list", "show", "tell me"
+            )):
+                logger.debug("Skipping semantic memory extraction — no personal fact triggers found")
+                return
+
+        def _do_extract():
+            try:
+                import requests
+                prompt = f"""Extract important facts or preferences about the user from this conversation.
 Return a JSON array of strings. If nothing important, return [].
 
 User: {user_input}
 SAM: {response}
 
 Return ONLY a JSON array."""
-            r = requests.post(
-                f"{self.settings.ollama_host}/api/generate",
-                json={"model": self.settings.primary_model, "prompt": prompt, "stream": False, "format": "json"},
-                timeout=30
-            )
-            facts = json.loads(r.json().get("response", "[]"))
-            if isinstance(facts, list):
-                for fact in facts:
-                    if isinstance(fact, str) and len(fact) > 10:
-                        self.save_semantic(fact, metadata={
-                            "source": "auto_extract",
-                            "timestamp": datetime.now().isoformat()
-                        })
-                logger.info(f"Extracted {len(facts)} memories")
-        except Exception as e:
-            logger.debug(f"Memory extraction skipped: {e}")
+                r = requests.post(
+                    f"{self.settings.ollama_host}/api/generate",
+                    json={"model": self.settings.primary_model, "prompt": prompt, "stream": False, "format": "json"},
+                    timeout=15
+                )
+                facts = json.loads(r.json().get("response", "[]"))
+                if isinstance(facts, list):
+                    for fact in facts:
+                        if isinstance(fact, str) and len(fact) > 10:
+                            self.save_semantic(fact, metadata={
+                                "source": "auto_extract",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    logger.info(f"Extracted {len(facts)} memories")
+            except Exception as e:
+                logger.debug(f"Memory extraction skipped: {e}")
+
+        if async_mode:
+            import threading
+            threading.Thread(target=_do_extract, daemon=True, name="sam-memory-extract").start()
+        else:
+            _do_extract()
 
     # ─── Chat Conversations Persistence ───────────────────────────────────
 

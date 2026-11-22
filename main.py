@@ -237,6 +237,7 @@ class SAM:
     def on_wake_voice(self):
         """Called by wake word listener — records and transcribes speech with streaming JEV reflexes."""
         logger.info("Wake word detected — recording...")
+        self.tts.stop()
         self.jev_reflex.reset_stream()
         user_input = self.stt.listen(
             on_partial_transcript=lambda partial: self.jev_reflex.evaluate_partial(partial)
@@ -247,6 +248,7 @@ class SAM:
     def on_text_input(self, text: str):
         """Called by text input listener — processes typed input directly."""
         logger.info(f"Text input: {text}")
+        self.tts.stop()
         self._process(text)
 
     # ─── Core Processing ──────────────────────────────────────────────────
@@ -256,6 +258,7 @@ class SAM:
         Serialized via self._process_lock -- see __init__ for why."""
         normalized = user_input.strip().lower()
         if normalized in self._STOP_PHRASES:
+            self.tts.stop()
             was_running = self._process_lock.locked()
             self._cancel_event.set()
             msg = ("Stopping now." if was_running
@@ -271,6 +274,7 @@ class SAM:
                   "this will run right after it finishes.\n")
             self._process_lock.acquire()  # now wait our turn
 
+        lock_held = True
         try:
             # Handle built-in commands first
             if self._handle_command(user_input):
@@ -329,6 +333,9 @@ class SAM:
 
                 turn_ctx.finish(success=True)
                 print(f"\nSAM: {result_msg}\n")
+                if lock_held:
+                    self._process_lock.release()
+                    lock_held = False
                 if self.settings.tts_engine != "none":
                     self.tts.speak(result_msg)
                 return
@@ -392,26 +399,32 @@ class SAM:
 
             # Always print response — useful in text mode
             print(f"\nSAM: {final_response.text}\n")
+            turn_ctx.finish(success=True)
 
-            # Speak response (unless in silent/text-only mode)
+            # Release process lock immediately after action/planning completes so consecutive tasks are unblocked
+            if lock_held:
+                self._process_lock.release()
+                lock_held = False
+
+            # Post-turn hooks: background persistence so Ollama and worker locks are never blocked
+            def _bg_post_turn():
+                try:
+                    if not self.settings.incognito:
+                        session.save(user_input=user_input, response=final_response,
+                                     memory_store=self.memory.get_store(self.settings))
+                    self.founder_mode.capture_if_relevant(user_input, final_response)
+                    self.notes_vault.append_daily_log(
+                        f"{user_input} -> {final_response.text[:120]}",
+                        category="Task"
+                    )
+                except Exception as ex:
+                    logger.debug(f"Background turn persistence error: {ex}")
+
+            threading.Thread(target=_bg_post_turn, daemon=True, name="sam-bg-turn-save").start()
+
+            # Speak response (outside _process_lock, so next input can run immediately or interrupt)
             if self.settings.tts_engine != "none":
                 self.tts.speak(final_response.text)
-
-            # Save session to memory — records what actually happened,
-            # not the discarded pre-action claim
-            if not self.settings.incognito:
-                session.save(user_input=user_input, response=final_response,
-                             memory_store=self.memory.get_store(self.settings))
-
-            # Founder Mode capture — same, sees the real outcome
-            self.founder_mode.capture_if_relevant(user_input, final_response)
-
-            # Auto-log to Daily Note in Notes Vault (Bidirectional Note Sync)
-            self.notes_vault.append_daily_log(
-                f"{user_input} -> {final_response.text[:120]}",
-                category="Task"
-            )
-            turn_ctx.finish(success=True)
 
         except Exception as e:
             if 'turn_ctx' in locals():
@@ -422,7 +435,8 @@ class SAM:
             if self.settings.tts_engine != "none":
                 self.tts.speak(error_msg)
         finally:
-            self._process_lock.release()
+            if lock_held:
+                self._process_lock.release()
 
     # ─── Commands ─────────────────────────────────────────────────────────
 

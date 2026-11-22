@@ -239,7 +239,7 @@ class FounderModeManager:
 
     # ─── Auto-capture (called from main.py after every turn) ───────────────
 
-    def capture_if_relevant(self, user_input: str, response):
+    def capture_if_relevant(self, user_input: str, response, async_mode: bool = False):
         """
         Called after every SAM turn. Cheap pre-filter first (no cost if no
         match). If matched and an LLM classifier is available, extracts a
@@ -251,6 +251,10 @@ class FounderModeManager:
         pricing table. Free tier never captures anything here — this is
         the actual enforcement point that makes the license matter, not
         just a status message at startup.
+
+        async_mode: If True, dispatches the LLM classification in a daemon
+        thread so the calling task runner can proceed immediately without
+        delaying consecutive tasks.
         """
         from licensing.tier import get_tier, PRO
         if get_tier(self.settings) != PRO:
@@ -265,6 +269,17 @@ class FounderModeManager:
             and getattr(self.settings, "founder_mode_llm_capture", True)
             and not getattr(self.settings, "incognito", False)
         )
+
+        if async_mode and use_llm:
+            import threading
+            threading.Thread(
+                target=self.capture_if_relevant,
+                args=(user_input, response),
+                kwargs={"async_mode": False},
+                daemon=True,
+                name="founder-capture"
+            ).start()
+            return
 
         if use_llm:
             try:

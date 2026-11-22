@@ -453,12 +453,18 @@ class TaskGateway:
                     result_text = route_decision.suggested_text or "Hey! I'm SAM."
                     from core.brain import BrainResponse
                     mock_resp = BrainResponse(text=result_text, action="none")
-                    if not self.settings.incognito:
-                        session.save(user_input=instruction, response=mock_resp,
-                                     memory_store=self.memory.get_store(self.settings))
-                    self.founder_mode.capture_if_relevant(instruction, mock_resp)
                     self.task_store.update_status(task_id, "completed", result_text=result_text)
                     self.event_bus.publish(task_id, "completed", result_text)
+
+                    def _bg_greet():
+                        try:
+                            if not self.settings.incognito:
+                                session.save(user_input=instruction, response=mock_resp,
+                                             memory_store=self.memory.get_store(self.settings))
+                            self.founder_mode.capture_if_relevant(instruction, mock_resp)
+                        except Exception as ex:
+                            logger.debug(f"Background capture error: {ex}")
+                    threading.Thread(target=_bg_greet, daemon=True, name=f"bg-greet-{task_id[:8]}").start()
                     return
 
                 elif route_decision.action:
@@ -510,10 +516,15 @@ class TaskGateway:
             self.task_store.update_status(task_id, final_status, result_text=final_response.text)
             self.event_bus.publish(task_id, final_status, final_response.text)
 
-            if not self.settings.incognito:
-                session.save(user_input=instruction, response=final_response,
-                             memory_store=self.memory.get_store(self.settings))
-            self.founder_mode.capture_if_relevant(instruction, final_response)
+            def _bg_post():
+                try:
+                    if not self.settings.incognito:
+                        session.save(user_input=instruction, response=final_response,
+                                     memory_store=self.memory.get_store(self.settings))
+                    self.founder_mode.capture_if_relevant(instruction, final_response)
+                except Exception as ex:
+                    logger.debug(f"Background post-turn capture error: {ex}")
+            threading.Thread(target=_bg_post, daemon=True, name=f"bg-post-{task_id[:8]}").start()
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)

@@ -86,26 +86,62 @@ class TextToSpeech:
         # until the app is restarted. (The clock is replaceable for tests.)
         self._synth_failed_at = {}
         self._clock = time.monotonic
+        self._active_proc = None
+        self._proc_lock = threading.Lock()
         logger.info(f"TTS initialised for platform: {PLATFORM}")
 
-    def speak(self, text: str):
+    def stop(self):
+        """Immediately stops any ongoing TTS audio playback."""
+        with self._proc_lock:
+            if self._active_proc is not None:
+                try:
+                    if self._active_proc.poll() is None:
+                        self._active_proc.terminate()
+                        try:
+                            self._active_proc.wait(timeout=0.2)
+                        except Exception:
+                            self._active_proc.kill()
+                except Exception as e:
+                    logger.debug(f"Error stopping TTS process: {e}")
+                finally:
+                    self._active_proc = None
+
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:
+            pass
+
+    def speak(self, text: str, block: bool = True):
         if not text or not text.strip():
             return
         text = self._clean_for_speech(text)
-        logger.info(f"Speaking: {text[:80]}...")
+        if not text:
+            return
 
-        for engine in self._get_engine_order():
-            if engine.__name__ in self._known_bad_engines:
-                continue
-            try:
-                engine(text)
-                return
-            except Exception as e:
-                logger.warning(f"TTS engine failed ({engine.__name__}): {e} "
-                                f"— skipping it for the rest of this session")
-                self._known_bad_engines.add(engine.__name__)
+        self.stop()
 
-        self._speak_print(text)
+        def _do_speak():
+            logger.info(f"Speaking: {text[:80]}...")
+            for engine in self._get_engine_order():
+                if engine.__name__ in self._known_bad_engines:
+                    continue
+                try:
+                    engine(text)
+                    return
+                except Exception as e:
+                    logger.warning(f"TTS engine failed ({engine.__name__}): {e} "
+                                    f"— skipping it for the rest of this session")
+                    self._known_bad_engines.add(engine.__name__)
+
+            self._speak_print(text)
+
+        if not block:
+            t = threading.Thread(target=_do_speak, daemon=True, name="sam-tts-worker")
+            t.start()
+            return t
+        else:
+            _do_speak()
 
     def _get_engine_order(self):
         engine_name = getattr(self.settings, "tts_engine", "kokoro")
@@ -390,7 +426,17 @@ class TextToSpeech:
         if os.environ.get("SAM_TEST_MODE") == "1":
             return
         if IS_MAC:
-            subprocess.run(["say", text], timeout=60, check=True)
+            proc = subprocess.Popen(["say", text])
+            with self._proc_lock:
+                self._active_proc = proc
+            try:
+                proc.wait(timeout=60)
+                if proc.returncode != 0 and proc.returncode != -15:
+                    raise subprocess.CalledProcessError(proc.returncode, ["say", text])
+            finally:
+                with self._proc_lock:
+                    if self._active_proc is proc:
+                        self._active_proc = None
         elif IS_WIN:
             self._speak_pyttsx3(text)
         else:
@@ -434,7 +480,17 @@ class TextToSpeech:
         if os.environ.get("SAM_TEST_MODE") == "1":
             return
         if IS_MAC:
-            subprocess.run(["afplay", path], timeout=120, check=True)
+            proc = subprocess.Popen(["afplay", path])
+            with self._proc_lock:
+                self._active_proc = proc
+            try:
+                proc.wait(timeout=120)
+                if proc.returncode != 0 and proc.returncode != -15:
+                    raise subprocess.CalledProcessError(proc.returncode, ["afplay", path])
+            finally:
+                with self._proc_lock:
+                    if self._active_proc is proc:
+                        self._active_proc = None
         elif IS_WIN:
             try:
                 ps_cmd = f'$p=New-Object System.Media.SoundPlayer("{path}");$p.PlaySync()'

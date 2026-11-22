@@ -22,7 +22,7 @@ class Session:
     history: List[Dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def save(self, user_input: str, response, memory_store=None):
+    def save(self, user_input: str, response, memory_store=None, async_extract: bool = True):
         """
         Extract and save memory from this interaction.
         Skipped entirely in incognito mode.
@@ -37,6 +37,10 @@ class Session:
         targets. Omit memory_store to get the old behaviour unchanged
         (creates its own store, exactly as before) — kept for backward
         compatibility with any caller not yet passing one.
+
+        async_extract: if True (default), heavy semantic fact extraction
+        runs asynchronously in the background so that session saving completes
+        in <1ms and does not delay consecutive or subsequent tasks.
         """
         if self.settings.incognito:
             logger.info("Incognito mode — session not saved")
@@ -63,10 +67,11 @@ class Session:
                 timestamp=self.created_at
             )
 
-            # Extract and save semantic memory
+            # Extract and save semantic memory (asynchronously by default)
             store.extract_and_save(
                 user_input=user_input,
-                response=response.text
+                response=response.text,
+                async_mode=async_extract
             )
 
             logger.info("Session saved to memory")
