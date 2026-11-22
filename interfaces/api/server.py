@@ -112,6 +112,7 @@ from interfaces.api.connect_routes import (
     stop_background_tasks as _stop_connect_background_tasks,
     require_local_caller,
 )
+from interfaces.api.bridge_routes import router as bridge_router
 from runtime.environment_manager import EnvironmentCompatibilityManager
 
 logger = logging.getLogger("SAM.iQOO.Server")
@@ -142,6 +143,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Last-Event-ID", "X-SAM-Device", "X-SAM-Timestamp", "X-SAM-Nonce", "X-SAM-Signature"],
 )
 app.include_router(connect_router)  # agent/cross-device: /api/connect/*
+app.include_router(bridge_router)   # omnichannel & apple ios bridges: /api/bridges/*, /api/ios/*, /api/fabric/*
 
 _gateway: TaskGateway = None  # constructed lazily on first request / at startup
 
