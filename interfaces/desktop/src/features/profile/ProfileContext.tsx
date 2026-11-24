@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { syncEcosystemPlatforms } from "@/api/client";
 import {
   DEFAULT_FOUNDER_PROFILE,
   GUEST_PROFILE,
@@ -84,6 +85,44 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       // ignore
     }
   }, [profile]);
+
+  // Auto-sync connected platforms and persona to backend ecosystem API
+  useEffect(() => {
+    if (!profile.connectedPlatforms || profile.connectedPlatforms.length === 0) return;
+    const timer = setTimeout(() => {
+      syncEcosystemPlatforms({
+        platforms: profile.connectedPlatforms.map((p) => {
+          const rawHandle = (p.handle || "").replace(/^@/, "").trim();
+          let canonicalUrl: string | undefined = undefined;
+          if (p.id === "github" && rawHandle) {
+            canonicalUrl = `https://github.com/${rawHandle}`;
+          } else if (p.id === "linkedin" && rawHandle) {
+            canonicalUrl = `https://www.linkedin.com/in/${rawHandle}`;
+          } else if (p.id === "twitter" && rawHandle) {
+            canonicalUrl = `https://x.com/${rawHandle}`;
+          } else if (p.id === "instagram" && rawHandle) {
+            canonicalUrl = `https://www.instagram.com/${rawHandle}`;
+          }
+
+          return {
+            id: p.id,
+            name: p.name,
+            handle: p.handle,
+            url: canonicalUrl,
+            connected: p.connected,
+            syncMessages: p.syncMessages,
+            syncContext: p.syncContext,
+          };
+        }),
+        persona: profile.personaAnalysis as Record<string, unknown> | undefined,
+        user_id: profile.id,
+      }).catch((err) => {
+        console.debug("Ecosystem background sync failed:", err);
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [profile.connectedPlatforms, profile.personaAnalysis, profile.id]);
 
   const signIn = (opts?: Partial<UserProfile>) => {
     let savedVault: Partial<UserProfile> | null = null;

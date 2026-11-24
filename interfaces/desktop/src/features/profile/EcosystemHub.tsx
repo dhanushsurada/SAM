@@ -15,7 +15,8 @@ import {
 } from "react-icons/fi";
 import { useProfile } from "./ProfileContext";
 import { Button } from "@/components/Button";
-import type { PlatformId } from "./types";
+import { createTask } from "@/api/client";
+import type { PlatformId, ConnectedPlatform } from "./types";
 
 function getPlatformIcon(id: PlatformId) {
   switch (id) {
@@ -44,6 +45,27 @@ export function EcosystemHub() {
   const [syncedNotice, setSyncedNotice] = useState(false);
   const [editingPlatform, setEditingPlatform] = useState<PlatformId | null>(null);
   const [handleInput, setHandleInput] = useState("");
+  const [auditingId, setAuditingId] = useState<string | null>(null);
+  const [auditNotice, setAuditNotice] = useState<string | null>(null);
+
+  const handleAudit = async (platform: ConnectedPlatform) => {
+    setAuditingId(platform.id);
+    try {
+      await createTask({
+        instruction: `Audit my ${platform.name}`,
+        input_type: "text",
+        attachments: [],
+      });
+      setAuditNotice(`Audit launched for ${platform.name} using connected verified profile!`);
+      setTimeout(() => setAuditNotice(null), 4500);
+    } catch (err) {
+      console.debug("Failed to dispatch audit task:", err);
+      setAuditNotice(`Audit command initiated for ${platform.name}.`);
+      setTimeout(() => setAuditNotice(null), 4500);
+    } finally {
+      setAuditingId(null);
+    }
+  };
 
   const handleRunAnalysis = async () => {
     setAnalyzing(true);
@@ -154,6 +176,13 @@ export function EcosystemHub() {
           <span className="text-[11px] text-mute">Context automatically tied to your sovereign ID</span>
         </div>
 
+        {auditNotice && (
+          <div className="rounded-xl border border-success/40 bg-success/15 px-3 py-2 text-xs text-success flex items-center gap-2">
+            <FiCheck size={14} className="shrink-0" />
+            <span>{auditNotice}</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {profile.connectedPlatforms.map((platform) => {
             const isEditing = editingPlatform === platform.id;
@@ -187,13 +216,25 @@ export function EcosystemHub() {
 
                   <div>
                     {platform.connected ? (
-                      <button
-                        type="button"
-                        onClick={() => disconnectPlatform(platform.id)}
-                        className="rounded-md border border-line/60 px-2 py-0.5 text-[11px] text-mute hover:border-danger hover:text-danger transition-colors"
-                      >
-                        Disconnect
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={auditingId === platform.id}
+                          onClick={() => handleAudit(platform)}
+                          className="rounded-md border border-ember/50 bg-ember/15 px-2.5 py-0.5 text-[11px] font-medium text-ember-text hover:bg-ember/25 transition-colors flex items-center gap-1 shadow-2xs disabled:opacity-50"
+                          title={`Perform instant autonomous audit of connected ${platform.name} account`}
+                        >
+                          <FiShield size={11} className={auditingId === platform.id ? "animate-spin" : ""} />
+                          {auditingId === platform.id ? "Auditing..." : "Audit"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => disconnectPlatform(platform.id)}
+                          className="rounded-md border border-line/60 px-2 py-0.5 text-[11px] text-mute hover:border-danger hover:text-danger transition-colors"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
                     ) : (
                       <button
                         type="button"

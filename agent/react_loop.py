@@ -907,7 +907,9 @@ class ReactLoop:
             import webbrowser
             try:
                 webbrowser.open(url)
-                return f"Playing in default browser: {url}"
+                if "youtube.com" in url or "spotify.com" in url:
+                    return f"Playing in default browser: {url}"
+                return f"Opened {url} in default browser."
             except Exception as e:
                 logger.warning(f"Could not open default browser: {e}")
         browser = self._get_browser()

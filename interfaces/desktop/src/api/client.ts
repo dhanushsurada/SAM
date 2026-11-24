@@ -679,3 +679,42 @@ export function executeSkill(name: string, input?: string, params?: Record<strin
     body: JSON.stringify({ input: input || "", params }),
   }, CORE_BASE);
 }
+
+export interface EcosystemSyncPayload {
+  platforms: Array<{
+    id: string;
+    name: string;
+    handle?: string;
+    url?: string;
+    connected?: boolean;
+    syncMessages?: boolean;
+    syncContext?: boolean;
+    [key: string]: unknown;
+  }>;
+  persona?: Record<string, unknown>;
+  user_id?: string;
+}
+
+export function syncEcosystemPlatforms(payload: EcosystemSyncPayload): Promise<{
+  ok: boolean;
+  synced_platforms: number;
+  synced_facts: number;
+}> {
+  return request("/profile/ecosystem/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, CORE_BASE);
+}
+
+export function getEcosystemStatus(): Promise<{
+  status: string;
+  founder_context_length: number;
+  platforms: string[];
+  connected_platforms?: Record<string, unknown>;
+}> {
+  return request("/profile/ecosystem", {
+    method: "GET",
+  }, CORE_BASE);
+}
+

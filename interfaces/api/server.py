@@ -43,6 +43,8 @@ import math
 import site
 import sys
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Optional, Dict, List, Any
 
@@ -1083,12 +1085,15 @@ def get_ecosystem_status():
     """Return ecosystem status and synthesized persona facts."""
     gateway = get_gateway()
     founder_ctx = gateway.founder_mode.get_context() or ""
+    identity_data = gateway.identity.load()
+    connected_platforms = identity_data.get("connected_platforms", {})
     return {
         "status": "active",
         "founder_context_length": len(founder_ctx),
-        "platforms": [
+        "platforms": list(connected_platforms.keys()) if connected_platforms else [
             "telegram", "instagram", "whatsapp", "traceop", "github", "twitter", "linkedin"
-        ]
+        ],
+        "connected_platforms": connected_platforms,
     }
 
 
@@ -1097,6 +1102,15 @@ def sync_ecosystem_context(req: EcosystemSyncRequest):
     """Sync connected platforms and record TraceOp persona intelligence into episodic memory."""
     gateway = get_gateway()
     synced_facts = 0
+
+    # Persist and resolve canonical URLs for all connected platforms into Identity
+    if req.platforms:
+        for p in req.platforms:
+            pid = p.get("id") or p.get("name")
+            if pid:
+                gateway.identity.set_platform(str(pid), p)
+        synced_facts += len(req.platforms)
+
     try:
         mem_store = gateway.memory.get_store(gateway.settings)
         if mem_store and req.persona:
@@ -1117,7 +1131,7 @@ def sync_ecosystem_context(req: EcosystemSyncRequest):
                 source="traceop",
                 timestamp=datetime.now().isoformat()
             )
-            synced_facts += len(req.platforms)
+            synced_facts += 1
     except Exception as e:
         logging.getLogger("sam.api").warning("Failed to save persona to memory: %s", e)
 

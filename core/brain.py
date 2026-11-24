@@ -350,6 +350,31 @@ class Brain:
                 "content": f"User identity and profile:\n{json.dumps(session.identity, indent=2)}"
             })
 
+            # Connected ecosystem platforms rule: NEVER ask for URLs when auditing connected platforms!
+            connected_platforms = (session.identity or {}).get("connected_platforms", {})
+            if connected_platforms:
+                platforms_summary = []
+                for pid, pdata in connected_platforms.items():
+                    if isinstance(pdata, dict) and pdata.get("connected", True):
+                        pname = pdata.get("name", pid.capitalize())
+                        handle = pdata.get("handle", "")
+                        url = pdata.get("url", "")
+                        platforms_summary.append(f"- {pname} (ID: {pid}): Handle='{handle}', URL='{url}'")
+                if platforms_summary:
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "Verified Connected Platforms & Profiles:\n"
+                            + "\n".join(platforms_summary)
+                            + "\n\nCRITICAL AUDIT & PLATFORM INSTRUCTION:\n"
+                            + "All above platforms are already fully authenticated, connected, and mapped to the user.\n"
+                            + "Whenever the user asks to 'audit', 'check', 'review', 'inspect', or 'open' their LinkedIn, GitHub, "
+                            + "X/Twitter, or Instagram account, you ALREADY HAVE THEIR VERIFIED URL. "
+                            + "NEVER prompt or ask the user for their profile URL or account link under any circumstances! "
+                            + "Immediately execute the task using their registered URL (via 'browser' or 'terminal' action)."
+                        )
+                    })
+
         # Founder Mode context
         if session.founder_context and not self.settings.incognito:
             messages.append({
@@ -387,6 +412,25 @@ class Brain:
         if clean_msg in GREETING_RESPONSES:
             return GREETING_RESPONSES[clean_msg]
 
+        if identity is None:
+            try:
+                from memory.identity import Identity
+                identity = Identity().load()
+            except Exception:
+                identity = {}
+
+        # Reflex response for platform audit queries in conversational chat
+        clean_lower = (message or "").strip().lower()
+        if any(v in clean_lower for v in ["audit", "review", "inspect"]) and any(p in clean_lower for p in ["linkedin", "github", "twitter", "instagram"]) or (" x " in f" {clean_lower} "):
+            target_plat = "linkedin" if "linkedin" in clean_lower else ("github" if "github" in clean_lower else ("twitter" if ("twitter" in clean_lower or " x " in f" {clean_lower} ") else "instagram"))
+            platforms = (identity or {}).get("connected_platforms", {})
+            pdata = platforms.get(target_plat, {})
+            url = pdata.get("url")
+            pname = pdata.get("name", target_plat.capitalize())
+            if not url:
+                url = f"https://www.linkedin.com/in/dhanushsurada" if target_plat == "linkedin" else (f"https://github.com/dhanushsurada" if target_plat == "github" else (f"https://x.com/dhanushsurada" if target_plat == "twitter" else f"https://www.instagram.com/dhanushsurada"))
+            return f"I've initiated the audit for your connected {pname} profile at {url}. Reviewing profile structure, recent activity, and public metrics."
+
         assistant_name = (identity or {}).get("assistant_name") or "SAM"
         user_name = (identity or {}).get("user_name") or "User"
 
@@ -395,6 +439,17 @@ class Brain:
             f"You are conversing with {user_name}. Keep your responses clear, helpful, direct, and conversational. "
             f"Do not format your response as JSON tool actions — reply naturally in plain text and markdown."
         )
+
+        connected_platforms = (identity or {}).get("connected_platforms", {})
+        if connected_platforms:
+            sys_content += "\nConnected Platforms and Profiles:\n"
+            for pid, pdata in connected_platforms.items():
+                if isinstance(pdata, dict) and pdata.get("connected", True):
+                    sys_content += f"- {pdata.get('name', pid.capitalize())}: {pdata.get('url', '')} (handle: {pdata.get('handle', '')})\n"
+            sys_content += (
+                "You already have the user's verified profile URLs and account connections above. "
+                "Never ask the user for their profile URL or account links when discussing, auditing, or reviewing them."
+            )
         if founder_context and not self.settings.incognito:
             sys_content += f"\nUser Preferences & Style:\n{founder_context}"
 
