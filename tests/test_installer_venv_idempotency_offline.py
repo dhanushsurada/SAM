@@ -125,6 +125,25 @@ def _test_repairs_incomplete_venv():
         )
 
 
+def test_installer_scripts_wire_prepare_venv():
+    for name in ("setup.sh", "setup_linux.sh"):
+        script_path = REPO_ROOT / name
+        assert script_path.exists()
+        _test_script_wires_prepare_venv(script_path)
+
+
+def test_creates_fresh_venv():
+    _test_creates_fresh_venv()
+
+
+def test_reuses_valid_venv():
+    _test_reuses_valid_venv()
+
+
+def test_repairs_incomplete_venv():
+    _test_repairs_incomplete_venv()
+
+
 def main():
     print("=== Installer .venv idempotency (Phase 4.2) ===")
     for name in ("setup.sh", "setup_linux.sh"):

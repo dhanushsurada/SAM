@@ -6,6 +6,7 @@ Opens URLs, fills forms, extracts data, navigates pages.
 
 import logging
 import json
+import os
 import threading
 from typing import Optional
 

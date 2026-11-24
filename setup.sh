@@ -27,6 +27,12 @@ fi
 
 if command -v brew >/dev/null 2>&1; then
   BREW="$(command -v brew)"
+elif [[ -x /opt/homebrew/bin/brew ]]; then
+  BREW=/opt/homebrew/bin/brew
+  eval "$("$BREW" shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+  BREW=/usr/local/bin/brew
+  eval "$("$BREW" shellenv)"
 else
   echo "Homebrew is required to install the macOS developer prerequisites."
   read -r -p "Run the official Homebrew installer from https://brew.sh now? It may request administrator access. [y/N] " answer
