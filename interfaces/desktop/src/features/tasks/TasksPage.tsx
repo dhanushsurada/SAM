@@ -43,10 +43,10 @@ export function TasksPage() {
       <TaskComposer onSubmit={submitTask} submitting={submitting} />
       {submitError && <p className="text-xs text-danger">{submitError}</p>}
 
-      <div className="grid gap-4 md:grid-cols-[260px_1fr]">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-[280px_1fr] transition-all duration-300">
         <SessionTaskList tasks={sessionTasks} selectedId={selectedTaskId} onSelect={selectTask} />
 
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
           {selectedTask ? (
             <>
               <LifecycleStrip events={events} status={selectedTask.status} />

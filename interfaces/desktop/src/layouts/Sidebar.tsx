@@ -102,23 +102,22 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
 
   return (
     <>
-      {/* Desktop: static column, always visible at md and up. */}
-      <aside className="hidden md:flex md:w-60 md:shrink-0 md:flex-col md:border-r md:border-line md:bg-void">
+      {/* Desktop: static column, always visible at md and up with fluid transitions. */}
+      <aside className="hidden md:flex md:w-60 md:shrink-0 md:flex-col md:border-r md:border-line md:bg-void transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]">
         {content}
       </aside>
 
-      {/* Mobile: slide-in drawer + backdrop, md:hidden. Not a shrunk desktop
-          layout — a distinct treatment, per the brief's explicit requirement. */}
+      {/* Mobile/Narrow: slide-in drawer + backdrop, md:hidden with Apple spring easing */}
       <div className="md:hidden">
         <div
           onClick={onCloseMobile}
           aria-hidden="true"
-          className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-[var(--sam-motion-state)] ${
+          className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
             mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         />
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-64 border-r border-line bg-void transition-transform duration-[var(--sam-motion-state)] ${
+          className={`fixed inset-y-0 left-0 z-50 w-64 border-r border-line bg-void transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl ${
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           }`}
           aria-hidden={!mobileOpen}

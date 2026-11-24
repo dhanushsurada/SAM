@@ -115,11 +115,11 @@ export function ProfileModal() {
       <div
         onClick={closeProfileModal}
         aria-hidden="true"
-        className="fixed inset-0 bg-void/80 backdrop-blur-md transition-opacity"
+        className="fixed inset-0 bg-void/80 backdrop-blur-md animate-sam-fade-in"
       />
 
       {/* Modal Surface */}
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-line/70 bg-surface/95 p-6 shadow-2xl backdrop-blur-2xl ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-line/70 bg-surface/95 p-6 shadow-2xl backdrop-blur-2xl ring-1 ring-white/5 animate-sam-scale-in">
         {/* Top Header */}
         <div className="flex items-start justify-between border-b border-line/50 pb-4">
           <div className="flex items-center gap-3.5">

@@ -239,11 +239,16 @@ class SAM:
         logger.info("Wake word detected — recording...")
         self.tts.stop()
         self.jev_reflex.reset_stream()
-        user_input = self.stt.listen(
-            on_partial_transcript=lambda partial: self.jev_reflex.evaluate_partial(partial)
-        )
-        if user_input and user_input.strip():
-            self._process(user_input)
+        try:
+            user_input = self.stt.listen(
+                on_partial_transcript=lambda partial: self.jev_reflex.evaluate_partial(partial)
+            )
+            if user_input and user_input.strip():
+                self._process(user_input)
+            else:
+                logger.info("Wake word activated, ready for instruction.")
+        except Exception as e:
+            logger.error(f"Error handling wake voice input: {e}", exc_info=True)
 
     def on_text_input(self, text: str):
         """Called by text input listener — processes typed input directly."""

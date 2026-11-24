@@ -63,8 +63,8 @@ export function IqooPage() {
       <TaskComposer onSubmit={submitTask} submitting={submitting} />
       {submitError && <p className="text-xs text-danger">{submitError}</p>}
 
-      <div className="grid gap-4 md:grid-cols-[1fr_260px]">
-        <div>
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-[1fr_280px] transition-all duration-300">
+        <div className="min-w-0">
           {selectedTask ? (
             <ActiveTask
               task={selectedTask}

@@ -73,7 +73,7 @@ for _ in range(5):
         break
     _cur = _cur.parent
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1172,6 +1172,29 @@ def restore_voice_audible():
     """Restore macOS volume and mute settings after speech completes."""
     from mouth.mac_audio import MacAudioGuard
     return MacAudioGuard.restore_audible()
+
+
+_LATEST_WAKE_EVENT = {"detected": False, "timestamp": 0.0}
+
+
+@app.post("/api/voice/wake-event", dependencies=[Depends(require_local_caller)])
+def record_wake_event(req: dict = Body(...)):
+    """Broadcast wake word detection event from wake listener to frontend clients."""
+    global _LATEST_WAKE_EVENT
+    _LATEST_WAKE_EVENT = {
+        "detected": bool(req.get("detected", True)),
+        "timestamp": float(req.get("timestamp", time.time()))
+    }
+    return {"status": "ok", "event": _LATEST_WAKE_EVENT}
+
+
+@app.get("/api/voice/wake-status", dependencies=[Depends(require_local_caller)])
+def get_wake_status():
+    """Query recent wake word activation status."""
+    global _LATEST_WAKE_EVENT
+    now = time.time()
+    active = _LATEST_WAKE_EVENT["detected"] and (now - _LATEST_WAKE_EVENT["timestamp"] < 3.5)
+    return {"detected": active, "timestamp": _LATEST_WAKE_EVENT["timestamp"]}
 
 
 # ─── Client frontend (mounted last so it never shadows /api routes) ────────

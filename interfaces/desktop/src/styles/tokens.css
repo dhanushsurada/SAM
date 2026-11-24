@@ -36,6 +36,13 @@
   --sam-radius-lg: 16px;
   --sam-motion-fast: 150ms;
   --sam-motion-state: 200ms;
+
+  /* Apple fluid spring curves and duration tokens */
+  --sam-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --sam-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --sam-duration-fast: 150ms;
+  --sam-duration-normal: 250ms;
+  --sam-duration-slow: 350ms;
 }
 
 /* -------------------------------------------------------------

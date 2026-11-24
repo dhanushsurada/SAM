@@ -232,7 +232,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.kind !== "working") return;
     const task = sessionTasks.find((candidate) => candidate.task_id === state.taskId);
-    if (task && TERMINAL_PHASES.has(task.status as never)) controller.taskFinished(task, speakReplies);
+    if (task && TERMINAL_PHASES.has(task.status as never)) {
+      spokenTaskIds.current.add(task.task_id);
+      activeTaskIdsInSession.current.delete(task.task_id);
+      controller.taskFinished(task, speakReplies);
+    }
   }, [state, sessionTasks, speakReplies, controller]);
 
   // Esc stops whatever voice is doing.
@@ -303,10 +307,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const speakText = useCallback(
     async (text: string) => {
       if (!text || !text.trim()) return;
+      player.stop(); // Stop any currently playing audio immediately to prevent overlap
       try {
-        const audio = await speechService.synthesize(text);
-        await player.play(audio);
-      } catch {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3500); // 3.5s timeout for fast speech fallback
+        try {
+          const audio = await speechService.synthesize(text, controller.signal);
+          clearTimeout(timeout);
+          await player.play(audio);
+          return;
+        } catch {
+          clearTimeout(timeout);
+        }
+
+        // Fast fallback to browser webview speech when server synthesis times out or is busy
         if (webviewSpeak) {
           try {
             await webviewSpeak(text, new AbortController().signal);
@@ -314,6 +328,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             // ignore
           }
         }
+      } catch {
+        // ignore
       }
     },
     [player, webviewSpeak]
@@ -517,6 +533,28 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [state.kind, wakeWordEnabled, controller]);
+
+  // Backend wake word polling (openWakeWord native listener integration)
+  const lastWakeTimestamp = useRef<number>(0);
+  useEffect(() => {
+    if (!wakeWordEnabled || state.kind !== "idle") return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8420/api/voice/wake-status");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.detected && data.timestamp > lastWakeTimestamp.current) {
+          lastWakeTimestamp.current = data.timestamp;
+          setWakeWordDetected(true);
+          setTimeout(() => setWakeWordDetected(false), 3500);
+          controller.press();
+        }
+      } catch {
+        // ignore
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [wakeWordEnabled, state.kind, controller]);
 
   const submitRectifiedText = useCallback(
     async (rectified: string) => {

@@ -70,7 +70,7 @@ export function ConfirmDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-void/70 backdrop-blur-md px-4 animate-sam-fade-in"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onCancel();
       }}
@@ -82,8 +82,9 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-description"
+        className="animate-sam-scale-in w-full max-w-sm"
       >
-        <Card padding="md" className="w-full max-w-sm outline-none">
+        <Card padding="md" className="w-full outline-none shadow-2xl">
           <h2 id="confirm-dialog-title" className="text-sm font-semibold text-ink">
             {title}
           </h2>

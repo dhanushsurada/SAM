@@ -88,6 +88,7 @@ class TextToSpeech:
         self._clock = time.monotonic
         self._active_proc = None
         self._proc_lock = threading.Lock()
+        self._synth_cache = {}
         logger.info(f"TTS initialised for platform: {PLATFORM}")
 
     def stop(self):
@@ -180,10 +181,16 @@ class TextToSpeech:
         """
         if not text or not text.strip():
             raise ValueError("Nothing to speak")
-        engines = self._get_synthesis_engine_order()
         cleaned = self._clean_for_speech(text)
         if not cleaned:
             raise ValueError("Nothing to speak")
+
+        # In-memory WAV cache for zero-latency instant replay of common utterances
+        cache_key = f"{cleaned}:{getattr(self.settings, 'speech_rate', 1.0)}"
+        if cache_key in self._synth_cache:
+            return self._synth_cache[cache_key]
+
+        engines = self._get_synthesis_engine_order()
 
         failures = []
         nothing_to_say = False
@@ -214,6 +221,9 @@ class TextToSpeech:
                     failures.append(f"{label}: {self._failure_reason(e)}")
                     continue
                 self._synth_failed_at.pop(name, None)
+                if len(self._synth_cache) > 128:
+                    self._synth_cache.pop(next(iter(self._synth_cache)), None)
+                self._synth_cache[cache_key] = wav
                 return wav
         if nothing_to_say:
             raise ValueError("Nothing in this text that SAM's voice can say")

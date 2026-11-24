@@ -525,10 +525,14 @@ export function ChatPage() {
   };
 
   return (
-    <div className="flex h-full gap-4">
+    <div className="flex h-full gap-4 transition-all duration-300">
       {/* ─── Conversations Sidebar (Parallel Chats) ───────────────────────── */}
-      {sidebarOpen && (
-        <aside className="flex w-60 flex-col rounded-xl border border-line/70 bg-surface/80 backdrop-blur-md p-3 text-sm shadow-panel">
+      <aside
+        className={`flex flex-col rounded-xl border border-line/70 bg-surface/80 backdrop-blur-md text-sm shadow-panel transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden shrink-0 ${
+          sidebarOpen ? "w-60 p-3 opacity-100" : "w-0 p-0 border-0 opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="w-54 min-w-[216px] flex flex-col h-full">
           <div className="flex items-center justify-between pb-2.5 border-b border-line/40">
             <span className="font-semibold text-xs tracking-tight text-ink flex items-center gap-1.5">
               <FiMessageSquare size={14} className="text-ember" /> Threads
@@ -567,11 +571,11 @@ export function ChatPage() {
               );
             })}
           </div>
-        </aside>
-      )}
+        </div>
+      </aside>
 
       {/* ─── Main Chat Window ────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col h-full max-w-3xl mx-auto">
+      <div className="flex flex-1 min-w-0 flex-col h-full max-w-4xl mx-auto w-full transition-all duration-300">
         {/* Chat Header */}
         <div className="flex items-center justify-between pb-2 border-b border-line mb-3">
           <div className="flex items-center gap-2">

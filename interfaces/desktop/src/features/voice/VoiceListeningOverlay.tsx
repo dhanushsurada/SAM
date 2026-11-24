@@ -49,7 +49,7 @@ export function VoiceListeningOverlay() {
   return (
     <aside
       aria-label="Voice input and real-time transcription"
-      className="fixed inset-x-0 bottom-6 z-50 flex justify-center px-4 pointer-events-none animate-in fade-in slide-in-from-bottom-5 duration-200"
+      className="fixed inset-x-0 bottom-6 z-50 flex justify-center px-4 pointer-events-none animate-sam-slide-up"
     >
       <div className="pointer-events-auto w-full max-w-xl overflow-hidden rounded-2xl border border-ember/50 bg-surface/95 p-4 shadow-2xl backdrop-blur-2xl ring-1 ring-ember/20 text-ink">
         {/* Top Header Bar */}

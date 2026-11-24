@@ -161,6 +161,73 @@
     outline: none;
     box-shadow: 0 0 0 1px rgb(var(--sam-ember) / 0.25);
   }
+
+  /* -------------------------------------------------------------
+     FLUID ANIMATIONS & MICRO-INTERACTIONS (Zero Jitter)
+     ------------------------------------------------------------- */
+  .animate-sam-fade-in {
+    animation: samFadeIn var(--sam-duration-fast) var(--sam-ease-spring) forwards;
+  }
+
+  .animate-sam-scale-in {
+    animation: samScaleIn var(--sam-duration-normal) var(--sam-ease-spring) forwards;
+    transform-origin: center center;
+  }
+
+  .animate-sam-slide-up {
+    animation: samSlideUp var(--sam-duration-normal) var(--sam-ease-spring) forwards;
+  }
+
+  .animate-sam-slide-down {
+    animation: samSlideDown var(--sam-duration-normal) var(--sam-ease-spring) forwards;
+  }
+
+  /* Subwindow responsive transition class */
+  .subwindow-fluid {
+    transition: all var(--sam-duration-normal) var(--sam-ease-spring);
+  }
+}
+
+@keyframes samFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes samScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes samSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes samSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Belt-and-suspenders reduced-motion */
