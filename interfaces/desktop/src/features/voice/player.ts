@@ -12,6 +12,8 @@
  * are kept low or silent. Uses Web Audio GainNode to amplify speech levels.
  */
 
+import { ensureVoiceAudible, restoreVoiceAudible } from "@/api/client";
+
 export interface SourceLike {
   buffer: unknown;
   onended: (() => void) | null;
@@ -35,15 +37,21 @@ export interface AudioContextLike {
 }
 
 export interface VoiceAudioConfig {
-  /** When true, boosts SAM's audio output so speech remains audible in quiet/silent environments. */
+  /** When true, unmutes macOS and boosts output so speech remains audible in quiet/silent environments. */
   overrideSilentMode: boolean;
   /** Digital gain boost multiplier (1.0 = normal, 1.5 = +3.5dB, 2.0 = +6dB). Default: 1.6 */
   volumeBoost: number;
+  /** SAM specific in-app volume level (0.0 to 1.0). Default: 0.85 */
+  samVolume: number;
+  /** When true, silences SAM speech explicitly inside the app. */
+  isMuted: boolean;
 }
 
 const DEFAULT_AUDIO_CONFIG: VoiceAudioConfig = {
   overrideSilentMode: true,
   volumeBoost: 1.6,
+  samVolume: 0.85,
+  isMuted: false,
 };
 
 let currentAudioConfig: VoiceAudioConfig = { ...DEFAULT_AUDIO_CONFIG };
@@ -137,10 +145,20 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
 
         // Apply gain node when available to support silent mode override and digital boost
         const config = getVoiceAudioConfig();
-        if (typeof ctx.createGain === "function" && config.overrideSilentMode) {
+        if (config.isMuted) {
+          resolve();
+          return;
+        }
+
+        if (config.overrideSilentMode) {
+          ensureVoiceAudible(Math.round(config.samVolume * 100), true).catch(() => {});
+        }
+
+        if (typeof ctx.createGain === "function") {
           try {
             const gain = ctx.createGain();
-            gain.gain.value = Math.max(0.5, Math.min(3.0, config.volumeBoost || 1.6));
+            const boostMult = config.overrideSilentMode ? (config.volumeBoost || 1.6) : 1.0;
+            gain.gain.value = Math.max(0.05, Math.min(3.0, config.samVolume * boostMult));
             source.connect(gain);
             gain.connect(ctx.destination);
           } catch {
@@ -155,6 +173,9 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
           if (done) return;
           done = true;
           if (current?.source === source) current = null;
+          if (config.overrideSilentMode) {
+            restoreVoiceAudible().catch(() => {});
+          }
           resolve();
         };
         source.onended = finish;
@@ -166,6 +187,7 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
     stop() {
       generation++;
       stopCurrent();
+      restoreVoiceAudible().catch(() => {});
     },
   };
 }

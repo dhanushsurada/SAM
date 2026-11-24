@@ -51,8 +51,11 @@ class BrowserAgent:
         try:
             from playwright.sync_api import sync_playwright
             self._playwright_ctx = sync_playwright().__enter__()
+            # Default to headless so SAM's browser tasks run smoothly in the background
+            # without popping up windows, stealing focus, or interfering with user work.
+            is_headless = os.environ.get("SAM_BROWSER_HEADED", "0") != "1"
             self._browser = self._playwright_ctx.chromium.launch(
-                headless=False  # Visible so user can see what SAM is doing
+                headless=is_headless
             )
             self._page = self._browser.new_page()
             self._started = True

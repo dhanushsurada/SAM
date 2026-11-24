@@ -288,8 +288,9 @@ class TieredExecutionRouter:
             )
 
         # 1b. Connected Platform & Profile Audits (<1ms deterministic reflex, zero URL prompting)
-        # Handles: "audit my linkedin", "audit github", "review my linkedin profile", "audit my twitter", etc.
-        audit_verbs = ["audit", "review", "inspect", "analyze"]
+        # Handles: "audit my linkedin", "audit github", "review my linkedin profile", "audit my twitter",
+        # "i need a complete detailed audit lie whats the growth ratio how the page is perfoming...", etc.
+        audit_verbs = ["audit", "review", "inspect", "analyze", "growth ratio", "how the page is perfoming", "how the page is performing"]
         if any(v in lower_body for v in audit_verbs):
             target_plat = None
             if "linkedin" in lower_body:
@@ -302,10 +303,15 @@ class TieredExecutionRouter:
                 target_plat = "instagram"
             elif any(w in lower_body for w in ["all profiles", "social profiles", "ecosystem", "connected platforms"]):
                 target_plat = "ecosystem"
+            elif any(w in lower_body for w in ["page", "growth ratio", "growth of the page", "profile"]):
+                # Default page to primary connected professional profile (LinkedIn)
+                target_plat = "linkedin"
 
             if target_plat:
                 from memory.identity import Identity
+                from core.audit_engine import PlatformAuditEngine
                 identity = Identity()
+                audit_engine = PlatformAuditEngine()
 
                 if target_plat == "ecosystem":
                     platforms = identity.load().get("connected_platforms", {})
@@ -325,38 +331,26 @@ class TieredExecutionRouter:
                         suggested_text="Auditing your connected ecosystem across GitHub, LinkedIn, X, and Instagram."
                     )
 
-                platform_data = identity.get_platform(target_plat)
-                url = identity.get_platform_url(target_plat)
-                pname = platform_data.get("name", target_plat.capitalize()) if platform_data else target_plat.capitalize()
-
-                if not url:
-                    if target_plat == "github":
-                        url = "https://github.com/dhanushsurada"
-                    elif target_plat == "linkedin":
-                        url = "https://www.linkedin.com/in/dhanushsurada"
-                    elif target_plat == "twitter":
-                        url = "https://x.com/dhanushsurada"
-                    elif target_plat == "instagram":
-                        url = "https://www.instagram.com/dhanushsurada"
-
-                task_desc = f"Audit {pname} profile and presence at {url}"
-                if target_plat == "github":
-                    task_desc = f"Audit GitHub profile, repositories, and recent commit activity at {url}"
-                elif target_plat == "linkedin":
-                    task_desc = f"Audit LinkedIn profile, headline, experience, and recommendations at {url}"
+                audit_result = audit_engine.audit(target_plat)
+                url = audit_result.get("url")
+                report = audit_result.get("report")
+                summary = audit_result.get("summary")
+                pname = target_plat.capitalize()
 
                 return RouteDecision(
                     tier=ExecutionTier.DIRECT,
-                    action="browser",
+                    action="audit",
                     action_payload={
+                        "platform": target_plat,
                         "url": url,
-                        "task": task_desc,
-                        "use_system_browser": True,
+                        "report": report,
+                        "summary": summary,
+                        "use_system_browser": False,
                     },
                     target_device=target_device or "desktop",
                     confidence=1.0,
-                    reason=f"Deterministic connected {pname} audit (zero URL prompting)",
-                    suggested_text=f"Auditing your connected {pname} profile at {url}."
+                    reason=f"Deterministic connected {pname} growth audit and 7-day plan (zero URL prompting)",
+                    suggested_text=report
                 )
 
         # 2. YouTube Music / Video Direct Playback

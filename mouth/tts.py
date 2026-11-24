@@ -480,6 +480,9 @@ class TextToSpeech:
         if os.environ.get("SAM_TEST_MODE") == "1":
             return
         if IS_MAC:
+            from mouth.mac_audio import MacAudioGuard
+            target_vol = getattr(self.settings, "sam_volume", 75) if hasattr(self, "settings") and self.settings else 75
+            MacAudioGuard.ensure_audible(target_volume=target_vol)
             proc = subprocess.Popen(["afplay", path])
             with self._proc_lock:
                 self._active_proc = proc
@@ -488,6 +491,7 @@ class TextToSpeech:
                 if proc.returncode != 0 and proc.returncode != -15:
                     raise subprocess.CalledProcessError(proc.returncode, ["afplay", path])
             finally:
+                MacAudioGuard.restore_audible()
                 with self._proc_lock:
                     if self._active_proc is proc:
                         self._active_proc = None

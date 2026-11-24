@@ -157,6 +157,14 @@ class ReactLoop:
                 return self._execute_create_document(payload)
             elif action_str in ("skill", "execute_skill"):
                 return self._execute_skill(payload)
+            elif action_str in ("morning_briefing", "briefing", "daily_briefing"):
+                return self._execute_morning_briefing(payload)
+            elif action_str in ("check_plate", "plate", "notes", "notes_vault"):
+                return self._execute_check_plate(payload)
+            elif action_str in ("audit", "platform_audit", "page_audit"):
+                return self._execute_platform_audit(payload)
+            elif action_str in ("skills_scan_and_install", "install_skills"):
+                return self._execute_skills_scan(payload)
             else:
                 return f"Unknown action: {action}"
 
@@ -935,3 +943,33 @@ class ReactLoop:
         vision = self._get_vision()
         task = payload.get("task", "read the screen")
         return vision.read(task)
+
+    def _execute_morning_briefing(self, payload: Dict[str, Any]) -> str:
+        briefing_obj = payload.get("briefing")
+        if briefing_obj and hasattr(briefing_obj, "spoken_summary"):
+            return briefing_obj.spoken_summary
+        from core.briefing_agent import MorningBriefingAgent
+        from memory.notes_vault import NotesVaultRetriever
+        agent = MorningBriefingAgent(notes_vault=NotesVaultRetriever())
+        return agent.generate_briefing().spoken_summary
+
+    def _execute_check_plate(self, payload: Dict[str, Any]) -> str:
+        summary = payload.get("summary")
+        if summary:
+            return str(summary)
+        from memory.notes_vault import NotesVaultRetriever
+        return NotesVaultRetriever().get_active_plate()
+
+    def _execute_platform_audit(self, payload: Dict[str, Any]) -> str:
+        report = payload.get("report")
+        if report:
+            return report
+        from core.audit_engine import PlatformAuditEngine
+        plat = payload.get("platform", "linkedin")
+        return PlatformAuditEngine().audit(plat)["report"]
+
+    def _execute_skills_scan(self, payload: Dict[str, Any]) -> str:
+        from core.skills_engine import skills_engine
+        res = skills_engine.scan_and_install_all_skills()
+        total = res.get("total_installed", 0)
+        return f"Successfully scanned and activated {total} skills."

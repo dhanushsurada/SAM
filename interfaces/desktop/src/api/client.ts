@@ -718,3 +718,25 @@ export function getEcosystemStatus(): Promise<{
   }, CORE_BASE);
 }
 
+export function ensureVoiceAudible(targetVolume: number = 75, overrideSilent: boolean = true): Promise<{
+  ok: boolean;
+  overridden?: boolean;
+}> {
+  return request("/voice/ensure-audible", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_volume: targetVolume, override_silent: overrideSilent }),
+  }, CORE_BASE);
+}
+
+export function restoreVoiceAudible(): Promise<{
+  ok: boolean;
+  restored?: boolean;
+}> {
+  return request("/voice/restore-audible", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  }, CORE_BASE);
+}
+

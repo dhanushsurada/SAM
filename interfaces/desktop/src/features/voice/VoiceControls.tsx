@@ -150,8 +150,47 @@ export function VoiceAudioPriorityControl({ size = 16 }: { size?: number }) {
           </div>
 
           <div className="space-y-3">
+            {/* SAM Dedicated In-App Master Volume */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-ink font-medium">SAM Voice Volume</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAudioConfig({ isMuted: !audioConfig.isMuted })}
+                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border transition-colors ${
+                      audioConfig.isMuted ? "border-danger text-danger bg-danger/10" : "border-line text-mute hover:text-ink"
+                    }`}
+                  >
+                    {audioConfig.isMuted ? "Muted" : "Active"}
+                  </button>
+                  <span className="font-mono text-ink text-xs font-semibold">
+                    {audioConfig.isMuted ? "0%" : `${Math.round((audioConfig.samVolume ?? 0.85) * 100)}%`}
+                  </span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.05"
+                disabled={audioConfig.isMuted}
+                value={audioConfig.samVolume ?? 0.85}
+                onChange={(e) => setAudioConfig({ samVolume: parseFloat(e.target.value), isMuted: false })}
+                className="w-full h-1.5 bg-line/80 rounded-lg appearance-none cursor-pointer accent-ember disabled:opacity-40"
+              />
+              <div className="flex justify-between text-[9px] text-mute">
+                <span>Quiet (20%)</span>
+                <span>Default (85%)</span>
+                <span>Full (100%)</span>
+              </div>
+              <p className="text-[10px] text-mute/80 italic mt-0.5">
+                Controlled solely inside SAM. System volume changes will not silence SAM unless muted here.
+              </p>
+            </div>
+
             {/* Override Switch */}
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start justify-between gap-2 pt-1 border-t border-line/30">
               <div>
                 <p className="text-xs font-medium text-ink">Audible in Silent Mode</p>
                 <p className="text-[10px] text-mute leading-snug mt-0.5">

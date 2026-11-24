@@ -1152,6 +1152,28 @@ def update_voice_silent_override(req: VoiceOverrideRequest):
     }
 
 
+class EnsureAudibleRequest(BaseModel):
+    target_volume: Optional[int] = 75
+    override_silent: Optional[bool] = True
+
+
+@app.post("/api/voice/ensure-audible", dependencies=[Depends(require_local_caller)])
+def ensure_voice_audible(req: EnsureAudibleRequest = EnsureAudibleRequest()):
+    """Temporarily unmute macOS and raise volume to SAM target level during speech."""
+    from mouth.mac_audio import MacAudioGuard
+    return MacAudioGuard.ensure_audible(
+        target_volume=req.target_volume or 75,
+        override_silent=req.override_silent if req.override_silent is not None else True
+    )
+
+
+@app.post("/api/voice/restore-audible", dependencies=[Depends(require_local_caller)])
+def restore_voice_audible():
+    """Restore macOS volume and mute settings after speech completes."""
+    from mouth.mac_audio import MacAudioGuard
+    return MacAudioGuard.restore_audible()
+
+
 # ─── Client frontend (mounted last so it never shadows /api routes) ────────
 
 if CLIENT_DIR.exists():

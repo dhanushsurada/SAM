@@ -449,14 +449,14 @@ class TaskGateway:
             # Performance: Tier 1 Direct Execution (sub-millisecond bypass for greetings, app control, calculation, and media)
             route_decision = self.tiered_router.route(instruction)
             if route_decision.tier == ExecutionTier.DIRECT:
-                if route_decision.action == "greet":
-                    result_text = route_decision.suggested_text or "Hey! I'm SAM."
+                if route_decision.action in ("greet", "morning_briefing", "check_plate", "audit", "direct_text"):
+                    result_text = route_decision.suggested_text or "Task completed."
                     from core.brain import BrainResponse
                     mock_resp = BrainResponse(text=result_text, action="none")
                     self.task_store.update_status(task_id, "completed", result_text=result_text)
                     self.event_bus.publish(task_id, "completed", result_text)
 
-                    def _bg_greet():
+                    def _bg_direct():
                         try:
                             if not self.settings.incognito:
                                 session.save(user_input=instruction, response=mock_resp,
@@ -464,7 +464,7 @@ class TaskGateway:
                             self.founder_mode.capture_if_relevant(instruction, mock_resp)
                         except Exception as ex:
                             logger.debug(f"Background capture error: {ex}")
-                    threading.Thread(target=_bg_greet, daemon=True, name=f"bg-greet-{task_id[:8]}").start()
+                    threading.Thread(target=_bg_direct, daemon=True, name=f"bg-direct-{task_id[:8]}").start()
                     return
 
                 elif route_decision.action:

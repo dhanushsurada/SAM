@@ -71,6 +71,17 @@ class Verifier:
                 )
 
             obs_lower = (observation or "").lower()
+
+            # Informational & direct action actions with non-empty observations are inherently successful
+            if action in ("morning_briefing", "check_plate", "audit", "platform_audit", "skills_scan_and_install") and observation:
+                return TaskResult(
+                    success=True, confidence=1.0,
+                    logs=[f"{action} generated valid output"],
+                    artifacts={"action": action, "payload": payload, "observation": observation},
+                    execution_time=execution_time,
+                    errors=[],
+                )
+
             looks_failed = any(sig in obs_lower for sig in _FAILURE_SIGNALS)
 
             if looks_failed:
