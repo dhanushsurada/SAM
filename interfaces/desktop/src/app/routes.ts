@@ -26,10 +26,7 @@ export interface RouteMeta {
   label: string;
   icon: SamIcon;
   group: NavGroup;
-  /** Which step of docs/frontend/PHASE5_PLAN.md §H builds the real version
-   * of this screen. Shown on the stub page so "not built" always says when
-   * it's coming, not just that it's missing. */
-  plannedStep: string;
+  category: string;
   description: string;
 }
 
@@ -52,7 +49,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Command Center",
     icon: FiHome,
     group: "assistant",
-    plannedStep: "Step 5",
+    category: "Overview",
     description:
       "System status, current model, recent tasks, and a quick command/task input — SAM's home screen.",
   },
@@ -61,7 +58,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Chat",
     icon: FiMessageSquare,
     group: "assistant",
-    plannedStep: "Step 6",
+    category: "Conversational",
     description:
       "Conversational view over SAM's task pipeline: each message runs as a task and SAM's reply is its outcome. Single-turn — no conversation history reaches the Brain.",
   },
@@ -70,7 +67,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Tasks",
     icon: FiCheckSquare,
     group: "assistant",
-    plannedStep: "Step 4",
+    category: "Execution",
     description:
       "General task console: request to outcome, with the lifecycle, live progress, cancel and retry.",
   },
@@ -79,7 +76,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Brain",
     icon: FiCpu,
     group: "core",
-    plannedStep: "Brain pass",
+    category: "Local Reasoning",
     description: "The local model SAM thinks with: what's installed in Ollama, which one is active, and switching it.",
   },
   {
@@ -87,7 +84,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Hands",
     icon: FiMousePointer,
     group: "core",
-    plannedStep: "Brain pass",
+    category: "Desktop Control",
     description: "How SAM acts on a computer: desktop control, vision, browser, terminal and verification.",
   },
   {
@@ -95,7 +92,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Projects & Folders",
     icon: FiFolder,
     group: "workspaces",
-    plannedStep: "Step 4",
+    category: "Workspaces",
     description: "Manage dedicated project folders, custom system prompts, and task context.",
   },
   {
@@ -103,7 +100,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Connect & Bridges",
     icon: FiSmartphone,
     group: "workspaces",
-    plannedStep: "Agent 3 + Android",
+    category: "Cross-Device",
     description: "Pair trusted mobile devices, set up Wi-Fi or USB tunnels, and manage omnichannel WhatsApp/Telegram/iOS bridges.",
   },
   {
@@ -111,7 +108,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Mobile Companion",
     icon: FiSmartphone,
     group: "workspaces",
-    plannedStep: "Step 4",
+    category: "Mobile Companion",
     description: "Phone to PC workflow: task gateway status, execution streams, and health monitor.",
   },
   {
@@ -119,7 +116,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Memory",
     icon: FiDatabase,
     group: "understanding",
-    plannedStep: "Step 7",
+    category: "Persistent Memory",
     description: "Episodic and semantic memory, search and browse.",
   },
   {
@@ -127,7 +124,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Founder Mode",
     icon: FiUser,
     group: "understanding",
-    plannedStep: "Step 7",
+    category: "Executive Alignment",
     description: "Decisions, reflections, taste profile — SAM's persistent understanding of you.",
   },
   {
@@ -135,7 +132,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Skills",
     icon: FiZap,
     group: "understanding",
-    plannedStep: "Step 7",
+    category: "Execution Skills",
     description: "Compiled skills library and status.",
   },
   {
@@ -143,7 +140,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Plugins & MCP",
     icon: FiBox,
     group: "understanding",
-    plannedStep: "Step 7",
+    category: "MCP Extensions",
     description: "Model Context Protocol connections: GitHub, Google Workspace, Slack, filesystem, and external tools.",
   },
   {
@@ -151,7 +148,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Diagnostics",
     icon: FiActivity,
     group: "system",
-    plannedStep: "Step 7",
+    category: "System Integrity",
     description: "sam doctor–style PASS/WARN/FAIL/UNVERIFIED status for every subsystem.",
   },
   {
@@ -159,7 +156,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Licensing",
     icon: FiKey,
     group: "system",
-    plannedStep: "Step 7",
+    category: "Licensing & Tier",
     description: "License and activation state.",
   },
   {
@@ -167,7 +164,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Permissions",
     icon: FiShield,
     group: "system",
-    plannedStep: "Agent 1 (native shell)",
+    category: "Host Sandboxing",
     description:
       "What SAM and the desktop shell can access on this machine, and why — desktop-app permissions are real; SAM Core's are listed but not yet reported over the API.",
   },
@@ -176,7 +173,7 @@ export const ROUTES: RouteMeta[] = [
     label: "Settings",
     icon: FiSettings,
     group: "settings",
-    plannedStep: "Step 8",
+    category: "Configuration",
     description: "General, model, voice, memory, runtime, and privacy configuration.",
   },
 ];

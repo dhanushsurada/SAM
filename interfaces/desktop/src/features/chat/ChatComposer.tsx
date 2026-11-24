@@ -6,11 +6,18 @@ import { VoiceMicButton, VoiceSpeakToggle, VoiceAudioPriorityControl } from "@/f
 export function ChatComposer({
   onSend,
   disabled,
+  value: externalValue,
+  onChange: onExternalChange,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
+  value?: string;
+  onChange?: (val: string) => void;
 }) {
-  const [value, setValue] = useState("");
+  const [internalValue, setInternalValue] = useState("");
+  const isControlled = externalValue !== undefined;
+  const value = isControlled ? externalValue : internalValue;
+  const setValue = isControlled ? (onExternalChange ?? (() => {})) : setInternalValue;
 
   const submit = () => {
     const trimmed = value.trim();

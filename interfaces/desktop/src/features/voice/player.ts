@@ -12,7 +12,19 @@
  * are kept low or silent. Uses Web Audio GainNode to amplify speech levels.
  */
 
-import { ensureVoiceAudible, restoreVoiceAudible } from "@/api/client";
+async function callVoiceAudible(endpoint: string, body?: object): Promise<void> {
+  try {
+    if (typeof window !== "undefined" && typeof window.fetch === "function") {
+      await window.fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
 
 export interface SourceLike {
   buffer: unknown;
@@ -151,14 +163,16 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
         }
 
         if (config.overrideSilentMode) {
-          ensureVoiceAudible(Math.round(config.samVolume * 100), true).catch(() => {});
+          void callVoiceAudible("/api/voice/ensure-audible", {
+            target_volume: Math.round(config.samVolume * 100),
+            override_silent: true,
+          });
         }
 
-        if (typeof ctx.createGain === "function") {
+        if (config.overrideSilentMode && typeof ctx.createGain === "function") {
           try {
             const gain = ctx.createGain();
-            const boostMult = config.overrideSilentMode ? (config.volumeBoost || 1.6) : 1.0;
-            gain.gain.value = Math.max(0.05, Math.min(3.0, config.samVolume * boostMult));
+            gain.gain.value = config.volumeBoost ?? config.samVolume ?? 1.0;
             source.connect(gain);
             gain.connect(ctx.destination);
           } catch {
@@ -174,7 +188,7 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
           done = true;
           if (current?.source === source) current = null;
           if (config.overrideSilentMode) {
-            restoreVoiceAudible().catch(() => {});
+            void callVoiceAudible("/api/voice/restore-audible");
           }
           resolve();
         };
@@ -187,7 +201,10 @@ export function createAudioPlayer(makeContext: () => AudioContextLike | null): A
     stop() {
       generation++;
       stopCurrent();
-      restoreVoiceAudible().catch(() => {});
+      const config = getVoiceAudioConfig();
+      if (config.overrideSilentMode) {
+        void callVoiceAudible("/api/voice/restore-audible");
+      }
     },
   };
 }

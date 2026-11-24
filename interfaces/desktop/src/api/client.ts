@@ -16,12 +16,16 @@ const BASE = "/api/iqoo";
 const CORE_BASE = "/api";
 
 export class ApiError extends Error {
+  status: number;
+  detail: string;
   constructor(
-    public status: number,
+    status: number,
     /** FastAPI's HTTPException body shape: {"detail": "..."}. */
-    public detail: string
+    detail: string
   ) {
     super(`${status}: ${detail}`);
+    this.status = status;
+    this.detail = detail;
     this.name = "ApiError";
   }
 }

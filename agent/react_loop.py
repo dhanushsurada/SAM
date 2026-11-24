@@ -237,6 +237,8 @@ class ReactLoop:
 
         start = time.time()
         observation = self.execute(action, payload)
+        from sovereign.security.redactor import PrivacyRedactor
+        observation = PrivacyRedactor.redact_text(observation)
         elapsed = time.time() - start
         result = self._verifier.verify(action, payload, observation, elapsed)
         attempts.append({
@@ -253,6 +255,7 @@ class ReactLoop:
         if decision == "retry":
             start = time.time()
             observation2 = self.execute(action, payload)
+            observation2 = PrivacyRedactor.redact_text(observation2)
             elapsed2 = time.time() - start
             result2 = self._verifier.verify(action, payload, observation2, elapsed2)
             attempts.append({

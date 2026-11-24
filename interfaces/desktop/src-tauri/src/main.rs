@@ -186,10 +186,12 @@ fn main() {
             let tray_menu = Menu::with_items(app, &[&show_item, &quick_item, &quit_item])?;
 
             // `icon_as_template` lets macOS invert the glyph automatically
-            // between light and dark menu bars — without it the icon
-            // reads wrong in one of the two.
+            // between light and dark menu bars — using dedicated monochrome tray template
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))
+                .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
+
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)

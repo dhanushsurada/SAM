@@ -267,6 +267,19 @@ SAM/
 
 ---
 
+## Documentation
+
+Comprehensive product and technical documentation is organized in the [`docs/`](docs/README.md) directory:
+
+- 📖 **[Master Documentation Index](docs/README.md)** — Overview of all system manuals, guides, and specifications.
+- 💡 **[Product User Guide](docs/USER_GUIDE.md)** — Consumer guide for Chat with prompt editing, Command Center, and Task execution.
+- 🏗 **[System Architecture](docs/ARCHITECTURE.md)** — Detailed technical design across Desktop, Brain, Hands, Voice, and Security.
+- 🗺 **[Product Roadmap](docs/ROADMAP.md)** — Current capabilities and future horizons for `v2.1.1` and beyond.
+- 📱 **[Mobile Setup & Bridges Guide](docs/guides/MOBILE_SETUP_AND_COMMANDS_GUIDE.md)** — Step-by-step setup for WhatsApp, Telegram, Android, and iOS.
+- ✅ **[Feature Acceptance Checklist](docs/FEATURE_ACCEPTANCE_CHECKLIST.md)** — Feature status and verification matrix.
+
+---
+
 ## Verification & Status
 
 For detailed feature-by-feature classification across 🟢 **Verified**, 🟡 **Implemented (Unverified)**, and 🔴 **Not Implemented**, consult the **[Feature Acceptance Checklist](docs/FEATURE_ACCEPTANCE_CHECKLIST.md)**.

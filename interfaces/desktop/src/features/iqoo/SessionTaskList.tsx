@@ -25,7 +25,7 @@ export function SessionTaskList({
   return (
     <div className="space-y-1">
       <p className="px-1 font-mono-data text-[10px] uppercase tracking-wider text-mute/70">
-        This session ({tasks.length}) — not a persistent history, see PHASE5_PLAN.md §F
+        Session Activity ({tasks.length})
       </p>
       {[...tasks].reverse().map((task) => (
         <button

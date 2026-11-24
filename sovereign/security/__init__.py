@@ -6,6 +6,7 @@ defensible proof of local-only network behavior during a task run.
 """
 
 from .document_trust import UNTRUSTED_DOCUMENT_INSTRUCTION, wrap_untrusted
+from .redactor import PrivacyRedactor
 from .network_guard import (
     NetworkGuardReport,
     NetworkPolicyViolation,
@@ -17,6 +18,7 @@ from .network_guard import (
 __all__ = [
     "UNTRUSTED_DOCUMENT_INSTRUCTION",
     "wrap_untrusted",
+    "PrivacyRedactor",
     "NetworkGuardReport",
     "NetworkPolicyViolation",
     "SocketGuard",

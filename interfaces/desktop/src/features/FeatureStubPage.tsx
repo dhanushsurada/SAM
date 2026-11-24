@@ -28,7 +28,7 @@ export function FeatureStubPage() {
       title={route.label}
       description={route.description}
       mode="planned"
-      meta={`${route.plannedStep} — see docs/frontend/PHASE5_PLAN.md §H`}
+      meta="Feature module roadmap"
     />
   );
 }

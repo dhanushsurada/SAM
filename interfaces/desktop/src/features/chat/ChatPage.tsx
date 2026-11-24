@@ -56,6 +56,7 @@ export function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const labelOf = useTaskLabel();
   const [isChatThinking, setIsChatThinking] = useState(false);
+  const [composerDraft, setComposerDraft] = useState("");
 
   // Projects Context
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -375,6 +376,154 @@ export function ChatPage() {
     }
   };
 
+  const handleEditPrompt = async (messageId: string, newText: string) => {
+    if (!newText.trim() || isChatThinking) return;
+    const conv = conversations.find((c) => c.id === activeConvId);
+    if (!conv) return;
+    const msgs = conv.messages || [];
+    const targetIdx = msgs.findIndex((m) => m.id === messageId);
+    if (targetIdx === -1) return;
+
+    // Truncate everything after targetIdx and update the prompt
+    const updatedUserMsg: ChatMessage = {
+      ...msgs[targetIdx],
+      content: newText,
+      timestamp: new Date().toISOString(),
+    };
+    const priorHistory = msgs.slice(0, targetIdx).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    const newMessages = [...msgs.slice(0, targetIdx), updatedUserMsg];
+
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === activeConvId
+          ? { ...c, updatedAt: new Date().toISOString(), messages: newMessages }
+          : c
+      )
+    );
+
+    setIsChatThinking(true);
+    try {
+      const res = await sendChatMessage(
+        newText,
+        activeConvId,
+        priorHistory,
+        activeProject?.id,
+        activeProject?.context
+      );
+      const assistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}-assistant`,
+        role: "assistant",
+        content: res.reply || "Done.",
+        timestamp: new Date().toISOString(),
+      };
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConvId
+            ? { ...c, updatedAt: new Date().toISOString(), messages: [...newMessages, assistantMsg] }
+            : c
+        )
+      );
+      if (speakReplies && res.reply) void speak(res.reply);
+    } catch (e: unknown) {
+      const errMsg: ChatMessage = {
+        id: `msg-${Date.now()}-err`,
+        role: "assistant",
+        content: e instanceof Error ? e.message : "Error connecting to Brain.",
+        timestamp: new Date().toISOString(),
+        tone: "danger",
+      };
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConvId
+            ? { ...c, messages: [...newMessages, errMsg] }
+            : c
+        )
+      );
+    } finally {
+      setIsChatThinking(false);
+    }
+  };
+
+  const handleRegenerate = async (assistantMessageId: string) => {
+    if (isChatThinking) return;
+    const conv = conversations.find((c) => c.id === activeConvId);
+    if (!conv) return;
+    const msgs = conv.messages || [];
+    const targetIdx = msgs.findIndex((m) => m.id === assistantMessageId);
+    if (targetIdx <= 0) return;
+
+    // Find the closest preceding user prompt
+    let userIdx = targetIdx - 1;
+    while (userIdx >= 0 && msgs[userIdx].role !== "user") {
+      userIdx--;
+    }
+    if (userIdx < 0) return;
+
+    const userPrompt = msgs[userIdx].content;
+    const priorHistory = msgs.slice(0, userIdx).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    const trimmedMsgs = msgs.slice(0, userIdx + 1);
+
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === activeConvId
+          ? { ...c, updatedAt: new Date().toISOString(), messages: trimmedMsgs }
+          : c
+      )
+    );
+
+    setIsChatThinking(true);
+    try {
+      const res = await sendChatMessage(
+        userPrompt,
+        activeConvId,
+        priorHistory,
+        activeProject?.id,
+        activeProject?.context
+      );
+      const newAssistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}-assistant`,
+        role: "assistant",
+        content: res.reply || "Done.",
+        timestamp: new Date().toISOString(),
+      };
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConvId
+            ? { ...c, updatedAt: new Date().toISOString(), messages: [...trimmedMsgs, newAssistantMsg] }
+            : c
+        )
+      );
+      if (speakReplies && res.reply) void speak(res.reply);
+    } catch (e: unknown) {
+      const errMsg: ChatMessage = {
+        id: `msg-${Date.now()}-err`,
+        role: "assistant",
+        content: e instanceof Error ? e.message : "Error connecting to Brain.",
+        timestamp: new Date().toISOString(),
+        tone: "danger",
+      };
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConvId
+            ? { ...c, messages: [...trimmedMsgs, errMsg] }
+            : c
+        )
+      );
+    } finally {
+      setIsChatThinking(false);
+    }
+  };
+
+  const handleQuoteToComposer = (text: string) => {
+    setComposerDraft(text);
+  };
+
   return (
     <div className="flex h-full gap-4">
       {/* ─── Conversations Sidebar (Parallel Chats) ───────────────────────── */}
@@ -508,7 +657,14 @@ export function ChatPage() {
           )}
 
           {currentMessages.map((msg) => (
-            <ChatMessageBubble key={msg.id} message={msg} />
+            <ChatMessageBubble
+              key={msg.id}
+              message={msg}
+              onEditPrompt={handleEditPrompt}
+              onQuoteToComposer={handleQuoteToComposer}
+              onRegenerate={handleRegenerate}
+              isThinking={isChatThinking}
+            />
           ))}
 
           {isChatThinking && (
@@ -523,7 +679,12 @@ export function ChatPage() {
 
         {/* Footer / Composer */}
         <div className="pt-3 space-y-2">
-          <ChatComposer onSend={handleSend} disabled={isChatThinking} />
+          <ChatComposer
+            onSend={handleSend}
+            disabled={isChatThinking}
+            value={composerDraft}
+            onChange={setComposerDraft}
+          />
           <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-mute">
             <div className="flex items-center gap-1.5">
               <span>💬 Fast conversational mode.</span>
