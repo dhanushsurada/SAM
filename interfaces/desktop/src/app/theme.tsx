@@ -74,7 +74,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/core")
+        .then(({ invoke }) => {
+          invoke("sync_theme_icon", { themeName: theme }).catch(() => {});
+        })
+        .catch(() => {});
+    }
   }, [theme]);
+
+  // Listen to OS system appearance changes (dark/light mode)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => {
+      const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+      if (!stored) {
+        setThemeState(e.matches ? "dark" : "light");
+      }
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.colorTemplate = colorTemplate;

@@ -34,6 +34,52 @@
 
 mod runtime;
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn set_macos_dock_icon_data(data: *const u8, len: usize);
+}
+
+const ICON_DARK_BYTES: &[u8] = include_bytes!("../icons/icon_dark.png");
+const ICON_LIGHT_BYTES: &[u8] = include_bytes!("../icons/icon_light.png");
+
+fn apply_system_theme_icon(app: &tauri::AppHandle, theme: tauri::Theme) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        let bytes = match theme {
+            tauri::Theme::Dark => ICON_DARK_BYTES,
+            tauri::Theme::Light => ICON_LIGHT_BYTES,
+            _ => ICON_DARK_BYTES,
+        };
+        unsafe {
+            set_macos_dock_icon_data(bytes.as_ptr(), bytes.len());
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(win) = app.get_webview_window("main") {
+            let bytes = match theme {
+                tauri::Theme::Dark => ICON_DARK_BYTES,
+                tauri::Theme::Light => ICON_LIGHT_BYTES,
+                _ => ICON_DARK_BYTES,
+            };
+            if let Ok(img) = tauri::image::Image::from_bytes(bytes) {
+                let _ = win.set_icon(img);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn sync_theme_icon(app: tauri::AppHandle, theme_name: String) {
+    let theme = if theme_name == "light" {
+        tauri::Theme::Light
+    } else {
+        tauri::Theme::Dark
+    };
+    apply_system_theme_icon(&app, theme);
+}
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -147,10 +193,13 @@ fn main() {
             runtime::model_select,
             runtime::model_pull,
             runtime::model_pull_cancel,
+            sync_theme_icon,
         ])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {
                 eprintln!("SAM: main window exists, url = {:?}", w.url());
+                let initial_theme = w.theme().unwrap_or(tauri::Theme::Dark);
+                apply_system_theme_icon(app.handle(), initial_theme);
             }
             if let Err(error) = runtime::initialize_packaged_runtime(app.handle()) {
                 eprintln!("SAM: could not initialize bundled runtime configuration: {error}");
@@ -216,6 +265,9 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::ThemeChanged(theme) = event {
+                apply_system_theme_icon(window.app_handle(), *theme);
+            }
             // The main window hides instead of closing — SAM is meant to
             // stay resident (menu bar / background operation, per the
             // product brief), not quit every time its window closes.

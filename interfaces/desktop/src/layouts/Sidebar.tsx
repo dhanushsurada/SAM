@@ -3,6 +3,7 @@ import { GROUP_LABELS, ROUTES, type NavGroup } from "@/app/routes";
 import { NavItem } from "@/components/NavItem";
 import { useTaskSession } from "@/stores/taskSession";
 import { SidebarProfile } from "@/features/profile/SidebarProfile";
+import { useTheme } from "@/app/theme";
 import type { HealthStatus } from "@/api/types";
 
 type PulseVisual = { dotClass: string; textClass: string; label: string };
@@ -31,6 +32,7 @@ export interface SidebarProps {
 }
 
 export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
+  const { theme } = useTheme();
   const settingsRoute = ROUTES.find((r) => r.group === "settings")!;
   const { health, healthLoading, healthError } = useTaskSession();
   const pulse = gatewayPulse(health, healthLoading, healthError);
@@ -39,13 +41,18 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     <div className="flex h-full flex-col bg-void/60 backdrop-blur-xl">
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-line/40">
         <div className="flex items-center gap-2.5">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg overflow-hidden border border-line/60 shadow-sm">
-            <img src="/logo.png" alt="SAM" className="h-full w-full object-cover" onError={(e) => {
-              (e.currentTarget as HTMLElement).style.display = "none";
-              if (e.currentTarget.parentElement) {
-                e.currentTarget.parentElement.innerHTML = '<span class="font-bold text-xs text-ember">S</span>';
-              }
-            }} />
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg overflow-hidden border border-line/60 bg-surface shadow-sm">
+            <img
+              src={theme === "light" ? "/logo-light.png" : "/logo-dark.png"}
+              alt="SAM"
+              className="h-full w-full object-cover transition-opacity duration-300"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = "none";
+                if (e.currentTarget.parentElement) {
+                  e.currentTarget.parentElement.innerHTML = '<span class="font-bold text-xs text-ember">S</span>';
+                }
+              }}
+            />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
