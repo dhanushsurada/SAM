@@ -1,12 +1,8 @@
-# SAM Desktop (Phase 5)
+# SAM Desktop Application
 
-The full SAM product UI — not `frontend/` (that's VEDA, a different product
-for a different hackathon) and not `interfaces/web/` (SAM's existing narrow
-iQOO phone client, left untouched).
+The native, local-first SAM desktop interface built with Tauri v2, React, Tailwind CSS, and Vite.
 
-See `../../docs/frontend/PHASE5_PLAN.md` for the full plan: capability map,
-architecture decisions, directory structure, page inventory, design system,
-the real-vs-demo backend boundary, and implementation order.
+See [Product User Guide](../../docs/USER_GUIDE.md) and [System Architecture](../../docs/ARCHITECTURE.md) for capability documentation, design system tokens, and client runtime architecture.
 
 ## Setup
 

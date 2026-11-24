@@ -198,6 +198,7 @@ export function CommandCenterPage() {
           streamError={streamError}
           onCancel={cancelSelected}
           onRetry={retrySelected}
+          onEditAndResubmit={(instruction) => void submitTask({ instruction, input_type: "text", attachments: [] })}
           cancelling={cancelling}
           retrying={retrying}
         />
@@ -207,7 +208,7 @@ export function CommandCenterPage() {
       <ExecutiveBriefingCard onRunTask={(prompt) => setPresetText(prompt)} />
 
       {/* System Telemetry & Local Brain Cards */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         <SystemPulse health={health} loading={healthLoading} error={healthError} />
         <BrainCard />
       </div>

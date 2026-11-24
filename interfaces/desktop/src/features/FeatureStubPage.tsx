@@ -28,7 +28,7 @@ export function FeatureStubPage() {
       title={route.label}
       description={route.description}
       mode="planned"
-      meta="Feature module roadmap"
+      meta="Feature Module"
     />
   );
 }

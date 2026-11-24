@@ -60,7 +60,7 @@ export const ROUTES: RouteMeta[] = [
     group: "assistant",
     category: "Conversational",
     description:
-      "Conversational view over SAM's task pipeline: each message runs as a task and SAM's reply is its outcome. Single-turn — no conversation history reaches the Brain.",
+      "Fast conversational assistant with persistent multi-turn memory, project context, and voice playback.",
   },
   {
     path: "/tasks",
@@ -166,7 +166,7 @@ export const ROUTES: RouteMeta[] = [
     group: "system",
     category: "Host Sandboxing",
     description:
-      "What SAM and the desktop shell can access on this machine, and why — desktop-app permissions are real; SAM Core's are listed but not yet reported over the API.",
+      "System sandbox permissions, macOS accessibility, screen capture, and host access controls.",
   },
   {
     path: "/settings",

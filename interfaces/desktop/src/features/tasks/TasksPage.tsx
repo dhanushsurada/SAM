@@ -56,6 +56,7 @@ export function TasksPage() {
                 streamError={streamError}
                 onCancel={cancelSelected}
                 onRetry={retrySelected}
+                onEditAndResubmit={(instruction) => void submitTask({ instruction, input_type: "text", attachments: [] })}
                 cancelling={cancelling}
                 retrying={retrying}
               />
@@ -66,8 +67,7 @@ export function TasksPage() {
             </p>
           )}
           <p className="text-xs text-mute">
-            Tasks sent from a phone client run through the same pipeline but aren't listed here: the gateway
-            keeps a task ledger, and no endpoint exposes it yet.
+            Tasks dispatched from the mobile companion, WhatsApp/Telegram bridges, or desktop execute in the unified pipeline.
           </p>
         </div>
       </div>

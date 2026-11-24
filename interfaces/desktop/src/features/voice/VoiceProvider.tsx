@@ -308,9 +308,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     async (text: string) => {
       if (!text || !text.trim()) return;
       player.stop(); // Stop any currently playing audio immediately to prevent overlap
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          // ignore
+        }
+      }
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3500); // 3.5s timeout for fast speech fallback
+        const timeout = setTimeout(() => controller.abort(), 1200); // 1.2s timeout for fast fallback
         try {
           const audio = await speechService.synthesize(text, controller.signal);
           clearTimeout(timeout);
@@ -350,9 +357,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           activeTaskIdsInSession.current.add(task.task_id);
         }
       }
-      if (sessionTasks.length > 0) {
-        initialRestoredSeen.current = true;
-      }
+      initialRestoredSeen.current = true;
       return;
     }
 
