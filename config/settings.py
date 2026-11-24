@@ -131,11 +131,17 @@ class Settings:
     # instead of running silently. Opt in deliberately.
     allow_risky_terminal_commands: bool = False
 
-    # Phase 2 — Telegram bridge (ecosystem/telegram_bridge.py).
+    # Phase 2 — Telegram bridge (interfaces/telegram/telegram_bridge.py).
     # This is an internet-relay bridge, NOT local-WiFi ecosystem — command
     # text passes through Telegram's servers. See docs/PHASE_2_TELEGRAM_BRIDGE.md.
     telegram_bot_token: str = ""       # from @BotFather
     telegram_bot_username: str = ""    # bot's @username, without the @
+
+    # WhatsApp Omnichannel Bridge (interfaces/whatsapp/whatsapp_bridge.py)
+    whatsapp_phone_number_id: str = "" # Meta WhatsApp Cloud API Phone Number ID
+    whatsapp_access_token: str = ""    # Permanent System User Access Token from Meta Developer
+    whatsapp_verify_token: str = "sam_whatsapp_verify_token" # Webhook challenge verify token
+    whatsapp_phone_number: str = ""    # Bot WhatsApp number (international format e.g. +1234567890)
 
     # iQOO Hackathon 2026 branch — Phone Task Gateway API server
     # (interfaces/api/server.py). Single source of truth for host/port:
@@ -186,6 +192,10 @@ class Settings:
     detected_platform: str = PLATFORM
 
     def __post_init__(self):
+        # Allow test subclasses or custom subclasses to preserve class-level attribute overrides
+        for k, v in self.__class__.__dict__.items():
+            if not k.startswith("_") and not callable(v):
+                setattr(self, k, v)
         self._load_yaml()
         self._detect_hardware()
         self._select_model()
@@ -212,6 +222,19 @@ class Settings:
             # via the loop above — don't second-guess it either way.
             if "primary_model" in data and "model_explicitly_set" not in data:
                 self.model_explicitly_set = True
+
+        # Environment variable overrides for bridges and external credentials
+        for env_k, attr_k in [
+            ("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+            ("TELEGRAM_BOT_USERNAME", "telegram_bot_username"),
+            ("WHATSAPP_PHONE_NUMBER_ID", "whatsapp_phone_number_id"),
+            ("WHATSAPP_ACCESS_TOKEN", "whatsapp_access_token"),
+            ("WHATSAPP_VERIFY_TOKEN", "whatsapp_verify_token"),
+            ("WHATSAPP_PHONE_NUMBER", "whatsapp_phone_number"),
+        ]:
+            val = os.getenv(env_k)
+            if val:
+                setattr(self, attr_k, val)
 
     def _detect_hardware(self):
         try:

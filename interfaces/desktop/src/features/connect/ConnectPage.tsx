@@ -311,7 +311,7 @@ export function ConnectPage() {
               : "text-mute hover:text-ink hover:bg-surface"
           }`}
         >
-          <FiHelpCircle size={13} className="text-ember" /> Guide
+          <FiHelpCircle size={13} className="text-ember" /> Mobile Setup &amp; Commands Guide
         </button>
       </div>
 
@@ -541,6 +541,91 @@ export function ConnectPage() {
               </button>
             </div>
           </div>
+
+          {/* WhatsApp Step-by-Step Guide & Command Cheat Sheet */}
+          <div className="rounded-lg border border-line bg-surface p-4 text-xs space-y-3">
+            <h3 className="font-semibold text-ink text-sm flex items-center gap-2">
+              <FiMessageSquare className="text-emerald-400" />
+              <span>How WhatsApp Remote Control Works</span>
+              <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono">
+                100% Autonomous
+              </span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">1</span>
+                  <span>Connect Meta Cloud API</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  In Meta Developers, create a free WhatsApp App. Copy your <strong>Phone Number ID</strong> and <strong>System User Token</strong> into <code>config/settings.yaml</code> or set <code>WHATSAPP_PHONE_NUMBER_ID</code> in <code>.env</code>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">2</span>
+                  <span>Pair Your Phone Number</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Click <strong>"Pair WhatsApp"</strong> above to get your one-time code. From your phone, text <code>/start &lt;code&gt;</code> to SAM's WhatsApp bot number. SAM binds your phone as a trusted operator.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">3</span>
+                  <span>Send Real Commands</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Text SAM just like you talk on desktop! SAM executes via Brain &amp; ReactLoop on your Mac and texts you back the real execution output and screenshots.
+                </p>
+              </div>
+            </div>
+
+            {/* Example Commands */}
+            <div className="rounded border border-line bg-surface-raised p-3 space-y-2">
+              <div className="font-semibold text-ink text-xs flex items-center justify-between">
+                <span>Try Sending These Commands From WhatsApp:</span>
+                <span className="text-[10px] text-mute">Tap any command to copy</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono-data">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("Open Safari and summarize latest tech news", "cmd-wa-1")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-emerald-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-emerald-400">&quot;Open Safari and summarize latest tech news&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("Take a screenshot of my Mac screen", "cmd-wa-2")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-emerald-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-emerald-400">&quot;Take a screenshot of my Mac screen&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("What's on my plate today?", "cmd-wa-3")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-emerald-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-emerald-400">&quot;What&apos;s on my plate today?&quot; (Morning Briefing)</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("/status", "cmd-wa-4")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-emerald-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-emerald-400">&quot;/status&quot; or &quot;/devices&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+              </div>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -630,6 +715,91 @@ export function ConnectPage() {
               </div>
             </div>
           )}
+
+          {/* Telegram Step-by-Step Guide & Command Cheat Sheet */}
+          <div className="rounded-lg border border-line bg-surface p-4 text-xs space-y-3">
+            <h3 className="font-semibold text-ink text-sm flex items-center gap-2">
+              <FiSend className="text-sky-400" />
+              <span>Telegram Companion Bot Setup (1-Minute Quick Start)</span>
+              <span className="text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded font-mono">
+                Long-Polling / Zero Port Forwarding
+              </span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold">1</span>
+                  <span>Create Free Bot with @BotFather</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Open Telegram on your phone or desktop, search <strong>@BotFather</strong>, send <code>/newbot</code>, choose a name and username (e.g. <code>MySAM_Bot</code>). Copy the HTTP API token.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold">2</span>
+                  <span>Set Token in SAM</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Add <code>telegram_bot_token: &quot;YOUR_TOKEN&quot;</code> to <code>config/settings.yaml</code> or export <code>TELEGRAM_BOT_TOKEN=&quot;YOUR_TOKEN&quot;</code> in your environment.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold">3</span>
+                  <span>Pair with 1 Click</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Click <strong>&quot;Pair Telegram&quot;</strong> above, then tap <strong>&quot;Open in Telegram&quot;</strong>. It opens the bot with <code>/start &lt;token&gt;</code> prefilled. Tap Start, and you&apos;re paired!
+                </p>
+              </div>
+            </div>
+
+            {/* Example Commands */}
+            <div className="rounded border border-line bg-surface-raised p-3 space-y-2">
+              <div className="font-semibold text-ink text-xs flex items-center justify-between">
+                <span>Try Sending These Remote Commands From Telegram:</span>
+                <span className="text-[10px] text-mute">Tap any command to copy</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono-data">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("Run git status in my project and report changes", "cmd-tg-1")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-sky-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-sky-400">&quot;Run git status in my project and report changes&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("Lock my Mac screen now", "cmd-tg-2")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-sky-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-sky-400">&quot;Lock my Mac screen now&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("Summarize unread emails and calendar events", "cmd-tg-3")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-sky-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-sky-400">&quot;Summarize unread emails and calendar events&quot;</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard("/devices", "cmd-tg-4")}
+                  className="text-left p-2 rounded bg-surface border border-line text-ink hover:border-sky-500/40 transition-colors flex items-center justify-between group"
+                >
+                  <span className="text-sky-400">&quot;/devices&quot; (view all connected nodes)</span>
+                  <FiCopy size={11} className="text-mute group-hover:text-ink flex-shrink-0 ml-1" />
+                </button>
+              </div>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -756,9 +926,77 @@ export function ConnectPage() {
             </div>
           ) : (
             <div className="rounded border border-dashed border-line p-4 text-center text-xs text-mute">
-              Click <strong>"Generate Pairing Key"</strong> to start a secure pairing session.
+              Click <strong>&quot;Generate Pairing Key&quot;</strong> to start a secure pairing session.
             </div>
           )}
+
+          {/* SAM Android Companion App Guide */}
+          <div className="rounded-lg border border-line bg-surface p-4 text-xs space-y-3">
+            <h3 className="font-semibold text-ink text-sm flex items-center gap-2">
+              <FiSmartphone className="text-blue-400" />
+              <span>SAM for Android Companion Client Setup</span>
+              <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded font-mono">
+                Kotlin · Jetpack Compose · Ed25519 Signatures
+              </span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold">1</span>
+                  <span>Install App on Android</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Open the <code>sam-android</code> folder in Android Studio, or build the debug APK via <code>./gradlew assembleDebug</code> in <code>sam-android/</code> and install it on your Android 8.0+ device.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold">2</span>
+                  <span>Pair with SAM Core</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  Ensure phone &amp; Mac are on the same Wi-Fi. In the Android app, enter your Mac&apos;s IP (e.g. <code>http://192.168.1.X:8420</code>) and the pairing token generated above.
+                </p>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold">3</span>
+                  <span>Enable Autonomous Permissions</span>
+                </div>
+                <p className="text-mute text-[11px] leading-relaxed">
+                  In Android App Settings, enable <strong>Notification Listener</strong> (so SAM can read mobile alerts) and <strong>Accessibility Service</strong> (so SAM can launch and click mobile apps).
+                </p>
+              </div>
+            </div>
+
+            {/* Android Capabilities Matrix */}
+            <div className="rounded border border-line bg-surface-raised p-3 space-y-2">
+              <div className="font-semibold text-ink text-xs">
+                What You Can Do from the Android App:
+              </div>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-mute">
+                <li className="flex items-center gap-1.5">
+                  <FiCheck className="text-blue-400 flex-shrink-0" />
+                  <span><strong>Mobile Chat &amp; Voice:</strong> Ask SAM questions or dispatch tasks to your Mac directly.</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <FiCheck className="text-blue-400 flex-shrink-0" />
+                  <span><strong>Remote Task Watch:</strong> Real-time SSE streaming of running tasks on your phone lockscreen.</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <FiCheck className="text-blue-400 flex-shrink-0" />
+                  <span><strong>Cross-Device Clipboard:</strong> Copy text on your Mac, instantly paste on Android.</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <FiCheck className="text-blue-400 flex-shrink-0" />
+                  <span><strong>Mobile App Automation:</strong> SAM Desktop can trigger Android apps, open URLs, and sync files.</span>
+                </li>
+              </ul>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -802,39 +1040,143 @@ export function ConnectPage() {
         </Card>
       )}
 
-      {/* Tab: Troubleshooting Guide */}
+      {/* Tab: Troubleshooting & Master Guide */}
       {activeTab === "troubleshooting" && (
-        <Card className="space-y-4">
-          <div>
-            <h2 className="font-semibold text-ink text-sm">Connection Troubleshooting Assistant</h2>
+        <Card className="space-y-5">
+          <div className="border-b border-line pb-3">
+            <h2 className="font-semibold text-ink text-sm flex items-center gap-2">
+              <FiHelpCircle className="text-ember" />
+              <span>Mobile Setup &amp; Remote Commands Master Guide</span>
+            </h2>
             <p className="mt-1 text-xs text-mute">
-              Common issues preventing mobile connection and how to resolve them immediately.
+              Everything you need to command SAM remotely from WhatsApp, Telegram, Android, or iPhone.
             </p>
           </div>
 
-          <div className="space-y-3 text-xs">
-            <div className="rounded border border-line bg-surface-raised p-3 space-y-1">
-              <h4 className="font-medium text-ink flex items-center gap-1.5">
-                <span className="text-amber-400 font-bold">1.</span> Phone says "Connection Refused" or "Cannot Reach PC"
-              </h4>
-              <p className="text-mute">
-                <strong>Cause:</strong> macOS Application Firewall is blocking incoming port 8420, or phone and Mac are on different subnets.
-              </p>
-              <p className="text-mute">
-                <strong>Fix:</strong> Open <em>System Settings &rarr; Network &rarr; Firewall &rarr; Options</em> and ensure SAM allows incoming connections. Alternatively, turn on your phone's personal hotspot and connect your Mac to it.
-              </p>
+          {/* Quick Comparison Table */}
+          <div className="space-y-2">
+            <h3 className="font-medium text-ink text-xs">Channel Capability Matrix</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border border-line rounded">
+                <thead className="bg-surface-raised border-b border-line text-mute font-medium text-[11px]">
+                  <tr>
+                    <th className="p-2.5">Mobile Channel</th>
+                    <th className="p-2.5">Protocol / Transport</th>
+                    <th className="p-2.5">Setup Effort</th>
+                    <th className="p-2.5">Key Superpowers</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line text-ink text-[11px]">
+                  <tr>
+                    <td className="p-2.5 font-medium flex items-center gap-1.5">
+                      <FiMessageSquare className="text-emerald-400" /> WhatsApp
+                    </td>
+                    <td className="p-2.5 text-mute font-mono-data">Meta Cloud Webhook</td>
+                    <td className="p-2.5 text-emerald-400 font-medium">~2 mins</td>
+                    <td className="p-2.5 text-mute">Works on any smartphone, voice notes, markdown answers, screenshots.</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-medium flex items-center gap-1.5">
+                      <FiSend className="text-sky-400" /> Telegram Bot
+                    </td>
+                    <td className="p-2.5 text-mute font-mono-data">Long-Polling (No Ports)</td>
+                    <td className="p-2.5 text-sky-400 font-medium">~1 min</td>
+                    <td className="p-2.5 text-mute">Zero port forwarding, 1-click deep link, full Mac command execution, file transfer.</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-medium flex items-center gap-1.5">
+                      <FiSmartphone className="text-blue-400" /> Android App
+                    </td>
+                    <td className="p-2.5 text-mute font-mono-data">Local HTTP/SSE + Ed25519</td>
+                    <td className="p-2.5 text-blue-400 font-medium">Install APK</td>
+                    <td className="p-2.5 text-mute">Phone UI automation (Accessibility), mobile notification sync, lockscreen watch, voice.</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-medium flex items-center gap-1.5">
+                      <FiRadio className="text-pink-400" /> iPhone / Siri
+                    </td>
+                    <td className="p-2.5 text-mute font-mono-data">Direct REST / Shortcuts</td>
+                    <td className="p-2.5 text-pink-400 font-medium">1-Click iOS</td>
+                    <td className="p-2.5 text-mute">Action Button trigger, voice responses via AirPods, Apple Continuity clipboard.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <div className="rounded border border-line bg-surface-raised p-3 space-y-1">
-              <h4 className="font-medium text-ink flex items-center gap-1.5">
-                <span className="text-amber-400 font-bold">2.</span> Hotel / Campus / Office Wi-Fi Blocks Peer Devices
-              </h4>
-              <p className="text-mute">
-                <strong>Cause:</strong> Enterprise routers enable "AP Isolation" or "Client Isolation", which forbids devices from talking to each other.
-              </p>
-              <p className="text-mute">
-                <strong>Fix:</strong> Switch to the <strong>USB Cable Method</strong> (Tab 2) or connect both devices to a mobile hotspot.
-              </p>
+          {/* Real-World Commands Cheat Sheet */}
+          <div className="space-y-2">
+            <h3 className="font-medium text-ink text-xs">Commands You Can Send From Your Phone</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-2">
+                <span className="font-semibold text-ink text-[11px] block text-ember">🖥️ Mac Automation &amp; Control</span>
+                <ul className="space-y-1.5 text-mute text-[11px]">
+                  <li>• <code>&quot;Take a screenshot of my Mac and describe what&apos;s open&quot;</code></li>
+                  <li>• <code>&quot;Open Safari and research quantum computing breakthroughs&quot;</code></li>
+                  <li>• <code>&quot;Lock my Mac screen immediately&quot;</code></li>
+                  <li>• <code>&quot;Set system volume to 50% and pause Spotify&quot;</code></li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-2">
+                <span className="font-semibold text-ink text-[11px] block text-emerald-400">⚡ Productivity &amp; Founder Briefing</span>
+                <ul className="space-y-1.5 text-mute text-[11px]">
+                  <li>• <code>&quot;What&apos;s on my plate today?&quot;</code> (JEV reflex morning briefing)</li>
+                  <li>• <code>&quot;Summarize my unread emails and draft a reply to Alex&quot;</code></li>
+                  <li>• <code>&quot;Note down idea: Launch decentralized storage bridge&quot;</code></li>
+                  <li>• <code>&quot;Check my calendar schedule for tomorrow&quot;</code></li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-2">
+                <span className="font-semibold text-ink text-[11px] block text-sky-400">🛠️ Developer &amp; Terminal Execution</span>
+                <ul className="space-y-1.5 text-mute text-[11px]">
+                  <li>• <code>&quot;Run pytest tests in ~/Projects/SAM and report failed tests&quot;</code></li>
+                  <li>• <code>&quot;Check git status and tell me changed files&quot;</code></li>
+                  <li>• <code>&quot;Compile the release binary and notify me when finished&quot;</code></li>
+                  <li>• <code>&quot;Check memory usage and top CPU processes&quot;</code></li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded border border-line bg-surface-raised space-y-2">
+                <span className="font-semibold text-ink text-[11px] block text-purple-400">📱 Mobile &amp; Bot Built-In Utilities</span>
+                <ul className="space-y-1.5 text-mute text-[11px]">
+                  <li>• <code>/status</code> — Report Mac online status, primary LLM, and uptime</li>
+                  <li>• <code>/devices</code> — List all paired nodes, phones, and bridges</li>
+                  <li>• <code>/health</code> — Full diagnostic check of local services</li>
+                  <li>• <code>/start &lt;token&gt;</code> — One-time pairing handshake</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Connection Troubleshooting */}
+          <div className="space-y-2 pt-2 border-t border-line">
+            <h3 className="font-medium text-ink text-xs">Connection &amp; Network Troubleshooting</h3>
+            <div className="space-y-2.5 text-xs">
+              <div className="rounded border border-line bg-surface-raised p-3 space-y-1">
+                <h4 className="font-medium text-ink flex items-center gap-1.5">
+                  <span className="text-amber-400 font-bold">1.</span> Phone says &quot;Connection Refused&quot; or &quot;Cannot Reach PC&quot;
+                </h4>
+                <p className="text-mute text-[11px]">
+                  <strong>Cause:</strong> macOS Application Firewall is blocking incoming port 8420, or phone and Mac are on different Wi-Fi subnets (e.g. 5GHz vs 2.4GHz guest network).
+                </p>
+                <p className="text-mute text-[11px]">
+                  <strong>Fix:</strong> Open <em>System Settings &rarr; Network &rarr; Firewall &rarr; Options</em> and ensure SAM allows incoming connections. Alternatively, turn on your phone&apos;s personal hotspot and connect your Mac to it.
+                </p>
+              </div>
+
+              <div className="rounded border border-line bg-surface-raised p-3 space-y-1">
+                <h4 className="font-medium text-ink flex items-center gap-1.5">
+                  <span className="text-amber-400 font-bold">2.</span> Hotel / Campus / Office Wi-Fi Blocks Peer Devices
+                </h4>
+                <p className="text-mute text-[11px]">
+                  <strong>Cause:</strong> Enterprise routers enable &quot;AP Isolation&quot;, which forbids devices from communicating locally with each other.
+                </p>
+                <p className="text-mute text-[11px]">
+                  <strong>Fix:</strong> Use <strong>Telegram Bot</strong> (requires zero local network access) or switch to <strong>USB Cable Connection</strong> with <code>adb reverse tcp:8420 tcp:8420</code>.
+                </p>
+              </div>
             </div>
           </div>
         </Card>
