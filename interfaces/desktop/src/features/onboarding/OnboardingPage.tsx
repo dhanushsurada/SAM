@@ -8,15 +8,84 @@ import { ModeBadge } from "@/components/ModeBadge";
 import { useTaskSession } from "@/stores/taskSession";
 import { useRuntime, useRuntimePolling } from "@/stores/runtime";
 import { isNative, openOllamaDownload, repairRuntimeConfiguration } from "@/lib/native";
-import { getEnvironmentReport, repairEnvironment, type EnvironmentReport } from "@/api/client";
+import { getEnvironmentReport, repairEnvironment, getRecommendedModels, type EnvironmentReport, type RecommendedModelItem, type RecommendedModelsResponse } from "@/api/client";
 
 const STEPS = ["Welcome", "System check", "Model & voice", "Permissions", "Configuration", "Ready"] as const;
 
-const RECOMMENDED_MODELS = [
-  { name: "qwen2.5:14b", label: "Qwen 2.5 14B", desc: "Recommended · Advanced reasoning & tool execution", size: "9.0 GB" },
-  { name: "qwen2.5:7b", label: "Qwen 2.5 7B", desc: "Balanced · Fast responses & efficient", size: "4.7 GB" },
-  { name: "llama3.2:3b", label: "Llama 3.2 3B", desc: "Lightweight · Fast intent & low RAM", size: "2.0 GB" },
-] as const;
+const DEFAULT_LATEST_MODELS: RecommendedModelItem[] = [
+  {
+    name: "qwen3.5:8b",
+    label: "Qwen 3.5 8B",
+    desc: "Recommended · Latest Gen SOTA agentic reasoning & rapid tool execution",
+    size: "5.2 GB",
+    generation: "Latest (3.5)",
+    tier: "balanced",
+    min_ram_gb: 8,
+    optimal_ram_gb: 16,
+    is_installed: false,
+    is_recommended: true,
+  },
+  {
+    name: "qwen3.5:27b",
+    label: "Qwen 3.5 27B",
+    desc: "Flagship Powerhouse · Deep reasoning architecture & expansive 64k multi-turn context",
+    size: "17.1 GB",
+    generation: "Latest (3.5)",
+    tier: "flagship",
+    min_ram_gb: 24,
+    optimal_ram_gb: 32,
+    is_installed: false,
+    is_recommended: false,
+  },
+  {
+    name: "qwen3.5:14b",
+    label: "Qwen 3.5 14B",
+    desc: "High Precision · High token fidelity for complex workflows & code analysis",
+    size: "9.3 GB",
+    generation: "Latest (3.5)",
+    tier: "balanced",
+    min_ram_gb: 16,
+    optimal_ram_gb: 24,
+    is_installed: false,
+    is_recommended: false,
+  },
+  {
+    name: "qwen3.5:4b",
+    label: "Qwen 3.5 4B",
+    desc: "Ultra Fast · Sub-second latency, low power & minimal RAM footprint",
+    size: "2.7 GB",
+    generation: "Latest (3.5)",
+    tier: "fast",
+    min_ram_gb: 4,
+    optimal_ram_gb: 8,
+    is_installed: false,
+    is_recommended: false,
+  },
+  {
+    name: "deepseek-r1:8b",
+    label: "DeepSeek R1 8B",
+    desc: "Reasoning Specialist · Chain-of-thought verification for math & algorithmic planning",
+    size: "4.9 GB",
+    generation: "Reasoning R1",
+    tier: "reasoning",
+    min_ram_gb: 8,
+    optimal_ram_gb: 16,
+    is_installed: false,
+    is_recommended: false,
+  },
+  {
+    name: "qwen2.5:14b",
+    label: "Qwen 2.5 14B",
+    desc: "Legacy Stable · Proven tool execution & structured JSON adherence",
+    size: "9.0 GB",
+    generation: "Stable (2.5)",
+    tier: "balanced",
+    min_ram_gb: 12,
+    optimal_ram_gb: 16,
+    is_installed: false,
+    is_recommended: false,
+  },
+];
 
 export function OnboardingPage() {
   const [step, setStep] = useState(0);
@@ -33,6 +102,26 @@ export function OnboardingPage() {
   const [runtimeRepairMessage, setRuntimeRepairMessage] = useState<string | null>(null);
   const [voiceInstalling, setVoiceInstalling] = useState(false);
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
+  const [recommendedData, setRecommendedData] = useState<RecommendedModelsResponse | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<"latest" | "all">("latest");
+
+  useEffect(() => {
+    if (step !== 2) return;
+    let active = true;
+    getRecommendedModels()
+      .then((data) => {
+        if (active) {
+          setRecommendedData(data);
+          if (!modelName && data.recommended_model) {
+            setModelName(data.recommended_model);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [step, modelName]);
 
   useEffect(() => {
     if (!native) return;
@@ -209,39 +298,100 @@ export function OnboardingPage() {
               {runtime.snapshot?.ollama.state === "READY" && runtime.models?.models.length === 0 && <p className="text-xs text-warn">No model is installed. Model-backed chat, planning, and other Brain features stay unavailable until you choose and download a model.</p>}
               {ollamaActionMessage && <p role="status" className="text-xs text-mute">{ollamaActionMessage}</p>}
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-mute">Recommended Models</label>
-                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-                  {RECOMMENDED_MODELS.map((m) => {
-                    const isSelected = modelName === m.name;
-                    const isInstalled = Boolean(runtime.models?.models.some((installed) => installed.name === m.name));
-                    return (
-                      <button
-                        key={m.name}
-                        type="button"
-                        onClick={() => setModelName(m.name)}
-                        className={`flex flex-col items-start rounded-md border p-2 text-left transition-colors ${
-                          isSelected
-                            ? "border-ember bg-ember/10 text-ink"
-                            : "border-line bg-void hover:border-line-hover text-mute"
-                        }`}
-                      >
-                        <div className="flex w-full items-center justify-between">
-                          <span className="text-xs font-semibold text-ink">{m.label}</span>
-                          <span className="text-[10px] text-mute">{m.size}</span>
-                        </div>
-                        <span className="mt-1 text-[11px] leading-tight text-mute">{m.desc}</span>
-                        {isInstalled && (
-                          <span className="mt-1.5 text-[10px] font-medium text-success">✓ Installed</span>
-                        )}
-                      </button>
-                    );
-                  })}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-mute">Recommended Models</label>
+                    <span className="rounded bg-ember/15 px-1.5 py-0.5 text-[9px] font-semibold text-ember">
+                      {recommendedData?.detected_ram_gb ? `${recommendedData.detected_ram_gb} GB RAM Detected` : "Latest Releases"}
+                    </span>
+                  </div>
+                  <div className="flex gap-1 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter("latest")}
+                      className={`rounded px-2 py-0.5 transition-colors ${
+                        categoryFilter === "latest"
+                          ? "bg-surface border border-line text-ink font-medium"
+                          : "text-mute hover:text-ink"
+                      }`}
+                    >
+                      Latest 3.5 & SOTA
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter("all")}
+                      className={`rounded px-2 py-0.5 transition-colors ${
+                        categoryFilter === "all"
+                          ? "bg-surface border border-line text-ink font-medium"
+                          : "text-mute hover:text-ink"
+                      }`}
+                    >
+                      All Curated
+                    </button>
+                  </div>
+                </div>
+
+                {recommendedData?.recommendation_reason && (
+                  <p className="text-[11px] text-mute/90 italic bg-surface/50 border border-line/40 rounded px-2.5 py-1">
+                    💡 {recommendedData.recommendation_reason}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(recommendedData?.catalog || DEFAULT_LATEST_MODELS)
+                    .filter((m) => categoryFilter === "all" || m.generation.includes("3.5") || m.tier === "reasoning" || m.is_recommended)
+                    .map((m) => {
+                      const isSelected = modelName === m.name;
+                      const isInstalled = Boolean(
+                        m.is_installed ||
+                        runtime.models?.models.some((installed) => installed.name === m.name)
+                      );
+                      return (
+                        <button
+                          key={m.name}
+                          type="button"
+                          onClick={() => setModelName(m.name)}
+                          className={`relative flex flex-col items-start rounded-lg border p-2.5 text-left transition-all duration-200 ${
+                            isSelected
+                              ? "border-ember bg-ember/10 ring-1 ring-ember/40 text-ink shadow-sm"
+                              : "border-line bg-void/80 hover:border-line-hover text-mute hover:bg-surface/40"
+                          }`}
+                        >
+                          <div className="flex w-full items-center justify-between">
+                            <span className="text-xs font-semibold text-ink">{m.label}</span>
+                            <span className="text-[10px] font-mono text-mute">{m.size}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <span className="rounded bg-line/60 px-1 py-0.5 text-[9px] text-ink font-medium">
+                              {m.generation}
+                            </span>
+                            {m.is_recommended && (
+                              <span className="rounded bg-ember/20 px-1 py-0.5 text-[9px] font-semibold text-ember">
+                                Recommended
+                              </span>
+                            )}
+                          </div>
+                          <span className="mt-1.5 text-[11px] leading-tight text-mute/80">{m.desc}</span>
+                          {isInstalled && (
+                            <span className="mt-2 text-[10px] font-medium text-success flex items-center gap-1">
+                              ✓ Installed
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
 
               <div className="flex gap-2">
-                <input aria-label="Model name" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="e.g. qwen2.5:14b" className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm" />
+                <input
+                  aria-label="Model name"
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  placeholder="e.g. qwen3.5:8b, qwen3.5:27b, deepseek-r1:8b"
+                  className="min-w-0 flex-1 rounded-md border border-line bg-void px-2 py-1 text-sm font-mono"
+                />
                 <Button variant="secondary" size="sm" onClick={() => void runtime.refreshModels()} loading={runtime.modelsLoading}>Refresh</Button>
               </div>
               <div className="flex gap-2">

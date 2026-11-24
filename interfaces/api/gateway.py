@@ -242,6 +242,10 @@ class TaskGateway:
             status["busy"] = self._is_busy()
         return status
 
+    def get_model_recommendations(self) -> dict:
+        """Hardware-matched model recommendations dynamically populated with latest releases."""
+        return self.model_manager.get_recommendations()
+
     def select_model(self, requested: str) -> dict:
         """Validate `requested` against Ollama, then make it the Brain.
 

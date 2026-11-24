@@ -567,6 +567,12 @@ def model_updates():
     return {"notifications": get_model_update_notifications()}
 
 
+@app.get("/api/models/recommended", dependencies=[Depends(require_local_caller)])
+def model_recommendations():
+    """Get dynamic, hardware-matched model recommendations based on latest releases."""
+    return get_gateway().get_model_recommendations()
+
+
 # ─── Conversational Chat & Persistent Memory ──────────────────────────────
 
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_local_caller)])

@@ -72,6 +72,99 @@ _PINNABLE = (
     ("founder_classifier", "founder_mode_classifier_model"),
 )
 
+LATEST_MODEL_CATALOG: List[dict] = [
+    {
+        "name": "qwen3.5:8b",
+        "label": "Qwen 3.5 8B",
+        "desc": "Recommended Daily Driver · SOTA agentic reasoning & rapid tool execution",
+        "size": "5.2 GB",
+        "generation": "Latest (3.5)",
+        "tier": "balanced",
+        "min_ram_gb": 8,
+        "optimal_ram_gb": 16,
+    },
+    {
+        "name": "qwen3.5:27b",
+        "label": "Qwen 3.5 27B",
+        "desc": "Flagship Powerhouse · Deep reasoning architecture & expansive 64k multi-turn context",
+        "size": "17.1 GB",
+        "generation": "Latest (3.5)",
+        "tier": "flagship",
+        "min_ram_gb": 24,
+        "optimal_ram_gb": 32,
+    },
+    {
+        "name": "qwen3.5:14b",
+        "label": "Qwen 3.5 14B",
+        "desc": "High Precision · High token fidelity for complex workflows & code analysis",
+        "size": "9.3 GB",
+        "generation": "Latest (3.5)",
+        "tier": "balanced",
+        "min_ram_gb": 16,
+        "optimal_ram_gb": 24,
+    },
+    {
+        "name": "qwen3.5:4b",
+        "label": "Qwen 3.5 4B",
+        "desc": "Ultra Fast · Sub-second latency, low power & minimal RAM footprint",
+        "size": "2.7 GB",
+        "generation": "Latest (3.5)",
+        "tier": "fast",
+        "min_ram_gb": 4,
+        "optimal_ram_gb": 8,
+    },
+    {
+        "name": "deepseek-r1:8b",
+        "label": "DeepSeek R1 8B",
+        "desc": "Reasoning Specialist · Chain-of-thought verification for math & algorithmic planning",
+        "size": "4.9 GB",
+        "generation": "Reasoning R1",
+        "tier": "reasoning",
+        "min_ram_gb": 8,
+        "optimal_ram_gb": 16,
+    },
+    {
+        "name": "llama3.3:70b",
+        "label": "Llama 3.3 70B",
+        "desc": "Ultra Enterprise · Heavy multi-agent coordination for 64GB+ unified memory",
+        "size": "43.0 GB",
+        "generation": "Llama 3.3",
+        "tier": "flagship",
+        "min_ram_gb": 48,
+        "optimal_ram_gb": 64,
+    },
+    {
+        "name": "qwen2.5:14b",
+        "label": "Qwen 2.5 14B",
+        "desc": "Legacy Stable · Proven tool execution & structured JSON adherence",
+        "size": "9.0 GB",
+        "generation": "Stable (2.5)",
+        "tier": "balanced",
+        "min_ram_gb": 12,
+        "optimal_ram_gb": 16,
+    },
+    {
+        "name": "qwen2.5:7b",
+        "label": "Qwen 2.5 7B",
+        "desc": "Legacy Balanced · Established baseline for older hardware",
+        "size": "4.7 GB",
+        "generation": "Stable (2.5)",
+        "tier": "fast",
+        "min_ram_gb": 8,
+        "optimal_ram_gb": 12,
+    },
+    {
+        "name": "llama3.2:3b",
+        "label": "Llama 3.2 3B",
+        "desc": "Lightweight Baseline · Fast basic intent parsing",
+        "size": "2.0 GB",
+        "generation": "Llama 3.2",
+        "tier": "fast",
+        "min_ram_gb": 4,
+        "optimal_ram_gb": 8,
+    },
+]
+
 
 # ─── Errors ────────────────────────────────────────────────────────────────
 # One base class so callers can catch "any expected model-management failure"
@@ -537,3 +630,42 @@ class ModelManager:
         name = self.validate_selection(requested)
         self.apply_selection(name)
         return self.status()
+
+    def get_recommendations(self) -> dict:
+        """
+        Returns hardware-matched model recommendations dynamically.
+        Detects RAM/architecture and maps to the latest SOTA releases (e.g. Qwen 3.5 series).
+        """
+        ram_gb = getattr(self.settings, "detected_ram_gb", None) or 16
+        installed_names = []
+        try:
+            tags = self._fetch_tags()
+            installed_names = [self._tag_name(t) for t in tags]
+        except Exception:
+            pass
+
+        if ram_gb >= 32:
+            recommended_name = "qwen3.5:27b"
+            reason = f"Optimal for your {ram_gb} GB unified memory architecture: runs SOTA 27B deep reasoning with full 64k context."
+        elif ram_gb >= 16:
+            recommended_name = "qwen3.5:8b"
+            reason = f"Optimal for your {ram_gb} GB system: latest generation 8B model delivers flagship-level tool calling with rapid latency."
+        else:
+            recommended_name = "qwen3.5:4b"
+            reason = f"Optimal for your {ram_gb} GB system: ultra-fast 4B model fits comfortably into available memory with sub-second responses."
+
+        catalog = []
+        for item in LATEST_MODEL_CATALOG:
+            is_installed = any(same_model(item["name"], installed) for installed in installed_names)
+            catalog.append({
+                **item,
+                "is_installed": is_installed,
+                "is_recommended": (item["name"] == recommended_name),
+            })
+
+        return {
+            "detected_ram_gb": ram_gb,
+            "recommended_model": recommended_name,
+            "recommendation_reason": reason,
+            "catalog": catalog,
+        }

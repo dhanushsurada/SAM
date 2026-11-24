@@ -278,6 +278,30 @@ export function getModelUpdates(): Promise<{ notifications: ModelNotification[] 
   return request<{ notifications: ModelNotification[] }>("/models/updates", undefined, CORE_BASE);
 }
 
+export interface RecommendedModelItem {
+  name: string;
+  label: string;
+  desc: string;
+  size: string;
+  generation: string;
+  tier: "flagship" | "balanced" | "fast" | "reasoning";
+  min_ram_gb: number;
+  optimal_ram_gb: number;
+  is_installed: boolean;
+  is_recommended: boolean;
+}
+
+export interface RecommendedModelsResponse {
+  detected_ram_gb: number;
+  recommended_model: string;
+  recommendation_reason: string;
+  catalog: RecommendedModelItem[];
+}
+
+export function getRecommendedModels(): Promise<RecommendedModelsResponse> {
+  return request<RecommendedModelsResponse>("/models/recommended", undefined, CORE_BASE);
+}
+
 export interface ChatResponsePayload {
   reply: string;
   model: string;

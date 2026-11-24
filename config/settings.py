@@ -269,7 +269,10 @@ class Settings:
             self.primary_model = "qwen2.5:7b"
 
     def save(self):
-        data = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        data = {
+            k: v for k, v in self.__dict__.items()
+            if not k.startswith("_") and not callable(v) and not isinstance(v, staticmethod)
+        }
         data[SCHEMA_KEY] = SETTINGS_SCHEMA_VERSION
         with open(SAM_DATA_DIR / "settings.yaml", "w") as f:
             yaml.dump(data, f, default_flow_style=False)
